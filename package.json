@@ -1,0 +1,64 @@
+{
+  "name": "deckuse",
+  "version": "0.1.0",
+  "description": "Headless, file-native structural operations for PPTX decks",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "deckuse": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pptx",
+    "powerpoint",
+    "presentation",
+    "cli",
+    "headless"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "peerDependencies": {
+    "@deckflow/presentation": "^0.3.5",
+    "@deckflow/pptx-modifier": "^0.27.0"
+  },
+  "peerDependenciesMeta": {
+    "@deckflow/presentation": {
+      "optional": true
+    },
+    "@deckflow/pptx-modifier": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.20",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.2",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
