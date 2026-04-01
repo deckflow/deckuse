@@ -36,7 +36,11 @@ export async function getTextCommand(
       // Get text based on target type
       let text: string | null = null
 
-      if (target.shapeId) {
+      // First check if selector already extracted text (e.g., from text[contains('X')])
+      if (target.metadata?.text && typeof target.metadata.text === 'string') {
+        text = target.metadata.text
+        console.log(`Slide ${target.slide}:`)
+      } else if (target.shapeId) {
         // Get text from specific shape
         text = await reader.readText(target.slide, target.shapeId)
         console.log(

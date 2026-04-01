@@ -180,7 +180,9 @@ Many commands from the README are not yet implemented:
 The workspace is a directory containing:
 - Extracted PPTX contents (XML files, media, etc.)
 - `.deckuse/` directory with:
-  - `metadata.json` - workspace metadata and indexes
+  - `metadata.json` - workspace metadata, indexes, and parsing results
+
+See `docs/METADATA_STRUCTURE.md` for detailed information about the metadata format.
 
 ### Selector System
 

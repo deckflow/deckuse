@@ -8,7 +8,7 @@ import { CommandError } from '../utils/errors.js'
 export async function listSlidesCommand(workspaceDir: string): Promise<void> {
   try {
     const workspace = await Workspace.load(workspaceDir)
-    const { slides } = workspace.metadata.indexes
+    const slides = workspace.getSlides()
 
     if (slides.length === 0) {
       console.log('No slides found')
@@ -16,22 +16,17 @@ export async function listSlidesCommand(workspaceDir: string): Promise<void> {
     }
 
     console.log('\n=== Slides ===\n')
-    console.log(
-      'Index | ID       | Title                | Layout       | Path'
-    )
-    console.log(
-      '------|----------|----------------------|--------------|-------------'
-    )
+    console.log('Index | Layout Ref        | Shapes | Content')
+    console.log('------|-------------------|--------|------------------')
 
-    for (const slide of slides) {
-      const title = (slide.title || '(no title)').padEnd(20).slice(0, 20)
-      const layout = slide.layout.padEnd(12).slice(0, 12)
-      const id = slide.id.padEnd(8).slice(0, 8)
+    slides.forEach((slide, idx) => {
+      const index = String(idx + 1).padStart(5)
+      const layoutRef = (slide._layoutRef || 'unknown').padEnd(17).slice(0, 17)
+      const shapeCount = String(slide.spTree?.length ?? 0).padStart(6)
+      const hasContent = slide.spTree?.length > 0 ? 'Yes' : 'No'
 
-      console.log(
-        `${String(slide.index).padStart(5)} | ${id} | ${title} | ${layout} | ${slide.path}`
-      )
-    }
+      console.log(`${index} | ${layoutRef} | ${shapeCount} | ${hasContent}`)
+    })
 
     console.log(`\nTotal: ${slides.length} slides\n`)
   } catch (error) {

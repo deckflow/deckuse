@@ -2,7 +2,38 @@
 
 ## [Unreleased]
 
-### Changed (2026-03-30)
+### Changed (2026-03-31 - Part 2)
+- **Removed Indexes**: Simplified metadata structure by removing separate indexes
+  - All data now comes from `results` (single source of truth)
+  - No more duplication between indexes and results
+  - Commands query results directly via helper methods
+  - Updated: Workspace, Selector, all commands
+  - Benefits: Simpler, no sync issues, more flexible
+
+### Fixed (2026-03-31 - Part 1)
+- **Init Command Hanging**: Fixed init command hanging when parsing PPTX files
+  - Corrected loading order: masters → layouts → slides (was causing "Slide lack slideLayout" error)
+  - Fixed slideLayouts type handling (Map vs Object)
+  - Removed debug logs, kept clean output
+  - See `BUGFIX_INIT_HANG.md` for details
+
+### Added (2026-03-30 - Part 2)
+- **Metadata Results Node**: Added `results` field to workspace metadata
+  - Stores complete parsing results from @deckflow/presentation
+  - Includes presentation, slides, slideMasters, and slideLayouts
+  - Enables caching and advanced operations
+
+- **PPTX Reader Integration**: Implemented @deckflow/presentation integration
+  - Added `parseFromFile()` method to parse PPTX files
+  - Parse and cache complete presentation structure on init
+  - Build indexes from parsing results
+
+- **Documentation**:
+  - Created `docs/METADATA_STRUCTURE.md` - Metadata design and rationale
+  - Created `docs/IMPLEMENTATION_STATUS.md` - Detailed implementation status
+  - Updated `DEVELOPMENT.md` with metadata reference
+
+### Changed (2026-03-30 - Part 1)
 - **Package Manager**: Migrated from npm to pnpm
   - Added `.npmrc` configuration
   - Updated all documentation to use pnpm commands

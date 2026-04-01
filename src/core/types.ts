@@ -37,11 +37,12 @@ export interface WorkspaceMetadata {
   sourcePptx?: string
   initialized: Date
   lastModified: Date
-  indexes: {
-    slides: SlideIndex[]
-    shapes: ShapeIndex[]
-    layouts: LayoutIndex[]
-  }
+  /**
+   * Complete presentation object from @deckflow/presentation parsing
+   * This is the single source of truth for all PPTX structure data
+   * Contains: slides, slideMasters, slideSize, defaultTextStyle, etc.
+   */
+  results?: any // Presentation.toJSON() result
 }
 
 export interface SlideIndex {
@@ -71,7 +72,7 @@ export interface Selector {
   type: 'slide' | 'shape' | 'text' | 'layout'
   index?: number
   filters?: Record<string, string>
-  path?: string[]
+  path?: (string | Selector)[]  // Support nested selectors in path
   raw: string
 }
 

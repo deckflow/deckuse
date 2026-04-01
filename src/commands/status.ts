@@ -49,11 +49,14 @@ export async function statusCommand(workspaceDir: string): Promise<void> {
       )
     }
 
-    // Show index stats
-    const { slides, shapes, layouts } = workspace.metadata.indexes
-    console.log('\n=== Indexes ===\n')
+    // Show data stats from results
+    const slides = workspace.getSlides()
+    const masters = workspace.getSlideMasters()
+    const layouts = workspace.getSlideLayouts()
+
+    console.log('\n=== Content ===\n')
     console.log(`Slides:       ${slides.length}`)
-    console.log(`Shapes:       ${shapes.length}`)
+    console.log(`Masters:      ${masters.length}`)
     console.log(`Layouts:      ${layouts.length}`)
 
     // Run validation

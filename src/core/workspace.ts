@@ -9,9 +9,6 @@ import {
   WorkspaceMetadata,
   WorkspaceStatus,
   ValidationResult,
-  SlideIndex,
-  ShapeIndex,
-  LayoutIndex,
 } from './types.js'
 import {
   WorkspaceNotInitializedError,
@@ -57,11 +54,6 @@ export class Workspace {
       sourcePptx: path.resolve(pptxPath),
       initialized: new Date(),
       lastModified: new Date(),
-      indexes: {
-        slides: [],
-        shapes: [],
-        layouts: [],
-      },
     }
 
     // Save metadata
@@ -181,39 +173,57 @@ export class Workspace {
   }
 
   /**
-   * Update slide index
+   * Update parsing results from @deckflow/presentation
    */
-  async updateSlideIndex(slides: SlideIndex[]): Promise<void> {
+  async updateResults(results: WorkspaceMetadata['results']): Promise<void> {
     await this.updateMetadata({
-      indexes: {
-        ...this.metadata.indexes,
-        slides,
-      },
+      results,
     })
   }
 
   /**
-   * Update shape index
+   * Get slide count from results
    */
-  async updateShapeIndex(shapes: ShapeIndex[]): Promise<void> {
-    await this.updateMetadata({
-      indexes: {
-        ...this.metadata.indexes,
-        shapes,
-      },
-    })
+  getSlideCount(): number {
+    return this.metadata.results?.slides?.length ?? 0
   }
 
   /**
-   * Update layout index
+   * Get all slides from results
    */
-  async updateLayoutIndex(layouts: LayoutIndex[]): Promise<void> {
-    await this.updateMetadata({
-      indexes: {
-        ...this.metadata.indexes,
-        layouts,
-      },
-    })
+  getSlides(): any[] {
+    return this.metadata.results?.slides ?? []
+  }
+
+  /**
+   * Get slide by index (1-based)
+   */
+  getSlide(index: number): any | null {
+    const slides = this.getSlides()
+    return slides[index - 1] ?? null
+  }
+
+  /**
+   * Get all slide masters from results
+   */
+  getSlideMasters(): any[] {
+    return this.metadata.results?.slideMasters ?? []
+  }
+
+  /**
+   * Get all slide layouts from results (extracted from slideMasters)
+   */
+  getSlideLayouts(): any[] {
+    const slideMasters = this.metadata.results?.slideMasters ?? []
+    const layouts: any[] = []
+
+    for (const master of slideMasters) {
+      if (master?.slideLayouts && Array.isArray(master.slideLayouts)) {
+        layouts.push(...master.slideLayouts)
+      }
+    }
+
+    return layouts
   }
 
   /**

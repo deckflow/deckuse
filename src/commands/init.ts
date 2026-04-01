@@ -72,40 +72,26 @@ async function extractPptx(
 }
 
 /**
- * Build indexes for the workspace
+ * Parse and save PPTX structure
  */
 async function buildIndexes(workspace: Workspace): Promise<void> {
   const reader = new PptxReader(workspace.workspaceDir)
 
-  // Read slides and build slide index
-  const slides = await reader.readSlides()
-  const slideIndex = slides.map((slide, idx) => ({
-    index: idx + 1,
-    id: slide.id,
-    title: slide.title,
-    layout: slide.layout,
-    path: `ppt/slides/slide${idx + 1}.xml`,
-  }))
-
-  await workspace.updateSlideIndex(slideIndex)
-
-  // Read shapes and build shape index
-  const allShapes = []
-  for (const slide of slides) {
-    const shapes = await reader.readShapes(slide.index)
-    for (const shape of shapes) {
-      allShapes.push({
-        slideIndex: slide.index,
-        shapeId: shape.id,
-        shapeName: shape.name,
-        shapeType: shape.type,
-        text: shape.text,
-      })
-    }
+  // Parse the source PPTX file and get complete results
+  if (!workspace.metadata.sourcePptx) {
+    throw new Error('Source PPTX path not found in workspace metadata')
   }
 
-  await workspace.updateShapeIndex(allShapes)
+  logger.info('Parsing PPTX structure with @deckflow/presentation...')
+  const presentation = await reader.parseFromFile(workspace.metadata.sourcePptx)
 
-  // TODO: Build layout index when reader supports it
-  await workspace.updateLayoutIndex([])
+  // Save presentation object directly to results (single source of truth)
+  await workspace.updateResults(presentation)
+
+  const slideCount = presentation.slides?.length ?? 0
+  const masterCount = presentation.slideMasters?.length ?? 0
+
+  logger.info(
+    `Parsed ${slideCount} slides, ${masterCount} masters`
+  )
 }

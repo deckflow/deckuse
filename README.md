@@ -108,6 +108,160 @@ deckuse set text ./company_deck.deck "slide:3/title" "2026 Strategy"
 deckuse commit ./company_deck.deck --output company_deck_out.pptx
 ```
 
+## SELECTOR SYNTAX
+
+Selectors are the core addressing mechanism in DeckUse. They allow you to target specific slides, shapes, text, or layouts within a presentation.
+
+### Selector Types
+
+#### 1. Index-based Selectors
+Select elements by their position (1-based indexing):
+
+```bash
+slide:1        # First slide
+slide:3        # Third slide
+shape:2        # Second shape (context-dependent)
+layout:1       # First layout
+```
+
+#### 2. Path-based Selectors
+Navigate to nested elements using `/` separator:
+
+```bash
+slide:1/title           # Title element in slide 1
+slide:3/body            # Body element in slide 3
+slide:2/footer          # Footer element in slide 2
+```
+
+**Note**: Path names depend on the slide layout structure. Common paths include `title`, `body`, `subtitle`, `footer`.
+
+#### 3. Filter-based Selectors
+Select elements matching specific criteria using `[filter]` syntax:
+
+**Key-Value Filters**:
+```bash
+shape[type=textbox]     # All textbox shapes
+shape[type=picture]     # All picture shapes
+slide[layout=Title]     # All slides using Title layout
+layout[path=ppt/slideLayouts/slideLayout1.xml]  # Layout by path
+```
+
+**Function-style Filters**:
+```bash
+text[contains('Revenue')]       # Text containing "Revenue"
+text[contains('2026')]          # Text containing "2026"
+shape[contains('Chart')]        # Shapes containing "Chart" in name/text
+```
+
+#### 4. Type-only Selectors
+Select all elements of a type:
+
+```bash
+slide          # All slides
+shape          # All shapes (context-dependent)
+text           # All text elements
+layout         # All layouts
+```
+
+### Selector Grammar
+
+```ebnf
+selector        ::= type_selector | index_selector | filter_selector | path_selector
+
+type_selector   ::= "slide" | "shape" | "text" | "layout"
+
+index_selector  ::= type ":" number
+                  # Examples: slide:1, shape:3, layout:2
+
+filter_selector ::= type "[" filter "]"
+                  # Examples: shape[type=textbox], text[contains('keyword')]
+
+path_selector   ::= index_selector "/" path_component ("/" path_component)*
+                  # Examples: slide:1/title, slide:3/body/text
+
+type           ::= "slide" | "shape" | "text" | "layout"
+number         ::= [1-9][0-9]*
+filter         ::= key_value_filter | function_filter
+key_value_filter ::= identifier "=" value
+function_filter  ::= identifier "(" value ")"
+identifier     ::= [a-zA-Z_][a-zA-Z0-9_]*
+path_component ::= [a-zA-Z0-9_-]+
+value          ::= [^)\]]+ | "'" [^']* "'" | '"' [^"]* '"'
+```
+
+### Usage Examples
+
+#### Reading Content
+```bash
+# Get text from slide 3's title
+deckuse get text workspace "slide:3/title"
+
+# Get all text from slide 1
+deckuse get text workspace "slide:1"
+
+# Find all text containing "Revenue"
+deckuse get text workspace "text[contains('Revenue')]"
+```
+
+#### Modifying Content
+```bash
+# Set text in slide 1's title
+deckuse set text workspace "slide:1/title" "New Title"
+
+# Replace text in all slides
+deckuse replace text workspace "2025" "2026"
+
+# Set font size for all textboxes
+deckuse set font-size workspace "shape[type=textbox]" 16
+```
+
+#### Querying Structure
+```bash
+# Show slide 2 details
+deckuse show slide workspace 2
+
+# List all slides
+deckuse list slides workspace
+
+# Query selector matches
+deckuse query workspace "slide[layout=Title]"
+```
+
+### Selector Resolution
+
+Selectors are resolved against the workspace's `results` structure from `@deckflow/presentation`:
+
+1. **Index selectors**: Direct array access (1-based)
+   - `slide:3` → `results.slides[2]`
+
+2. **Path selectors**: Navigate nested structure
+   - `slide:3/title` → Find title element in slide 3's shape tree
+
+3. **Filter selectors**: Iterate and match
+   - `shape[type=textbox]` → Filter all shapes by type
+   - `text[contains('X')]` → Search text content
+
+4. **Type selectors**: Return all of type
+   - `slide` → All slides
+   - `layout` → All layouts
+
+### Current Limitations (Phase 1)
+
+- Path navigation is basic (placeholder paths)
+- Complex filter expressions not yet supported
+- No boolean operators (AND, OR, NOT)
+- No regex in filters (planned for Phase 2)
+- Shape selection outside slide context limited
+
+### Future Enhancements (Phase 2+)
+
+- Regex support: `text[matches('^Q[1-4]$')]`
+- Boolean operators: `shape[type=textbox AND contains('Revenue')]`
+- Relative selectors: `slide:current/next`, `shape:previous`
+- XPath-like syntax: `//shape[@type='textbox']`
+- Range selectors: `slide:1-5`, `shape:2,4,6`
+- Negative filters: `slide[layout!=Title]`
+
 # PART I — READ COMMANDS
 Read commands never modify content. Commands marked **[workspace]** require `deckuse init`.
 

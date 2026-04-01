@@ -13,47 +13,35 @@ export async function showSlideCommand(
 ): Promise<void> {
   try {
     const workspace = await Workspace.load(workspaceDir)
-    // TODO: Use reader when implementing actual PPTX reading
-    // const reader = new PptxReader(workspace.workspaceDir)
-
-    // Find slide in index
-    const slide = workspace.metadata.indexes.slides.find(
-      (s) => s.index === slideIndex
-    )
+    const slide = workspace.getSlide(slideIndex)
 
     if (!slide) {
       console.log(`Slide ${slideIndex} not found`)
       return
     }
 
-    // Get shapes for this slide
-    const shapes = workspace.metadata.indexes.shapes.filter(
-      (s) => s.slideIndex === slideIndex
-    )
-
     console.log('\n=== Slide Details ===\n')
-    console.log(`Index:        ${slide.index}`)
-    console.log(`ID:           ${slide.id}`)
-    console.log(`Title:        ${slide.title || '(no title)'}`)
-    console.log(`Layout:       ${slide.layout}`)
-    console.log(`Path:         ${slide.path}`)
-    console.log(`Shape count:  ${shapes.length}`)
+    console.log(`Index:        ${slideIndex}`)
+    console.log(`Layout Ref:   ${slide._layoutRef || 'unknown'}`)
+    console.log(`Master Ref:   ${slide._masterRef || 'unknown'}`)
+    console.log(`Shapes:       ${slide.spTree?.length ?? 0}`)
 
-    if (shapes.length > 0) {
-      console.log('\n=== Shapes ===\n')
-      console.log('ID       | Name                 | Type       | Text')
-      console.log('---------|----------------------|------------|-------------')
+    if (slide.clrMapOvr) {
+      console.log(`Color Map:    Overridden`)
+    }
 
-      for (const shape of shapes) {
-        const id = shape.shapeId.padEnd(8).slice(0, 8)
-        const name = shape.shapeName.padEnd(20).slice(0, 20)
-        const type = shape.shapeType.padEnd(10).slice(0, 10)
-        const text = shape.text
-          ? shape.text.slice(0, 30) + (shape.text.length > 30 ? '...' : '')
-          : ''
+    if (slide.spTree && slide.spTree.length > 0) {
+      console.log('\n=== Shape Tree ===\n')
+      console.log('Index | Type      | Properties')
+      console.log('------|-----------|------------------')
 
-        console.log(`${id} | ${name} | ${type} | ${text}`)
-      }
+      slide.spTree.forEach((shape: any, idx: number) => {
+        const index = String(idx + 1).padStart(5)
+        const type = Object.keys(shape)[0] || 'unknown'
+        const hasText = shape[type]?.txBody ? 'Has text' : ''
+
+        console.log(`${index} | ${type.padEnd(9)} | ${hasText}`)
+      })
     }
 
     console.log()

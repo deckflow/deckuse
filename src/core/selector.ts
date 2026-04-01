@@ -17,13 +17,24 @@ export class SelectorParser {
   static parse(selectorStr: string): Selector {
     const trimmed = selectorStr.trim()
 
-    // Handle path-based selectors: slide:3/title
+    // Handle path-based selectors: slide:3/title or slide:3/text[contains('X')]
     if (trimmed.includes('/')) {
       const parts = trimmed.split('/')
       const base = parts[0]!
-      const path = parts.slice(1)
+      const pathParts = parts.slice(1)
 
       const baseSelector = this.parseSimple(base)
+
+      // Parse each path component - could be a string or a selector
+      const path = pathParts.map(part => {
+        // Check if this path component is a filter selector
+        // Matches: text[contains('X')], shape[type=textbox], etc.
+        if (/^(slide|shape|text|layout)\[.+\]$/.test(part)) {
+          return this.parseSimple(part) // Parse as a Selector
+        }
+        return part // Keep as plain string
+      })
+
       return {
         ...baseSelector,
         path,
@@ -142,70 +153,50 @@ export class SelectorResolver {
     metadata: WorkspaceMetadata,
     _workspaceDir: string
   ): Promise<ResolvedTarget[]> {
-    const { indexes } = metadata
+    const slides = metadata.results?.slides ?? []
 
     // Index-based selection
     if (selector.index !== undefined) {
-      const slide = indexes.slides.find((s) => s.index === selector.index)
+      const slide = slides[selector.index - 1]
       if (!slide) {
         throw new SelectorNotFoundError(selector.raw)
       }
 
-      // Handle path if present (e.g., slide:3/title)
+      // Handle path if present (e.g., slide:3/title or slide:3/text[contains('X')])
       if (selector.path && selector.path.length > 0) {
-        return [
-          {
-            slide: slide.index,
-            element: null, // Will be populated by command handler
-            metadata: {
-              path: selector.path,
-              slideId: slide.id,
-            },
-          },
-        ]
+        return this.resolvePath(slide, selector.index, selector.path, metadata, _workspaceDir)
       }
 
       return [
         {
-          slide: slide.index,
-          element: null,
-          metadata: {
-            slideId: slide.id,
-          },
+          slide: selector.index,
+          element: slide,
         },
       ]
     }
 
     // Filter-based selection
     if (selector.filters) {
-      const filtered = indexes.slides.filter((slide) => {
+      const filtered = slides.filter((slide: any) => {
         for (const [key, value] of Object.entries(selector.filters!)) {
-          if (key === 'layout' && slide.layout !== value) {
+          if (key === 'layout' && slide._layoutRef !== value) {
             return false
           }
-          if (key === 'title' && slide.title !== value) {
-            return false
-          }
+          // Add more filter logic as needed
         }
         return true
       })
 
-      return filtered.map((slide) => ({
-        slide: slide.index,
-        element: null,
-        metadata: {
-          slideId: slide.id,
-        },
+      return filtered.map((slide: any) => ({
+        slide: slides.indexOf(slide) + 1,
+        element: slide,
       }))
     }
 
     // Return all slides if no index or filter
-    return indexes.slides.map((slide) => ({
-      slide: slide.index,
-      element: null,
-      metadata: {
-        slideId: slide.id,
-      },
+    return slides.map((slide: any, idx: number) => ({
+      slide: idx + 1,
+      element: slide,
     }))
   }
 
@@ -217,34 +208,28 @@ export class SelectorResolver {
     metadata: WorkspaceMetadata,
     _workspaceDir: string
   ): Promise<ResolvedTarget[]> {
-    const { indexes } = metadata
+    const slides = metadata.results?.slides ?? []
+    const results: ResolvedTarget[] = []
 
     // Filter-based selection
     if (selector.filters) {
-      const filtered = indexes.shapes.filter((shape) => {
-        for (const [key, value] of Object.entries(selector.filters!)) {
-          if (key === 'type' && shape.shapeType !== value) {
-            return false
+      slides.forEach((slide: any, slideIdx: number) => {
+        const shapes = slide.spTree ?? []
+        shapes.forEach((shape: any) => {
+          // Match filters
+          for (const [key, value] of Object.entries(selector.filters!)) {
+            if (key === 'type' && shape.type === value) {
+              results.push({
+                slide: slideIdx + 1,
+                element: shape,
+              })
+            }
           }
-          if (key === 'name' && shape.shapeName !== value) {
-            return false
-          }
-        }
-        return true
+        })
       })
-
-      return filtered.map((shape) => ({
-        slide: shape.slideIndex,
-        shapeId: shape.shapeId,
-        element: null,
-        metadata: {
-          shapeName: shape.shapeName,
-          shapeType: shape.shapeType,
-        },
-      }))
     }
 
-    return []
+    return results
   }
 
   /**
@@ -255,34 +240,97 @@ export class SelectorResolver {
     metadata: WorkspaceMetadata,
     _workspaceDir: string
   ): Promise<ResolvedTarget[]> {
-    const { indexes } = metadata
+    const slides = metadata.results?.slides ?? []
+    const results: ResolvedTarget[] = []
 
     // Filter-based selection (e.g., text[contains('Revenue')])
     if (selector.filters) {
-      const results: ResolvedTarget[] = []
+      slides.forEach((slide: any, slideIdx: number) => {
+        const shapes = slide.spTree ?? []
+        shapes.forEach((shape: any) => {
+          if (shape?.txBody) {
+            // Extract text from textBody
+            const text = this.extractTextFromBody(shape.txBody)
 
-      for (const shape of indexes.shapes) {
-        if (!shape.text) continue
-
-        for (const [key, value] of Object.entries(selector.filters)) {
-          if (key === 'contains' && shape.text.includes(value)) {
-            results.push({
-              slide: shape.slideIndex,
-              shapeId: shape.shapeId,
-              element: null,
-              metadata: {
-                text: shape.text,
-                shapeName: shape.shapeName,
-              },
-            })
+            for (const [key, value] of Object.entries(selector.filters!)) {
+              if (key === 'contains' && text.includes(value)) {
+                results.push({
+                  slide: slideIdx + 1,
+                  element: shape,
+                  metadata: { text },
+                })
+              }
+            }
           }
+        })
+      })
+    }
+
+    return results
+  }
+
+  /**
+   * Extract plain text from text body structure
+   */
+  private static extractTextFromBody(textBody: any): string {
+    if (!textBody) {
+      return ''
+    }
+
+    const texts: string[] = []
+
+    // Handle @deckflow/presentation format (children-based)
+    if (textBody.children) {
+      const paragraphs = Array.isArray(textBody.children) ? textBody.children : [textBody.children]
+
+      for (const paragraph of paragraphs) {
+        if (!paragraph || !paragraph.children) continue
+
+        const paragraphTexts: string[] = []
+        const runs = Array.isArray(paragraph.children) ? paragraph.children : [paragraph.children]
+
+        for (const run of runs) {
+          if (run && run.t) {
+            paragraphTexts.push(run.t)
+          }
+        }
+
+        if (paragraphTexts.length > 0) {
+          texts.push(paragraphTexts.join(''))
         }
       }
 
-      return results
+      return texts.join('\n')
     }
 
-    return []
+    // Handle standard PPTX format (p/r based) as fallback
+    if (textBody.p) {
+      const paragraphs = Array.isArray(textBody.p) ? textBody.p : [textBody.p]
+
+      for (const paragraph of paragraphs) {
+        if (!paragraph) continue
+
+        const paragraphTexts: string[] = []
+
+        if (paragraph.r) {
+          const runs = Array.isArray(paragraph.r) ? paragraph.r : [paragraph.r]
+
+          for (const run of runs) {
+            if (run && run.t) {
+              paragraphTexts.push(run.t)
+            }
+          }
+        }
+
+        if (paragraphTexts.length > 0) {
+          texts.push(paragraphTexts.join(''))
+        }
+      }
+
+      return texts.join('\n')
+    }
+
+    return ''
   }
 
   /**
@@ -293,11 +341,18 @@ export class SelectorResolver {
     metadata: WorkspaceMetadata,
     _workspaceDir: string
   ): Promise<ResolvedTarget[]> {
-    const { indexes } = metadata
+    // Extract all slide layouts from slide masters
+    const slideMasters = metadata.results?.slideMasters ?? []
+    const layouts: any[] = []
+    for (const master of slideMasters) {
+      if (master?.slideLayouts && Array.isArray(master.slideLayouts)) {
+        layouts.push(...master.slideLayouts)
+      }
+    }
 
     // Index-based selection
     if (selector.index !== undefined) {
-      const layout = indexes.layouts[selector.index]
+      const layout = layouts[selector.index - 1]
       if (!layout) {
         throw new SelectorNotFoundError(selector.raw)
       }
@@ -305,43 +360,156 @@ export class SelectorResolver {
       return [
         {
           slide: -1, // Layout is not slide-specific
-          element: null,
-          metadata: {
-            layoutId: layout.id,
-            layoutName: layout.name,
-          },
+          element: layout,
         },
       ]
     }
 
     // Filter-based selection
     if (selector.filters) {
-      const filtered = indexes.layouts.filter((layout) => {
+      const filtered = layouts.filter((layout: any) => {
         for (const [key, value] of Object.entries(selector.filters!)) {
-          if (key === 'name' && layout.name !== value) {
+          if (key === 'path' && layout.path !== value) {
             return false
           }
         }
         return true
       })
 
-      return filtered.map((layout) => ({
+      return filtered.map((layout: any) => ({
         slide: -1,
-        element: null,
-        metadata: {
-          layoutId: layout.id,
-          layoutName: layout.name,
-        },
+        element: layout,
       }))
     }
 
-    return indexes.layouts.map((layout) => ({
+    return layouts.map((layout: any) => ({
       slide: -1,
-      element: null,
-      metadata: {
-        layoutId: layout.id,
-        layoutName: layout.name,
-      },
+      element: layout,
     }))
+  }
+
+  /**
+   * Resolve path components within a scope (e.g., slide:1/text[contains('X')])
+   */
+  private static async resolvePath(
+    baseElement: any,
+    slideIndex: number,
+    path: (string | Selector)[],
+    _metadata: WorkspaceMetadata,
+    _workspaceDir: string
+  ): Promise<ResolvedTarget[]> {
+    // Process each path component
+    for (const component of path) {
+      if (typeof component === 'string') {
+        // Simple string path
+        // Special case: 'text' means all text in this slide
+        if (component === 'text') {
+          return this.resolveTextInSlide(
+            { type: 'text', raw: 'text' },
+            baseElement,
+            slideIndex
+          )
+        }
+
+        // For other string paths (e.g., 'title', 'body'), return with path metadata
+        return [
+          {
+            slide: slideIndex,
+            element: baseElement,
+            metadata: { path: [component] },
+          },
+        ]
+      } else {
+        // It's a nested Selector - apply it within the current scope
+        if (component.type === 'text') {
+          return this.resolveTextInSlide(component, baseElement, slideIndex)
+        } else if (component.type === 'shape') {
+          return this.resolveShapeInSlide(component, baseElement, slideIndex)
+        }
+      }
+    }
+
+    // Fallback: return base element
+    return [{ slide: slideIndex, element: baseElement }]
+  }
+
+  /**
+   * Resolve text selector within a specific slide
+   */
+  private static resolveTextInSlide(
+    selector: Selector,
+    slide: any,
+    slideIndex: number
+  ): ResolvedTarget[] {
+    const results: ResolvedTarget[] = []
+    const shapes = slide.spTree ?? []
+
+    if (!selector.filters) {
+      // No filters - return all text shapes
+      shapes.forEach((shape: any) => {
+        if (shape?.txBody) {
+          const text = this.extractTextFromBody(shape.txBody)
+          results.push({
+            slide: slideIndex,
+            element: shape,
+            metadata: { text },
+          })
+        }
+      })
+      return results
+    }
+
+    // Apply filters
+    shapes.forEach((shape: any) => {
+      if (shape?.txBody) {
+        const text = this.extractTextFromBody(shape.txBody)
+
+        for (const [key, value] of Object.entries(selector.filters!)) {
+          if (key === 'contains' && text.includes(value)) {
+            results.push({
+              slide: slideIndex,
+              element: shape,
+              metadata: { text },
+            })
+          }
+        }
+      }
+    })
+
+    return results
+  }
+
+  /**
+   * Resolve shape selector within a specific slide
+   */
+  private static resolveShapeInSlide(
+    selector: Selector,
+    slide: any,
+    slideIndex: number
+  ): ResolvedTarget[] {
+    const results: ResolvedTarget[] = []
+    const shapes = slide.spTree ?? []
+
+    if (!selector.filters) {
+      // No filters - return all shapes
+      return shapes.map((shape: any) => ({
+        slide: slideIndex,
+        element: shape,
+      }))
+    }
+
+    // Apply filters
+    shapes.forEach((shape: any) => {
+      for (const [key, value] of Object.entries(selector.filters!)) {
+        if (key === 'type' && shape.type === value) {
+          results.push({
+            slide: slideIndex,
+            element: shape,
+          })
+        }
+      }
+    })
+
+    return results
   }
 }
