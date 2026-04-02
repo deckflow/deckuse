@@ -1,7 +1,6 @@
-# DeckUse Manual v2
+# DeckUse Manual v1.2
 
-**Generated:** 2026-03-29  
-**Scope:** `man deckuse` draft, compact layout, Git-inspired workflow, no diff in phase 1.
+**Scope:** `man deckuse` draft, compact layout, Git-inspired workflow, no diff in v1.
 
 # DECKUSE(1)
 ## NAME
