@@ -118,7 +118,7 @@ Yes for all modifications. Some commands can work directly on PPTX.
 <details>
 <summary><b>Is DeckUse free?</b></summary>
 
-Yes, DeckUse is MIT open source.
+Yes, DeckUse is open source.
 </details>
 
 <details>
