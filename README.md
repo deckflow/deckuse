@@ -135,6 +135,25 @@ slide:2/footer          # Footer element in slide 2
 
 **Note**: Path names depend on the slide layout structure. Common paths include `title`, `body`, `subtitle`, `footer`.
 
+#### 2.1. Shape ID Path Selectors (for nested/grouped shapes)
+Some write operations (e.g. via `pptx-modifier`) address shapes by an **ID path**: if a shape with `id=9` is nested under a parent shape `id=6`, its ID path is `6,9`.
+
+DeckUse supports expressing this in two equivalent forms:
+
+- **Recommended (explicit, composable)**:
+
+```bash
+deckuse get text <workspace.dir> "slide:1/shape[id=6]/shape[id=9]"
+```
+
+- **CLI shorthand (ID path sugar)**:
+
+```bash
+deckuse get text <workspace.dir> "slide:1/#6,9"
+```
+
+Both selectors mean: within slide 1, traverse the shape tree by IDs `6 → 9`.
+
 #### 3. Filter-based Selectors
 Select elements matching specific criteria using `[filter]` syntax:
 

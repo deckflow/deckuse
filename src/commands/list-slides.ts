@@ -16,16 +16,51 @@ export async function listSlidesCommand(workspaceDir: string): Promise<void> {
     }
 
     console.log('\n=== Slides ===\n')
-    console.log('Index | Layout Ref        | Shapes | Content')
-    console.log('------|-------------------|--------|------------------')
+    console.log(
+      'Index | Slide Ref                     | Layout Ref              | Master Ref                    | Shapes | Content'
+    )
+    console.log(
+      '------|--------------------------------|-------------------------|-------------------------------|--------|------------------'
+    )
+
+    const formatRef = (value: unknown, width: number): string => {
+      const raw = value ? String(value) : 'unknown'
+      if (raw.length <= width) return raw.padEnd(width)
+      if (width <= 3) return raw.slice(0, width)
+      return raw.slice(0, width - 3) + '...'
+    }
+
+    const countShapesDeep = (spTree: unknown): number => {
+      if (!Array.isArray(spTree)) return 0
+
+      let count = 0
+      for (const node of spTree) {
+        count += 1
+
+        // Some PPTX structures represent group-like shapes with nested spTree.
+        if (node && typeof node === 'object') {
+          const nested = (node as any).spTree
+          if (Array.isArray(nested)) {
+            count += countShapesDeep(nested)
+          }
+        }
+      }
+      return count
+    }
 
     slides.forEach((slide, idx) => {
       const index = String(idx + 1).padStart(5)
-      const layoutRef = (slide._layoutRef || 'unknown').padEnd(17).slice(0, 17)
-      const shapeCount = String(slide.spTree?.length ?? 0).padStart(6)
-      const hasContent = slide.spTree?.length > 0 ? 'Yes' : 'No'
+      const slideRef = formatRef(slide._ref, 32)
+      const layoutRef = formatRef(slide._layoutRef, 22)
+      const masterRef = formatRef(slide._masterRef, 29)
 
-      console.log(`${index} | ${layoutRef} | ${shapeCount} | ${hasContent}`)
+      const shapeCountNum = countShapesDeep(slide.spTree)
+      const shapeCount = String(shapeCountNum).padStart(6)
+      const hasContent = shapeCountNum > 0 ? 'Yes' : 'No'
+
+      console.log(
+        `${index} | ${slideRef} | ${layoutRef} | ${masterRef} | ${shapeCount} | ${hasContent}`
+      )
     })
 
     console.log(`\nTotal: ${slides.length} slides\n`)
