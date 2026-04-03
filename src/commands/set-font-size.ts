@@ -55,10 +55,8 @@ export async function setFontSizeCommand(
       }
     }
 
-    // Save changes
     await writer.save()
 
-    // Update workspace metadata
     await workspace.updateMetadata({
       lastModified: new Date(),
     })

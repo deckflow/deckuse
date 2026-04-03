@@ -154,6 +154,19 @@ deckuse get text <workspace.dir> "slide:1/#6,9"
 
 Both selectors mean: within slide 1, traverse the shape tree by IDs `6 → 9`.
 
+#### 2.2. Paragraph Selectors (a:p) within a text box
+Most text edits are performed at the **paragraph** level (`a:p`) inside a shape's `txBody`. When targeting a text box by shape ID path, you can address a specific paragraph by appending `/p:<index>` (0-based):
+
+```bash
+# Paragraph 0 (first paragraph) in the text box at ID path #6,9 on slide 1
+deckuse get text <workspace.dir> "slide:1/#6,9/p:0"
+
+# Paragraph 2 (third paragraph)
+deckuse get text <workspace.dir> "slide:1/#6,9/p:2"
+```
+
+Paragraph indices are **0-based**: the first paragraph is `p:0`, then `p:1`, `p:2`, ...
+
 #### 3. Filter-based Selectors
 Select elements matching specific criteria using `[filter]` syntax:
 

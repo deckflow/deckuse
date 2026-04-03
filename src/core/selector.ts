@@ -7,8 +7,12 @@
  * - text[contains('Revenue')]
  */
 
-import { Selector, ResolvedTarget, WorkspaceMetadata } from './types.js'
+import { Selector, ResolvedTarget, ResolvedParagraph, WorkspaceMetadata, PageType } from './types.js'
 import { InvalidSelectorError, SelectorNotFoundError } from '../utils/errors.js'
+import {
+  extractParagraphTextsFromBody,
+  findIdPathInSpTree,
+} from '../utils/pptx-text.js'
 
 export class SelectorParser {
   /**
@@ -24,6 +28,25 @@ export class SelectorParser {
       const pathParts = parts.slice(1)
 
       const baseSelector = this.parseSimple(base)
+
+      // Detect canonical idPath selector: slide:N/#id1,id2/p:M
+      const idPathPart = pathParts.find(p => p.startsWith('#'))
+      const pIndexPart = pathParts.find(p => /^p:\d+$/.test(p))
+
+      if (idPathPart) {
+        const idPathStr = idPathPart.slice(1) // remove '#'
+        const idPath = idPathStr.split(',').map(s => parseInt(s.trim(), 10))
+        const paragraphIndex = pIndexPart
+          ? parseInt(pIndexPart.slice(2), 10)
+          : undefined
+
+        return {
+          ...baseSelector,
+          idPath,
+          paragraphIndex,
+          raw: selectorStr,
+        }
+      }
 
       // Parse each path component - could be a string or a selector
       const path = pathParts.map(part => {
@@ -146,6 +169,180 @@ export class SelectorResolver {
   }
 
   /**
+   * 基于 selector 解析出段落级定位信息，可直接用于 pptx-modifier 调用。
+   * 支持 slide / slideLayout / slideMaster 页面类型。
+   */
+  static async resolveParagraphs(
+    selector: Selector,
+    metadata: WorkspaceMetadata,
+    workspaceDir: string
+  ): Promise<ResolvedParagraph[]> {
+    // Fast path: canonical idPath selector like slide:1/#22/p:0
+    if (selector.idPath && selector.idPath.length > 0) {
+      return this.resolveParagraphsByIdPath(selector, metadata)
+    }
+
+    const targets = await this.resolve(selector, metadata, workspaceDir)
+    const results: ResolvedParagraph[] = []
+
+    for (const target of targets) {
+      const shape = target.element
+      if (!shape?.txBody) continue
+
+      const pageType: PageType = target.pageType ?? 'slide'
+      const pageIndex = target.slide
+
+      const spTree = this.getSpTreeForTarget(target, metadata)
+      const idPath = findIdPathInSpTree(spTree, shape)
+      if (!idPath || idPath.length === 0) continue
+
+      const paragraphs = extractParagraphTextsFromBody(shape.txBody)
+      for (let i = 0; i < paragraphs.length; i++) {
+        results.push({
+          pageType,
+          pageIndex,
+          idPath,
+          paragraphIndex: i,
+          text: paragraphs[i] ?? '',
+        })
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * Resolve paragraphs directly via canonical idPath (e.g. slide:1/#22/p:0)
+   */
+  private static resolveParagraphsByIdPath(
+    selector: Selector,
+    metadata: WorkspaceMetadata,
+  ): ResolvedParagraph[] {
+    const pageIndex = selector.index ?? 1
+    const idPath = selector.idPath!
+    const pageType: PageType = selector.type === 'layout' ? 'slideLayout' : 'slide'
+
+    const spTree = this.getSpTreeByPage(pageType, pageIndex, metadata)
+    if (!spTree) return []
+
+    const shape = this.findShapeByIdPath(spTree, idPath)
+    if (!shape?.txBody) return []
+
+    const paragraphs = extractParagraphTextsFromBody(shape.txBody)
+
+    if (selector.paragraphIndex !== undefined) {
+      const pi = selector.paragraphIndex
+      if (pi < 0 || pi >= paragraphs.length) return []
+      return [{
+        pageType,
+        pageIndex,
+        idPath,
+        paragraphIndex: pi,
+        text: paragraphs[pi] ?? '',
+      }]
+    }
+
+    return paragraphs.map((text, i) => ({
+      pageType,
+      pageIndex,
+      idPath,
+      paragraphIndex: i,
+      text: text ?? '',
+    }))
+  }
+
+  /**
+   * Get spTree for a given page type and index from metadata
+   */
+  private static getSpTreeByPage(
+    pageType: PageType,
+    pageIndex: number,
+    metadata: WorkspaceMetadata,
+  ): any[] | undefined {
+    if (pageType === 'slide') {
+      const slide = (metadata.results?.slides ?? [])[pageIndex - 1]
+      return slide?.spTree
+    }
+    if (pageType === 'slideLayout') {
+      const layouts: any[] = []
+      for (const m of (metadata.results?.slideMasters ?? [])) {
+        if (m?.slideLayouts && Array.isArray(m.slideLayouts)) {
+          layouts.push(...m.slideLayouts)
+        }
+      }
+      return layouts[pageIndex - 1]?.spTree
+    }
+    if (pageType === 'slideMaster') {
+      const master = (metadata.results?.slideMasters ?? [])[pageIndex - 1]
+      return master?.spTree
+    }
+    return undefined
+  }
+
+  /**
+   * Walk spTree to find the shape node matching the given idPath
+   */
+  private static findShapeByIdPath(
+    spTree: any[],
+    idPath: number[],
+  ): any | undefined {
+    if (!Array.isArray(spTree) || idPath.length === 0) return undefined
+
+    const [targetId, ...rest] = idPath
+
+    for (const node of spTree) {
+      if (!node || typeof node !== 'object') continue
+      if (node.id !== targetId) continue
+
+      if (rest.length === 0) return node
+
+      if (Array.isArray(node.spTree)) {
+        const found = this.findShapeByIdPath(node.spTree, rest)
+        if (found) return found
+      }
+    }
+
+    return undefined
+  }
+
+  /**
+   * 从 metadata 中按 pageType 取对应的 spTree
+   */
+  private static getSpTreeForTarget(
+    target: ResolvedTarget,
+    metadata: WorkspaceMetadata
+  ): unknown {
+    const pageType = target.pageType ?? 'slide'
+    const pageIndex = target.slide
+
+    if (pageType === 'slide') {
+      const slides = metadata.results?.slides ?? []
+      const slide = slides[pageIndex - 1]
+      return slide?.spTree
+    }
+
+    if (pageType === 'slideLayout') {
+      const layouts: any[] = []
+      const masters = metadata.results?.slideMasters ?? []
+      for (const m of masters) {
+        if (m?.slideLayouts && Array.isArray(m.slideLayouts)) {
+          layouts.push(...m.slideLayouts)
+        }
+      }
+      const layout = layouts[pageIndex - 1]
+      return layout?.spTree
+    }
+
+    if (pageType === 'slideMaster') {
+      const masters = metadata.results?.slideMasters ?? []
+      const master = masters[pageIndex - 1]
+      return master?.spTree
+    }
+
+    return undefined
+  }
+
+  /**
    * Resolve slide selector
    */
   private static async resolveSlide(
@@ -171,6 +368,7 @@ export class SelectorResolver {
         {
           slide: selector.index,
           element: slide,
+          pageType: 'slide',
         },
       ]
     }
@@ -190,6 +388,7 @@ export class SelectorResolver {
       return filtered.map((slide: any) => ({
         slide: slides.indexOf(slide) + 1,
         element: slide,
+        pageType: 'slide',
       }))
     }
 
@@ -197,6 +396,7 @@ export class SelectorResolver {
     return slides.map((slide: any, idx: number) => ({
       slide: idx + 1,
       element: slide,
+      pageType: 'slide',
     }))
   }
 
@@ -222,6 +422,7 @@ export class SelectorResolver {
               results.push({
                 slide: slideIdx + 1,
                 element: shape,
+                pageType: 'slide',
               })
             }
           }
@@ -258,6 +459,7 @@ export class SelectorResolver {
                   slide: slideIdx + 1,
                   element: shape,
                   metadata: { text },
+                  pageType: 'slide',
                 })
               }
             }
@@ -359,8 +561,9 @@ export class SelectorResolver {
 
       return [
         {
-          slide: -1, // Layout is not slide-specific
+          slide: selector.index, // layoutIndex (1-based, flattened)
           element: layout,
+          pageType: 'slideLayout',
         },
       ]
     }
@@ -377,14 +580,16 @@ export class SelectorResolver {
       })
 
       return filtered.map((layout: any) => ({
-        slide: -1,
+        slide: layouts.indexOf(layout) + 1,
         element: layout,
+        pageType: 'slideLayout',
       }))
     }
 
     return layouts.map((layout: any) => ({
-      slide: -1,
+      slide: layouts.indexOf(layout) + 1,
       element: layout,
+      pageType: 'slideLayout',
     }))
   }
 
@@ -417,6 +622,7 @@ export class SelectorResolver {
             slide: slideIndex,
             element: baseElement,
             metadata: { path: [component] },
+            pageType: 'slide',
           },
         ]
       } else {
@@ -430,7 +636,7 @@ export class SelectorResolver {
     }
 
     // Fallback: return base element
-    return [{ slide: slideIndex, element: baseElement }]
+    return [{ slide: slideIndex, element: baseElement, pageType: 'slide' }]
   }
 
   /**
@@ -453,6 +659,7 @@ export class SelectorResolver {
             slide: slideIndex,
             element: shape,
             metadata: { text },
+            pageType: 'slide',
           })
         }
       })
@@ -470,6 +677,7 @@ export class SelectorResolver {
               slide: slideIndex,
               element: shape,
               metadata: { text },
+              pageType: 'slide',
             })
           }
         }
@@ -495,6 +703,7 @@ export class SelectorResolver {
       return shapes.map((shape: any) => ({
         slide: slideIndex,
         element: shape,
+        pageType: 'slide',
       }))
     }
 
@@ -505,6 +714,7 @@ export class SelectorResolver {
           results.push({
             slide: slideIndex,
             element: shape,
+            pageType: 'slide',
           })
         }
       }

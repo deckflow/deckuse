@@ -1,5 +1,5 @@
 /**
- * Set text command - replace text in a shape
+ * Set text command - replace text in matched paragraphs
  */
 
 import { Workspace } from '../core/workspace.js'
@@ -17,50 +17,37 @@ export async function setTextCommand(
     const workspace = await Workspace.load(workspaceDir)
     const writer = new PptxWriter(workspace.workspaceDir)
 
-    // Parse selector
     const selector = SelectorParser.parse(selectorStr)
-
-    // Resolve targets
-    const targets = await SelectorResolver.resolve(
+    const paragraphs = await SelectorResolver.resolveParagraphs(
       selector,
       workspace.metadata,
       workspace.workspaceDir
     )
+    console.log('paragraphs', JSON.stringify(paragraphs, null, 2));
 
-    if (targets.length === 0) {
+    if (paragraphs.length === 0) {
       logger.error(`No matches found for selector: ${selectorStr}`)
       return
     }
 
-    logger.info(`Found ${targets.length} target(s)`)
+    logger.info(`Found ${paragraphs.length} paragraph(s)`)
 
-    // Set text for each target
     let updatedCount = 0
-    for (const target of targets) {
-      if (target.shapeId) {
-        await writer.setText(target.slide, target.shapeId, text)
-        logger.info(
-          `Updated text in slide ${target.slide}, shape ${target.shapeId}`
-        )
-        updatedCount++
-      } else {
-        logger.warn(
-          `Skipping target at slide ${target.slide} (no shape ID)`
-        )
-      }
+    for (const p of paragraphs) {
+      await writer.setParagraphTextByIdPath(
+        p.pageIndex,
+        p.idPath,
+        p.paragraphIndex,
+        text,
+        { type: p.pageType }
+      )
+      updatedCount++
     }
 
-    // Save changes
     await writer.save()
+    await workspace.updateMetadata({ lastModified: new Date() })
 
-    // Update workspace metadata
-    await workspace.updateMetadata({
-      lastModified: new Date(),
-    })
-
-    logger.success(
-      `\nText updated in ${updatedCount} shape(s)`
-    )
+    logger.success(`\nText updated in ${updatedCount} paragraph(s)`)
     logger.info(
       `Run 'deckuse commit ${workspaceDir}' to build the PPTX file`
     )

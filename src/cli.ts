@@ -34,6 +34,7 @@ program
       await initCommand(pptx, options)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -50,6 +51,7 @@ program
       await statusCommand(workspace)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -87,6 +89,7 @@ listCmd
       await listSlidesCommand(workspace)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -108,6 +111,7 @@ showCmd
       await showSlideCommand(workspace, slide)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -129,6 +133,7 @@ getCmd
       await getTextCommand(workspace, selector)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -151,6 +156,7 @@ setCmd
       await setTextCommand(workspace, selector, text)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -168,6 +174,7 @@ setCmd
       await setFontSizeCommand(workspace, selector, size)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }
@@ -188,6 +195,7 @@ program
       await replaceTextCommand(workspace, search, replace, options)
     } catch (error) {
       if (error instanceof Error) {
+        if (process.env.DEBUG && error.stack) console.error(error.stack)
         logger.error(error.message)
         process.exit(1)
       }

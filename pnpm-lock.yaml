@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@deckflow/pptx-modifier':
-        specifier: ^0.27.0
-        version: 0.27.0
+        specifier: ^0.29.0
+        version: 0.29.0
       '@deckflow/presentation':
         specifier: ^0.3.5
         version: 0.3.5
@@ -36,8 +36,8 @@ importers:
 
 packages:
 
-  '@deckflow/pptx-modifier@0.27.0':
-    resolution: {integrity: sha512-b1Afq1Hvf1a+g7DM5ktU1HJ88Y6cEriLUUeUxe8ni0XB/sORPX5vlKutSF49/Uh1MbSmn4pg/FhYXDaeTGKdmQ==, tarball: https://npm.pkg.github.com/download/@deckflow/pptx-modifier/0.27.0/136f7b73d1929b0eb78926c18e2af95b0fd70fa7}
+  '@deckflow/pptx-modifier@0.29.0':
+    resolution: {integrity: sha512-EH0T/nCeQ8PDJUE9Ci8IxaXhCN8EP5DcjjIAkHXfUyr0CSUDuI7R1TIiHZPwpwq1f3Ug/IvqmgaXhYA/jZvn1Q==, tarball: https://npm.pkg.github.com/download/@deckflow/pptx-modifier/0.29.0/42da652befae2811e4216fcfad06aca72b7284be}
     hasBin: true
 
   '@deckflow/presentation@0.3.5':
@@ -988,7 +988,7 @@ packages:
 
 snapshots:
 
-  '@deckflow/pptx-modifier@0.27.0':
+  '@deckflow/pptx-modifier@0.29.0':
     dependencies:
       cac: 6.7.14
       jszip: 3.10.1
