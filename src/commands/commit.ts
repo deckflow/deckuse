@@ -72,24 +72,18 @@ async function buildPptx(
   workspaceDir: string,
   outputPath: string
 ): Promise<void> {
-  // Create a ZIP archive from the workspace contents
-  // Note: We need to exclude the .deckuse directory
+  const absCwd = path.resolve(workspaceDir)
+  const absOutput = path.resolve(outputPath)
 
-  const tempDir = path.join(workspaceDir, '.deckuse', 'temp')
+  const tempDir = path.join(absCwd, '.deckuse', 'temp')
   await fs.mkdir(tempDir, { recursive: true })
 
   try {
-    // Use zip command to create PPTX (which is a ZIP file)
-    // -r: recursive
-    // -q: quiet
-    // -X: exclude extra file attributes
-    // We need to zip from within the workspace directory to get correct paths
-    const cwd = workspaceDir
     const excludePattern = '.deckuse/*'
 
     await execAsync(
-      `cd "${cwd}" && zip -r -q -X "${outputPath}" . -x "${excludePattern}"`,
-      { cwd }
+      `cd "${absCwd}" && zip -r -q -X "${absOutput}" . -x "${excludePattern}"`,
+      { cwd: absCwd }
     )
   } catch (error) {
     throw new Error(`Failed to build PPTX: ${error}`)
