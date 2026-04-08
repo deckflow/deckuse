@@ -6,7 +6,11 @@ import { Workspace } from '../core/workspace.js'
 import { SelectorParser, SelectorResolver } from '../core/selector.js'
 import { PptxReader } from '../readers/pptx-reader.js'
 import { CommandError } from '../utils/errors.js'
-import { formatCanonicalIdPathSelector, formatParagraphSelector } from '../utils/pptx-text.js'
+import { formatParagraphSelector } from '../utils/pptx-text.js'
+
+function formatCanonicalIdPathSelector(slideIndex: number, idPath: number[]): string {
+  return `slide:${slideIndex}/#${idPath.join(',')}`
+}
 
 export async function getTextCommand(
   workspaceDir: string,
