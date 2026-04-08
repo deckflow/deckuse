@@ -2,19 +2,27 @@
  * Set font size command
  */
 
-import { Workspace } from '../core/workspace.js'
+import { openWorkspace } from '../core/open-workspace.js'
 import { SelectorParser, SelectorResolver } from '../core/selector.js'
 import { PptxWriter } from '../writers/pptx-writer.js'
+import { commitCommand } from './commit.js'
 import { logger } from '../utils/logger.js'
 import { CommandError } from '../utils/errors.js'
+
+export interface SetFontSizeOptions {
+  output?: string
+}
 
 export async function setFontSizeCommand(
   workspaceDir: string,
   selectorStr: string,
-  fontSize: number
+  fontSize: number,
+  options: SetFontSizeOptions
 ): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openWorkspace>> | null = null
   try {
-    const workspace = await Workspace.load(workspaceDir)
+    opened = await openWorkspace(workspaceDir)
+    const workspace = opened.workspace
     const writer = new PptxWriter(workspace.workspaceDir)
 
     // Validate font size
@@ -64,13 +72,27 @@ export async function setFontSizeCommand(
     logger.success(
       `\nFont size set to ${fontSize} in ${updatedCount} shape(s)`
     )
-    logger.info(
-      `Run 'deckuse commit ${workspaceDir}' to build the PPTX file`
-    )
+
+    if (opened.mode === 'pptx') {
+      if (!options.output) {
+        throw new Error('When workspace is a .pptx file, -o/--output is required')
+      }
+      await commitCommand(workspace.workspaceDir, { output: options.output })
+      logger.success(`Output PPTX: ${options.output}`)
+    } else if (options.output) {
+      await commitCommand(workspace.workspaceDir, { output: options.output })
+      logger.success(`Output PPTX: ${options.output}`)
+    } else {
+      logger.info(`Run 'deckuse commit ${workspaceDir}' to build the PPTX file`)
+    }
   } catch (error) {
     if (error instanceof Error) {
       throw new CommandError('set font-size', error.message)
     }
     throw error
+  } finally {
+    if (opened?.mode === 'pptx') {
+      await opened.cleanup().catch(() => {})
+    }
   }
 }

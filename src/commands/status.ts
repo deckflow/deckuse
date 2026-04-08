@@ -2,25 +2,15 @@
  * Status command - show workspace status
  */
 
-import { Workspace } from '../core/workspace.js'
+import { openWorkspace } from '../core/open-workspace.js'
 import { logger } from '../utils/logger.js'
 import { CommandError } from '../utils/errors.js'
 
 export async function statusCommand(workspaceDir: string): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openWorkspace>> | null = null
   try {
-    // Check if workspace is initialized
-    const isWorkspace = await Workspace.isWorkspace(workspaceDir)
-
-    if (!isWorkspace) {
-      logger.error(`Not a DeckUse workspace: ${workspaceDir}`)
-      logger.info(
-        `Run 'deckuse init <pptx-file>' to initialize a workspace`
-      )
-      return
-    }
-
-    // Load workspace
-    const workspace = await Workspace.load(workspaceDir)
+    opened = await openWorkspace(workspaceDir)
+    const workspace = opened.workspace
 
     // Get status
     const status = await workspace.getStatus()
@@ -85,5 +75,9 @@ export async function statusCommand(workspaceDir: string): Promise<void> {
       throw new CommandError('status', error.message)
     }
     throw error
+  } finally {
+    if (opened?.mode === 'pptx') {
+      await opened.cleanup().catch(() => {})
+    }
   }
 }

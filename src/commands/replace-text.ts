@@ -2,9 +2,10 @@
  * Replace text command - global find and replace
  */
 
-import { Workspace } from '../core/workspace.js'
+import { openWorkspace } from '../core/open-workspace.js'
 import { SelectorParser, SelectorResolver } from '../core/selector.js'
 import { PptxWriter } from '../writers/pptx-writer.js'
+import { commitCommand } from './commit.js'
 import { logger } from '../utils/logger.js'
 import { CommandError } from '../utils/errors.js'
 import { countOccurrences, pickQuoteForContains } from '../utils/pptx-text.js'
@@ -12,16 +13,19 @@ import { countOccurrences, pickQuoteForContains } from '../utils/pptx-text.js'
 export interface ReplaceTextOptions {
   slide?: number
   regex?: boolean
+  output?: string
 }
 
 export async function replaceTextCommand(
   workspaceDir: string,
   searchText: string,
   replaceText: string,
-  options: ReplaceTextOptions = {}
+  options: ReplaceTextOptions
 ): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openWorkspace>> | null = null
   try {
-    const workspace = await Workspace.load(workspaceDir)
+    opened = await openWorkspace(workspaceDir)
+    const workspace = opened.workspace
     const writer = new PptxWriter(workspace.workspaceDir)
 
     logger.info(
@@ -95,13 +99,27 @@ export async function replaceTextCommand(
 
     logger.success(`\nReplaced ${replacedCount} occurrence(s)`)
     logger.info(`Updated ${updatedParagraphCount} paragraph(s)`)
-    logger.info(
-      `Run 'deckuse commit ${workspaceDir}' to build the PPTX file`
-    )
+
+    if (opened.mode === 'pptx') {
+      if (!options.output) {
+        throw new Error('When workspace is a .pptx file, -o/--output is required')
+      }
+      await commitCommand(workspace.workspaceDir, { output: options.output })
+      logger.success(`Output PPTX: ${options.output}`)
+    } else if (options.output) {
+      await commitCommand(workspace.workspaceDir, { output: options.output })
+      logger.success(`Output PPTX: ${options.output}`)
+    } else {
+      logger.info(`Run 'deckuse commit ${workspaceDir}' to build the PPTX file`)
+    }
   } catch (error) {
     if (error instanceof Error) {
       throw new CommandError('replace text', error.message)
     }
     throw error
+  } finally {
+    if (opened?.mode === 'pptx') {
+      await opened.cleanup().catch(() => {})
+    }
   }
 }

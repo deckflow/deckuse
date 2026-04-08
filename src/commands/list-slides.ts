@@ -2,12 +2,14 @@
  * List slides command
  */
 
-import { Workspace } from '../core/workspace.js'
+import { openWorkspace } from '../core/open-workspace.js'
 import { CommandError } from '../utils/errors.js'
 
 export async function listSlidesCommand(workspaceDir: string): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openWorkspace>> | null = null
   try {
-    const workspace = await Workspace.load(workspaceDir)
+    opened = await openWorkspace(workspaceDir)
+    const workspace = opened.workspace
     const slides = workspace.getSlides()
 
     if (slides.length === 0) {
@@ -69,5 +71,9 @@ export async function listSlidesCommand(workspaceDir: string): Promise<void> {
       throw new CommandError('list slides', error.message)
     }
     throw error
+  } finally {
+    if (opened?.mode === 'pptx') {
+      await opened.cleanup().catch(() => {})
+    }
   }
 }

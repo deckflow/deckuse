@@ -2,7 +2,7 @@
  * Show slide command
  */
 
-import { Workspace } from '../core/workspace.js'
+import { openWorkspace } from '../core/open-workspace.js'
 import { CommandError } from '../utils/errors.js'
 // TODO: Import when implementing actual PPTX reading
 // import { PptxReader } from '../readers/pptx-reader.js'
@@ -11,8 +11,10 @@ export async function showSlideCommand(
   workspaceDir: string,
   slideIndex: number
 ): Promise<void> {
+  let opened: Awaited<ReturnType<typeof openWorkspace>> | null = null
   try {
-    const workspace = await Workspace.load(workspaceDir)
+    opened = await openWorkspace(workspaceDir)
+    const workspace = opened.workspace
     const slide = workspace.getSlide(slideIndex)
 
     if (!slide) {
@@ -50,5 +52,9 @@ export async function showSlideCommand(
       throw new CommandError('show slide', error.message)
     }
     throw error
+  } finally {
+    if (opened?.mode === 'pptx') {
+      await opened.cleanup().catch(() => {})
+    }
   }
 }

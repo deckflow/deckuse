@@ -87,7 +87,7 @@ deckuse commit ./company.deck --output output.pptx
 Task = “Replace all 2025 with 2026”
 
 ```bash
-deckuse replace text ./deck "2025" "2026"
+deckuse replace text ./deck "2025" "2026" -o output.pptx
 ```
 
 ---

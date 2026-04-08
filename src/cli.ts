@@ -149,9 +149,10 @@ setCmd
   .argument('<workspace>', 'Workspace directory')
   .argument('<selector>', 'Selector expression')
   .argument('<text>', 'New text content')
-  .action(async (workspace, selector, text) => {
+  .option('-o, --output <output>', 'Output PPTX file path')
+  .action(async (workspace, selector, text, options) => {
     try {
-      await setTextCommand(workspace, selector, text)
+      await setTextCommand(workspace, selector, text, options)
     } catch (error) {
       if (error instanceof Error) {
         if (process.env.DEBUG && error.stack) console.error(error.stack)
@@ -167,9 +168,10 @@ setCmd
   .argument('<workspace>', 'Workspace directory')
   .argument('<selector>', 'Selector expression')
   .argument('<size>', 'Font size in points', parseFloat)
-  .action(async (workspace, selector, size) => {
+  .option('-o, --output <output>', 'Output PPTX file path')
+  .action(async (workspace, selector, size, options) => {
     try {
-      await setFontSizeCommand(workspace, selector, size)
+      await setFontSizeCommand(workspace, selector, size, options)
     } catch (error) {
       if (error instanceof Error) {
         if (process.env.DEBUG && error.stack) console.error(error.stack)
@@ -186,6 +188,7 @@ program
   .argument('<workspace>', 'Workspace directory')
   .argument('<search>', 'Text to search for')
   .argument('<replace>', 'Text to replace with')
+  .option('-o, --output <output>', 'Output PPTX file path')
   .option('--slide <slide>', 'Limit to specific slide', parseInt)
   .option('--regex', 'Use regex matching')
   .action(async (workspace, search, replace, options) => {
