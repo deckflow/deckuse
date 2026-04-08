@@ -1,24 +1,37 @@
 import { defineConfig } from 'tsup'
 
-export default defineConfig({
-  entry: {
-    index: 'src/index.ts',
-    cli: 'src/cli.ts',
+export default defineConfig([
+  {
+    entry: {
+      index: 'src/index.ts',
+    },
+    format: ['esm'],
+    dts: true,
+    clean: true,
+    sourcemap: true,
+    splitting: false,
+    treeshake: true,
+    minify: true,
+    shims: true,
   },
-  format: ['esm'],
-  dts: true,
-  clean: true,
-  sourcemap: true,
-  splitting: false,
-  treeshake: true,
-  minify: false,
-  shims: true,
-  esbuildOptions(options) {
-    // Only add shebang to cli.js
-    if (options.entryNames === '[name]') {
-      options.banner = {
-        js: '#!/usr/bin/env node',
-      }
-    }
+  {
+    entry: {
+      cli: 'src/cli.ts',
+    },
+    format: ['cjs'],
+    dts: true,
+    clean: false,
+    sourcemap: true,
+    splitting: false,
+    treeshake: true,
+    minify: true,
+    shims: true,
+    outExtension() {
+      return { js: '.cjs' }
+    },
+    esbuildOptions(options) {
+      options.banner ??= {}
+      options.banner.js = '#!/usr/bin/env node'
+    },
   },
-})
+])

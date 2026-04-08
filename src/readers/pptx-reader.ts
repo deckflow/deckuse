@@ -3,11 +3,10 @@
  */
 
 import { promises as fs } from 'fs'
-import { Presentation } from '@deckflow/presentation'
 import { SlideInfo, ShapeInfo } from '../core/types.js'
 
 export class PptxReader {
-  private presentation: Presentation | null = null
+  private presentation: any | null = null
   private readonly workspaceDir: string
 
   constructor(workspaceDir: string) {
@@ -17,12 +16,13 @@ export class PptxReader {
   /**
    * Load the presentation from workspace
    */
-  private async loadPresentation(): Promise<Presentation> {
+  private async loadPresentation(): Promise<any> {
     if (this.presentation) {
       return this.presentation
     }
 
     // Create presentation instance
+    const { Presentation } = await import('@deckflow/presentation')
     this.presentation = new Presentation()
 
     // TODO: Implement loading from workspace directory
@@ -41,6 +41,7 @@ export class PptxReader {
    * This is used during init to get the full presentation structure
    */
   async parseFromFile(pptxPath: string): Promise<any> {
+    const { Presentation } = await import('@deckflow/presentation')
     const presentation = new Presentation()
 
     // Load PPTX file into buffer

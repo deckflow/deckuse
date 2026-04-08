@@ -2,7 +2,6 @@
  * PPTX Writer - wraps @deckflow/pptx-modifier for writing to PPTX files
  */
 
-import type { Modifier, FillStyle } from '@deckflow/pptx-modifier'
 import { createModifier } from '@deckflow/pptx-modifier'
 
 function normalizeHexColor(color: string): string {
@@ -37,13 +36,13 @@ function toPptxFontSize(fontSize: number): number {
 
 export class PptxWriter {
   private readonly workspaceDir: string
-  private modifier: Modifier | null = null
+  private modifier: any | null = null
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir
   }
 
-  private async getModifier(): Promise<Modifier> {
+  private async getModifier(): Promise<any> {
     if (this.modifier) return this.modifier
     // createModifier supports passing extracted directory path.
     this.modifier = await createModifier(this.workspaceDir)
@@ -52,7 +51,7 @@ export class PptxWriter {
 
   private async modifyTextOrThrow(
     shapeId: string,
-    fn: (modifier: Modifier, idPath: string[]) => Promise<void>
+    fn: (modifier: any, idPath: string[]) => Promise<void>
   ): Promise<void> {
     const idPath = parseIdPath(shapeId)
     if (!idPath) {
@@ -137,7 +136,7 @@ export class PptxWriter {
   ): Promise<void> {
     const hex = normalizeHexColor(color)
 
-    const textFill: FillStyle = {
+    const textFill = {
       type: 'solid',
       solid: { type: 'srgb', color: hex },
     }

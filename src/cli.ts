@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * DeckUse CLI entry point
  */

@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "deckuse": "./dist/cli.js"
+    "deckuse": "./dist/cli.cjs"
   },
   "exports": {
     ".": {
@@ -15,7 +15,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist/**/*.js",
+    "dist/**/*.cjs",
+    "dist/**/*.d.ts"
   ],
   "scripts": {
     "build": "tsup",
@@ -37,19 +39,9 @@
   "dependencies": {
     "commander": "^12.1.0"
   },
-  "peerDependencies": {
-    "@deckflow/presentation": "^0.3.5",
-    "@deckflow/pptx-modifier": "^0.29.0"
-  },
-  "peerDependenciesMeta": {
-    "@deckflow/presentation": {
-      "optional": true
-    },
-    "@deckflow/pptx-modifier": {
-      "optional": true
-    }
-  },
   "devDependencies": {
+    "@deckflow/presentation": "^0.3.5",
+    "@deckflow/pptx-modifier": "^0.29.0",
     "@types/node": "^20.16.20",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
