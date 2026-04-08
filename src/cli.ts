@@ -43,7 +43,7 @@ program
 program
   .command('status')
   .description('Show workspace status')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .action(async (workspace) => {
     try {
       await statusCommand(workspace)
@@ -81,7 +81,7 @@ const listCmd = program
 listCmd
   .command('slides')
   .description('List all slides')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .action(async (workspace) => {
     try {
       await listSlidesCommand(workspace)
@@ -102,7 +102,7 @@ const showCmd = program
 showCmd
   .command('slide')
   .description('Show slide details')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .argument('<slide>', 'Slide index', parseInt)
   .action(async (workspace, slide) => {
     try {
@@ -124,7 +124,7 @@ const getCmd = program
 getCmd
   .command('text')
   .description('Get text from a selector')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .argument('<selector>', 'Selector expression')
   .action(async (workspace, selector) => {
     try {
@@ -146,10 +146,13 @@ const setCmd = program
 setCmd
   .command('text')
   .description('Set text for a selector')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .argument('<selector>', 'Selector expression')
   .argument('<text>', 'New text content')
-  .option('-o, --output <output>', 'Output PPTX file path')
+  .option(
+    '-o, --output <output>',
+    'Output PPTX file path (required when <workspace> is a .pptx file; optional for workspace directories)'
+  )
   .action(async (workspace, selector, text, options) => {
     try {
       await setTextCommand(workspace, selector, text, options)
@@ -165,10 +168,13 @@ setCmd
 setCmd
   .command('font-size')
   .description('Set font size for a selector')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .argument('<selector>', 'Selector expression')
   .argument('<size>', 'Font size in points', parseFloat)
-  .option('-o, --output <output>', 'Output PPTX file path')
+  .option(
+    '-o, --output <output>',
+    'Output PPTX file path (required when <workspace> is a .pptx file; optional for workspace directories)'
+  )
   .action(async (workspace, selector, size, options) => {
     try {
       await setFontSizeCommand(workspace, selector, size, options)
@@ -185,10 +191,13 @@ setCmd
 program
   .command('replace')
   .description('Replace text globally')
-  .argument('<workspace>', 'Workspace directory')
+  .argument('<workspace>', 'Workspace directory or PPTX file path')
   .argument('<search>', 'Text to search for')
   .argument('<replace>', 'Text to replace with')
-  .option('-o, --output <output>', 'Output PPTX file path')
+  .option(
+    '-o, --output <output>',
+    'Output PPTX file path (required when <workspace> is a .pptx file; optional for workspace directories)'
+  )
   .option('--slide <slide>', 'Limit to specific slide', parseInt)
   .option('--regex', 'Use regex matching')
   .action(async (workspace, search, replace, options) => {

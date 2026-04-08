@@ -73,6 +73,11 @@ layout[path=ppt/slideLayouts/slideLayout1.xml]  # Layout by path
 deckuse set text ./company.deck "slide:3/title" "2026 Strategy"
 ```
 
+**Write commands and `-o/--output`**
+
+- If `<workspace>` is a **workspace directory** (e.g. `./company.deck`), write commands will **modify the workspace only**. `-o` is **optional** and will export a PPTX if provided.
+- If `<workspace>` is a **.pptx file path**, write commands require `-o` and will export the modified PPTX to that path (no `init` needed).
+
 **5. Build PPTX**
 
 ```bash
@@ -87,7 +92,14 @@ deckuse commit ./company.deck --output output.pptx
 Task = “Replace all 2025 with 2026”
 
 ```bash
-deckuse replace text ./deck "2025" "2026" -o output.pptx
+deckuse replace ./deck "2025" "2026"
+deckuse commit ./deck -o output.pptx
+```
+
+Or directly on a PPTX (no init, requires `-o`):
+
+```bash
+deckuse replace ./file.pptx "2025" "2026" -o output.pptx
 ```
 
 ---
