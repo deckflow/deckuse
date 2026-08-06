@@ -1,0 +1,133 @@
+import { err, ok, type AtomicCommand, type Diagnostic, type Result } from '@deckuse/core';
+import type { OpcArchive } from '@deckuse/opc';
+import type { Document, Element } from '@xmldom/xmldom';
+import { addElement, duplicateElement, setColor, updateChart } from './elements.js';
+import { findIndexed } from './indexer.js';
+import { addSlide, duplicateSlide, removeSlide } from './slides.js';
+import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
+import { attr, cNvPr, descendants, first, root, setNodeText } from './xml.js';
+const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
+  if (['slide', 'notes', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
+  if (item.kind === 'tableCell') {
+    const rawTableId = item.location?.['tableId'],
+      tableId = typeof rawTableId === 'string' ? rawTableId : '',
+      tableTail = tableId.split('.').at(-1),
+      table = descendants(doc).find((n) => attr(cNvPr(n), 'id') === tableTail);
+    if (!table) return;
+    const row = descendants(table, 'tr')[Number(item.location?.['row'])];
+    return row ? descendants(row, 'tc')[Number(item.location?.['column'])] : undefined;
+  }
+  const tail = item.ref.elementId?.split('.').at(-1);
+  return descendants(doc).find((n) => attr(cNvPr(n), 'id') === tail);
+};
+const transform = (node: Element, t: Record<string, unknown>): void => {
+  const x = first(node, 'xfrm');
+  if (!x) throw new Error('Element has no transform');
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  let off = first(x, 'off');
+  if (!off) {
+    off = doc.createElementNS(x.namespaceURI, 'a:off');
+    x.appendChild(off);
+  }
+  let ext = first(x, 'ext');
+  if (!ext) {
+    ext = doc.createElementNS(x.namespaceURI, 'a:ext');
+    x.appendChild(ext);
+  }
+  for (const [element, key, input, scale] of [
+    [off, 'x', 'x', 1],
+    [off, 'y', 'y', 1],
+    [ext, 'cx', 'width', 1],
+    [ext, 'cy', 'height', 1],
+    [x, 'rot', 'rotation', 60000],
+  ] as const)
+    if (typeof t[input] === 'number')
+      element.setAttribute(key, String(Math.round(t[input] * scale)));
+};
+export async function mutate(
+  command: AtomicCommand,
+  archive: OpcArchive,
+  index: IndexFile,
+): Promise<Result<MutationOutcome>> {
+  const ref = command.type === 'add' ? command.parent : command.ref;
+  if (ref.revision && ref.revision !== index.revision)
+    return err(
+      'TRANSACTION_CONFLICT',
+      `Expected revision ${ref.revision}, current ${index.revision}`,
+    );
+  const item = findIndexed(index, ref);
+  if (!item) return err('ELEMENT_NOT_FOUND', 'Element reference was not found');
+  const diagnostics: Diagnostic[] = [];
+  if (item.kind === 'slide') {
+    if (command.type === 'remove') {
+      removeSlide(archive, item.partUri);
+      return ok({ changed: true });
+    }
+    if (command.type === 'duplicate') {
+      return ok({
+        changed: true,
+        partUri: duplicateSlide(archive, item.partUri),
+      } as MutationOutcome);
+    }
+    if (command.type === 'add') {
+      const rawKind = command.element['kind'] ?? command.element['type'];
+      if (rawKind === 'slide') {
+        const template =
+            typeof command.element['templatePart'] === 'string'
+              ? command.element['templatePart']
+              : undefined,
+          layout =
+            typeof command.element['layoutPart'] === 'string'
+              ? command.element['layoutPart']
+              : undefined;
+        return ok({ changed: true, partUri: addSlide(archive, template, layout) });
+      }
+    }
+  }
+  const doc = archive.readXml(item.partUri),
+    node = nodeFor(doc, item);
+  if (!node)
+    return err(
+      'ELEMENT_NOT_FOUND',
+      `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
+    );
+  if (command.type === 'setText') {
+    if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
+      const result = updateChart(archive, item.payload['chartPart'], { title: command.text });
+      if (result.workbook)
+        diagnostics.push({
+          severity: 'warning',
+          code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
+          message: 'Chart cache changed; embedded workbook was not modified',
+        });
+    } else setNodeText(node, command.text);
+  } else if (command.type === 'setTransform') transform(node, command.transform);
+  else if (command.type === 'setProperties') {
+    if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
+      const result = updateChart(archive, item.payload['chartPart'], command.properties);
+      if (result.workbook)
+        diagnostics.push({
+          severity: 'warning',
+          code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
+          message: 'Chart cache changed; embedded workbook was not modified',
+        });
+    } else {
+      const color = command.properties['color'];
+      if (typeof color === 'string') {
+        const from =
+          typeof command.properties['from'] === 'string' ? command.properties['from'] : '';
+        setColor(node, from, color);
+      }
+      if (typeof command.properties['text'] === 'string')
+        setNodeText(node, command.properties['text']);
+    }
+  } else if (command.type === 'remove') node.parentNode?.removeChild(node);
+  else if (command.type === 'duplicate') duplicateElement(doc, node);
+  else {
+    const parent = item.kind === 'slide' ? (first(doc, 'spTree') ?? node) : node;
+    await addElement(archive, item.partUri, doc, parent, command.element);
+  }
+  archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
+  return ok({ changed: true, diagnostics }, diagnostics);
+}

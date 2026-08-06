@@ -1,0 +1,25 @@
+{
+  "name": "@deckuse/docx",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "@deckuse/core": "workspace:*"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

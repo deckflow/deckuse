@@ -1,0 +1,27 @@
+{
+  "name": "@deckuse/core",
+  "version": "0.0.0",
+  "type": "module",
+  "private": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema/command.json": "./schema/command.schema.json"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "dependencies": {
+    "zod": "latest"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
