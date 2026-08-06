@@ -1,8 +1,15 @@
-import { err, ok, type AtomicCommand, type Diagnostic, type Result } from '@deckuse/core';
+import {
+  err,
+  ok,
+  type AtomicCommand,
+  type Diagnostic,
+  type ElementRef,
+  type Result,
+} from '@deckuse/core';
 import type { OpcArchive } from '@deckuse/opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { addElement, duplicateElement, setColor, updateChart } from './elements.js';
-import { findIndexed } from './indexer.js';
+import { findIndexed, matchesSelector } from './indexer.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import { attr, cNvPr, descendants, first, root, setNodeText } from './xml.js';
@@ -17,7 +24,14 @@ const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
     const row = descendants(table, 'tr')[Number(item.location?.['row'])];
     return row ? descendants(row, 'tc')[Number(item.location?.['column'])] : undefined;
   }
-  const tail = item.ref.elementId?.split('.').at(-1);
+  // elementId is `${slideId}:${ancestors.cNvPrId joined by .}`; cNvPr ids are the leaf only.
+  const raw = item.location?.['cNvPrId'];
+  const tail =
+    typeof raw === 'string'
+      ? raw
+      : item.ref.elementId?.includes(':')
+        ? item.ref.elementId.split(':').slice(1).join(':').split('.').at(-1)
+        : item.ref.elementId?.split('.').at(-1);
   return descendants(doc).find((n) => attr(cNvPr(n), 'id') === tail);
 };
 const transform = (node: Element, t: Record<string, unknown>): void => {
@@ -45,11 +59,79 @@ const transform = (node: Element, t: Record<string, unknown>): void => {
     if (typeof t[input] === 'number')
       element.setAttribute(key, String(Math.round(t[input] * scale)));
 };
+const writeText = (
+  archive: OpcArchive,
+  item: IndexedElement,
+  text: string,
+  diagnostics: Diagnostic[],
+): Result<void> => {
+  if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
+    const result = updateChart(archive, item.payload['chartPart'], { title: text });
+    if (result.workbook)
+      diagnostics.push({
+        severity: 'warning',
+        code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
+        message: 'Chart cache changed; embedded workbook was not modified',
+      });
+    return ok(undefined, diagnostics);
+  }
+  const doc = archive.readXml(item.partUri),
+    node = nodeFor(doc, item);
+  if (!node)
+    return err(
+      'ELEMENT_NOT_FOUND',
+      `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
+    );
+  setNodeText(node, text);
+  archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
+  return ok(undefined, diagnostics);
+};
+const applyReplaceText = (
+  command: Extract<AtomicCommand, { type: 'replaceText' }>,
+  archive: OpcArchive,
+  index: IndexFile,
+): Result<MutationOutcome> => {
+  if (command.regex) {
+    try {
+      new RegExp(command.find, 'u');
+    } catch (cause) {
+      return err(
+        'INVALID_COMMAND',
+        cause instanceof Error ? cause.message : 'Invalid replaceText regex',
+      );
+    }
+  }
+  const matches = (text: string): boolean =>
+    command.regex ? new RegExp(command.find, 'u').test(text) : text.includes(command.find);
+  const replaced = (text: string): string =>
+    command.regex
+      ? text.replace(new RegExp(command.find, 'gu'), command.replace)
+      : text.split(command.find).join(command.replace);
+  const candidates = index.elements.filter(
+    (item) =>
+      Boolean(item.text?.length) &&
+      (!command.selector || matchesSelector(item, command.selector)) &&
+      matches(item.text ?? ''),
+  );
+  const limit = command.limit ?? 1000;
+  const selected = candidates.slice(0, limit);
+  const diagnostics: Diagnostic[] = [];
+  const refs: ElementRef[] = [];
+  for (const item of selected) {
+    const next = replaced(item.text ?? '');
+    if (next === item.text) continue;
+    const written = writeText(archive, item, next, diagnostics);
+    if (!written.ok) return written;
+    refs.push(item.ref);
+  }
+  return ok({ changed: refs.length > 0, matched: refs.length, refs, diagnostics }, diagnostics);
+};
 export async function mutate(
   command: AtomicCommand,
   archive: OpcArchive,
   index: IndexFile,
 ): Promise<Result<MutationOutcome>> {
+  if (command.type === 'replaceText') return applyReplaceText(command, archive, index);
   const ref = command.type === 'add' ? command.parent : command.ref;
   if (ref.revision && ref.revision !== index.revision)
     return err(
@@ -68,7 +150,7 @@ export async function mutate(
       return ok({
         changed: true,
         partUri: duplicateSlide(archive, item.partUri),
-      } as MutationOutcome);
+      });
     }
     if (command.type === 'add') {
       const rawKind = command.element['kind'] ?? command.element['type'];

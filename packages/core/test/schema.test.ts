@@ -22,6 +22,29 @@ describe('command schema', () => {
   });
   it('exposes draft 2020-12 JSON schema', () => {
     expect(commandJsonSchema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect(commandJsonSchema.oneOf).toHaveLength(13);
+    expect(commandJsonSchema.oneOf).toHaveLength(14);
+  });
+  it('parses replaceText and commit overwrite', () => {
+    expect(
+      commandSchema.parse({
+        version: '1.0',
+        type: 'replaceText',
+        workspaceId: 'w',
+        transactionId: 'tx',
+        find: '季度',
+        replace: 'Quarter',
+        regex: false,
+        selector: 'hasText=true',
+      }).type,
+    ).toBe('replaceText');
+    expect(
+      commandSchema.parse({
+        version: '1.0',
+        type: 'commit',
+        workspaceId: 'w',
+        transactionId: 'tx',
+        overwrite: true,
+      }).overwrite,
+    ).toBe(true);
   });
 });

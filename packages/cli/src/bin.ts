@@ -71,7 +71,8 @@ try {
       );
     } else if (action === 'commit') {
       const workspace = clean[1];
-      if (!workspace) throw new Error('Usage: deckuse commit workspace/ -o output.pptx');
+      if (!workspace) throw new Error('Usage: deckuse commit workspace/ -o output.pptx [--force]');
+      const force = clean.includes('--force') || clean.includes('-f');
       ok = await execute({
         version: '1.0',
         type: 'commit',
@@ -80,6 +81,7 @@ try {
         ...(option('-o') || option('--output')
           ? { destination: option('-o') ?? option('--output') }
           : {}),
+        ...(force ? { overwrite: true } : {}),
       });
     } else if (action === 'apply') {
       const workspace = clean[1],

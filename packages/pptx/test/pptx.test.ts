@@ -319,4 +319,114 @@ describe('pptx adapter', () => {
       '99',
     );
   });
+  it('queries with *, hasText, text~, replaceText, and commit overwrite', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-replace-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace'),
+      out = join(root, 'out.pptx');
+    await fixture(source);
+    expect(
+      (
+        await pptxAdapter.init(
+          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          {},
+        )
+      ).ok,
+    ).toBe(true);
+    const all = await pptxAdapter.execute(
+      { version: '1.0', type: 'query', workspaceId: workspace, selector: '*', limit: 1000 },
+      {},
+    );
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+    expect((all.value as unknown[]).length).toBeGreaterThan(3);
+    const withText = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'hasText=true',
+        limit: 1000,
+      },
+      {},
+    );
+    expect(withText.ok).toBe(true);
+    if (!withText.ok) return;
+    const textItems = withText.value as Array<{ text?: string }>;
+    expect(textItems.length).toBeGreaterThan(0);
+    expect(textItems.every((item) => Boolean(item.text?.length))).toBe(true);
+    const hello = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'text~=^Hello$',
+        limit: 10,
+      },
+      {},
+    );
+    expect(hello.ok).toBe(true);
+    if (!hello.ok) return;
+    expect(hello.value).toHaveLength(1);
+    const rev = (
+      (
+        await pptxAdapter.execute(
+          { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+          {},
+        )
+      ).value as { document: { revision: string } }
+    ).document.revision;
+    const replaced = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'replaceText',
+        workspaceId: workspace,
+        transactionId: rev,
+        find: 'Hello',
+        replace: 'Bonjour',
+        selector: 'kind=textbox',
+      },
+      {},
+    );
+    expect(replaced, JSON.stringify(replaced)).toMatchObject({
+      ok: true,
+      value: { matched: 1, changed: true },
+    });
+    const newRev = (replaced.value as { revision: string }).revision;
+    const firstCommit = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'commit',
+        workspaceId: workspace,
+        transactionId: newRev,
+        destination: out,
+      },
+      {},
+    );
+    expect(firstCommit.ok).toBe(true);
+    const blocked = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'commit',
+        workspaceId: workspace,
+        transactionId: newRev,
+        destination: out,
+      },
+      {},
+    );
+    expect(blocked.ok).toBe(false);
+    const forced = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'commit',
+        workspaceId: workspace,
+        transactionId: newRev,
+        destination: out,
+        overwrite: true,
+      },
+      {},
+    );
+    expect(forced.ok).toBe(true);
+    expect(await readFile(out)).toBeTruthy();
+  });
 });

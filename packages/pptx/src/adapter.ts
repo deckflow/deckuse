@@ -19,13 +19,16 @@ import {
   readManifest,
   revision,
 } from './workspace.js';
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 export const pptxCapabilities = {
   slides: { add: true, duplicate: true, remove: true },
   elements: ['shape', 'textbox', 'connector', 'group', 'picture', 'table', 'chart'],
   pictureInput: ['base64', 'path'],
   chart: { title: true, seriesCache: true, embeddedWorkbook: false },
   properties: { text: true, srgbClr: true },
+  query: { matchAll: ['*', 'all'], textRegex: true, hasText: true },
+  text: { setText: true, replaceText: true },
+  commit: { overwrite: true },
   preservation: 'unknown parts and untouched XML are preserved; ZIP entries are recompressed',
 } as const;
 export const pptxAdapter: FormatAdapter = {
@@ -127,11 +130,13 @@ export const pptxAdapter: FormatAdapter = {
           command.destination ??
             join(dirname(manifest.source), `${basename(manifest.source, '.pptx')}.deckuse.pptx`),
         );
-        try {
-          await readFile(destination);
-          return err('IO_ERROR', `Destination exists: ${destination}`);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        if (!command.overwrite) {
+          try {
+            await readFile(destination);
+            return err('IO_ERROR', `Destination exists: ${destination}`);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          }
         }
         await mkdir(dirname(destination), { recursive: true });
         const temp = `${destination}.${randomUUID()}.tmp`;

@@ -31,5 +31,8 @@ export interface IndexFile {
 }
 export interface MutationOutcome {
   changed: boolean;
+  matched?: number;
+  refs?: ElementRef[];
+  partUri?: string;
   diagnostics?: import('@deckuse/core').Diagnostic[];
 }

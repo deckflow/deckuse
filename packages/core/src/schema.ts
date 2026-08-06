@@ -76,6 +76,20 @@ const initCommandSchema = z
     options: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+const selectorObjectSchema = z
+  .object({
+    kind: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    textRegex: z.string().min(1).optional(),
+    id: z.string().min(1).optional(),
+    slide: z.string().min(1).optional(),
+    hasText: z.boolean().optional(),
+  })
+  .strict();
+export const selectorSchema = z.union([z.string().min(1), selectorObjectSchema]);
+export type Selector = z.infer<typeof selectorSchema>;
+
 const inspectCommandSchema = z
   .object({
     ...commandBase,
@@ -90,18 +104,7 @@ const queryCommandSchema = z
     ...commandBase,
     type: z.literal('query'),
     workspaceId: z.string().min(1),
-    selector: z.union([
-      z.string().min(1),
-      z
-        .object({
-          kind: z.string().min(1).optional(),
-          name: z.string().min(1).optional(),
-          text: z.string().min(1).optional(),
-          id: z.string().min(1).optional(),
-          slide: z.string().min(1).optional(),
-        })
-        .strict(),
-    ]),
+    selector: selectorSchema,
     limit: z.number().int().positive().max(10000).default(100),
   })
   .strict();
@@ -120,6 +123,18 @@ const setTextCommandSchema = z
     type: z.literal('setText'),
     ref: elementRefSchema,
     text: z.string(),
+  })
+  .strict();
+const replaceTextCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('replaceText'),
+    find: z.string().min(1),
+    replace: z.string(),
+    regex: z.boolean().optional(),
+    selector: selectorSchema.optional(),
+    limit: z.number().int().positive().max(10000).optional(),
   })
   .strict();
 const setPropertiesCommandSchema = z
@@ -169,6 +184,7 @@ const commitCommandSchema = z
     workspaceId: z.string().min(1),
     transactionId: z.string().min(1),
     destination: z.string().min(1).optional(),
+    overwrite: z.boolean().optional(),
   })
   .strict();
 const validateCommandSchema = z
@@ -182,6 +198,7 @@ const validateCommandSchema = z
 
 export const atomicCommandSchema = z.discriminatedUnion('type', [
   setTextCommandSchema,
+  replaceTextCommandSchema,
   setTransformCommandSchema,
   setPropertiesCommandSchema,
   addCommandSchema,
@@ -205,6 +222,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   queryCommandSchema,
   getTextCommandSchema,
   setTextCommandSchema,
+  replaceTextCommandSchema,
   setTransformCommandSchema,
   setPropertiesCommandSchema,
   addCommandSchema,

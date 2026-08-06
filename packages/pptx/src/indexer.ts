@@ -187,11 +187,14 @@ export function matchesSelector(
         kind?: string | undefined;
         name?: string | undefined;
         text?: string | undefined;
+        textRegex?: string | undefined;
         id?: string | undefined;
         slide?: string | undefined;
+        hasText?: boolean | string | undefined;
       },
 ): boolean {
-  const spec: Record<string, string | undefined> =
+  if (typeof selector === 'string' && (selector === '*' || selector === 'all')) return true;
+  const spec: Record<string, string | boolean | undefined> =
     typeof selector === 'string'
       ? selector.includes('=')
         ? Object.fromEntries(
@@ -202,19 +205,41 @@ export function matchesSelector(
           )
         : { any: selector }
       : selector;
+  if (spec['any'] === '*' || spec['any'] === 'all') return true;
   const contains = (actual: string | undefined, expected: string | undefined): boolean =>
     expected === undefined || (actual?.toLowerCase().includes(expected.toLowerCase()) ?? false);
+  const hasTextSpec = spec['hasText'];
+  if (hasTextSpec !== undefined) {
+    const want =
+      typeof hasTextSpec === 'boolean'
+        ? hasTextSpec
+        : !['0', 'false', 'no'].includes(hasTextSpec.toLowerCase());
+    if (Boolean(item.text?.length) !== want) return false;
+  }
+  const textRegex =
+    typeof spec['textRegex'] === 'string'
+      ? spec['textRegex']
+      : typeof spec['text~'] === 'string'
+        ? spec['text~']
+        : undefined;
+  if (typeof textRegex === 'string') {
+    try {
+      if (!new RegExp(textRegex, 'u').test(item.text ?? '')) return false;
+    } catch {
+      return false;
+    }
+  }
   return (
-    contains(item.kind, spec['kind']) &&
-    contains(item.name, spec['name']) &&
-    contains(item.text, spec['text']) &&
-    contains(item.ref.elementId, spec['id']) &&
-    contains(item.slideId, spec['slide']) &&
+    contains(item.kind, typeof spec['kind'] === 'string' ? spec['kind'] : undefined) &&
+    contains(item.name, typeof spec['name'] === 'string' ? spec['name'] : undefined) &&
+    contains(item.text, typeof spec['text'] === 'string' ? spec['text'] : undefined) &&
+    contains(item.ref.elementId, typeof spec['id'] === 'string' ? spec['id'] : undefined) &&
+    contains(item.slideId, typeof spec['slide'] === 'string' ? spec['slide'] : undefined) &&
     contains(
       [item.kind, item.name, item.text, item.ref.elementId, item.slideId]
         .filter((value): value is string => value !== undefined)
         .join(' '),
-      spec['any'],
+      typeof spec['any'] === 'string' ? spec['any'] : undefined,
     )
   );
 }

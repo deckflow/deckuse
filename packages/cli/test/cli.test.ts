@@ -76,5 +76,7 @@ describe('deckuse CLI', () => {
     expect((await run(['validate', workspace, '--json'])).code).toBe(0);
     expect((await run(['commit', workspace, '-o', output, '--json'])).code).toBe(0);
     expect((await readFile(output)).length).toBeGreaterThan(0);
+    expect((await run(['commit', workspace, '-o', output, '--json'])).code).toBe(1);
+    expect((await run(['commit', workspace, '-o', output, '--force', '--json'])).code).toBe(0);
   });
 });
