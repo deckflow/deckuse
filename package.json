@@ -14,7 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "install:global": "node scripts/install-global.mjs",
-    "uninstall:global": "npm unlink -g @deckuse/cli",
+    "uninstall:global": "npm unlink -g @deckflow/deckuse",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "pnpm build && changeset publish"

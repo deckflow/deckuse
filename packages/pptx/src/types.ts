@@ -1,4 +1,4 @@
-import type { ElementRef } from '@deckuse/core';
+import type { ElementRef } from '@deckflow/deckuse-core';
 export type ElementKind =
   | 'slide'
   | 'shape'
@@ -34,5 +34,5 @@ export interface MutationOutcome {
   matched?: number;
   refs?: ElementRef[];
   partUri?: string;
-  diagnostics?: import('@deckuse/core').Diagnostic[];
+  diagnostics?: import('@deckflow/deckuse-core').Diagnostic[];
 }

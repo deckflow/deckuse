@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { OpcArchive } from '@deckuse/opc';
+import { OpcArchive } from '@deckflow/deckuse-opc';
 const encoder = new TextEncoder();
 async function fixture(path: string) {
   const archive = new OpcArchive();
@@ -43,7 +43,7 @@ const run = (
   stdin = '',
 ): Promise<{ code: number | null; stdout: string; stderr: string }> =>
   new Promise((done) => {
-    const child = spawn(process.execPath, [resolve('packages/cli/dist/bin.js'), ...args], {
+    const child = spawn(process.execPath, [resolve('packages/deckuse/dist/bin.js'), ...args], {
       cwd: resolve('.'),
     });
     let stdout = '',

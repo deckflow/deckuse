@@ -1,5 +1,5 @@
 {
-  "name": "@deckuse/cli",
+  "name": "@deckflow/deckuse",
   "version": "0.0.0",
   "type": "module",
   "private": false,
@@ -21,12 +21,12 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@deckuse/core": "workspace:*",
-    "@deckuse/pptx": "workspace:*",
-    "@deckuse/docx": "workspace:*",
-    "@deckuse/xlsx": "workspace:*",
-    "@deckuse/key": "workspace:*",
-    "@deckuse/numbers": "workspace:*"
+    "@deckflow/deckuse-core": "workspace:*",
+    "@deckflow/deckuse-pptx": "workspace:*",
+    "@deckflow/deckuse-docx": "workspace:*",
+    "@deckflow/deckuse-xlsx": "workspace:*",
+    "@deckflow/deckuse-key": "workspace:*",
+    "@deckflow/deckuse-numbers": "workspace:*"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -35,6 +35,6 @@
     "deckuse": "./dist/bin.js"
   },
   "devDependencies": {
-    "@deckuse/opc": "workspace:*"
+    "@deckflow/deckuse-opc": "workspace:*"
   }
 }

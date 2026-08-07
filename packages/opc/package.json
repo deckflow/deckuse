@@ -1,5 +1,5 @@
 {
-  "name": "@deckuse/opc",
+  "name": "@deckflow/deckuse-opc",
   "version": "0.0.0",
   "type": "module",
   "private": false,

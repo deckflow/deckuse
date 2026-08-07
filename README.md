@@ -59,7 +59,7 @@ deckuse commit ./ws -o deck.en.pptx --force --json
 - master/layout/theme 文本和 `srgbClr` 常见颜色修改（`setText` / `setProperties`）。
 - 未知 part 和未触碰节点保留；ZIP 会重新压缩，因此仅保证未修改 entry 的解压数据摘要一致。
 
-完整命令 schema 位于 `packages/core/schema/command.schema.json`，API 入口为 `@deckuse/core`、`@deckuse/opc` 与 `@deckuse/pptx`。
+完整命令 schema 位于 `packages/core/schema/command.schema.json`，API 入口为 `@deckflow/deckuse-core`、`@deckflow/deckuse-opc` 与 `@deckflow/deckuse-pptx`。
 
 ## 限制
 

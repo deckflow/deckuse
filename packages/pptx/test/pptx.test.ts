@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { OpcArchive } from '@deckuse/opc';
+import { OpcArchive } from '@deckflow/deckuse-opc';
 import { pptxAdapter } from '../src/index.js';
 const e = new TextEncoder();
 const CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';

@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import { OpcArchive, type OpcRelationship } from '@deckuse/opc';
+import { OpcArchive, type OpcRelationship } from '@deckflow/deckuse-opc';
 import { NS, REL, attr, descendants, first } from './xml.js';
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
 const nextNumber = (archive: OpcArchive, prefix: string): number =>

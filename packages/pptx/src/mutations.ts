@@ -5,8 +5,8 @@ import {
   type Diagnostic,
   type ElementRef,
   type Result,
-} from '@deckuse/core';
-import type { OpcArchive } from '@deckuse/opc';
+} from '@deckflow/deckuse-core';
+import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { addElement, duplicateElement, setColor, updateChart } from './elements.js';
 import { findIndexed, matchesSelector } from './indexer.js';

@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { WorkspaceManifest } from '@deckuse/core';
-import type { OpcArchive } from '@deckuse/opc';
+import type { WorkspaceManifest } from '@deckflow/deckuse-core';
+import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { IndexFile } from './types.js';
 export const packagePath = (workspace: string) => join(resolve(workspace), 'package.pptx');
 export const deckuseDir = (workspace: string) => join(resolve(workspace), '.deckuse');

@@ -1,5 +1,5 @@
 {
-  "name": "@deckuse/pptx",
+  "name": "@deckflow/deckuse-pptx",
   "version": "0.0.0",
   "type": "module",
   "private": false,
@@ -17,8 +17,8 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@deckuse/core": "workspace:*",
-    "@deckuse/opc": "workspace:*",
+    "@deckflow/deckuse-core": "workspace:*",
+    "@deckflow/deckuse-opc": "workspace:*",
     "@xmldom/xmldom": "latest"
   },
   "engines": {

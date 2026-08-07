@@ -5,7 +5,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/opc" },
     { "path": "./packages/pptx" },
-    { "path": "./packages/cli" },
+    { "path": "./packages/deckuse" },
     { "path": "./packages/docx" },
     { "path": "./packages/xlsx" },
     { "path": "./packages/key" },

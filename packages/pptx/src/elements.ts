@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { extname, posix } from 'node:path';
-import { OpcArchive, parseXml, type OpcRelationship } from '@deckuse/opc';
+import { OpcArchive, parseXml, type OpcRelationship } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import {
   NS,

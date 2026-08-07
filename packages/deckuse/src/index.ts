@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { AdapterRegistry, Executor, type Result } from '@deckuse/core';
-import { pptxAdapter } from '@deckuse/pptx';
-import { docxAdapter } from '@deckuse/docx';
-import { xlsxAdapter } from '@deckuse/xlsx';
-import { keyAdapter } from '@deckuse/key';
-import { numbersAdapter } from '@deckuse/numbers';
+import { AdapterRegistry, Executor, type Result } from '@deckflow/deckuse-core';
+import { pptxAdapter } from '@deckflow/deckuse-pptx';
+import { docxAdapter } from '@deckflow/deckuse-docx';
+import { xlsxAdapter } from '@deckflow/deckuse-xlsx';
+import { keyAdapter } from '@deckflow/deckuse-key';
+import { numbersAdapter } from '@deckflow/deckuse-numbers';
 export const createDefaultExecutor = (): Executor =>
   new Executor(
     new AdapterRegistry()

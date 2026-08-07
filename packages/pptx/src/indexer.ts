@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
-import type { ElementRef } from '@deckuse/core';
-import type { OpcArchive } from '@deckuse/opc';
+import type { ElementRef } from '@deckflow/deckuse-core';
+import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';

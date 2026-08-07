@@ -36,52 +36,52 @@ importers:
         specifier: latest
         version: 4.1.10(@types/node@26.1.2)(vite@8.2.0(@types/node@26.1.2))
 
-  packages/cli:
-    dependencies:
-      '@deckuse/core':
-        specifier: workspace:*
-        version: link:../core
-      '@deckuse/docx':
-        specifier: workspace:*
-        version: link:../docx
-      '@deckuse/key':
-        specifier: workspace:*
-        version: link:../key
-      '@deckuse/numbers':
-        specifier: workspace:*
-        version: link:../numbers
-      '@deckuse/pptx':
-        specifier: workspace:*
-        version: link:../pptx
-      '@deckuse/xlsx':
-        specifier: workspace:*
-        version: link:../xlsx
-    devDependencies:
-      '@deckuse/opc':
-        specifier: workspace:*
-        version: link:../opc
-
   packages/core:
     dependencies:
       zod:
         specifier: latest
         version: 4.4.3
 
+  packages/deckuse:
+    dependencies:
+      '@deckflow/deckuse-core':
+        specifier: workspace:*
+        version: link:../core
+      '@deckflow/deckuse-docx':
+        specifier: workspace:*
+        version: link:../docx
+      '@deckflow/deckuse-key':
+        specifier: workspace:*
+        version: link:../key
+      '@deckflow/deckuse-numbers':
+        specifier: workspace:*
+        version: link:../numbers
+      '@deckflow/deckuse-pptx':
+        specifier: workspace:*
+        version: link:../pptx
+      '@deckflow/deckuse-xlsx':
+        specifier: workspace:*
+        version: link:../xlsx
+    devDependencies:
+      '@deckflow/deckuse-opc':
+        specifier: workspace:*
+        version: link:../opc
+
   packages/docx:
     dependencies:
-      '@deckuse/core':
+      '@deckflow/deckuse-core':
         specifier: workspace:*
         version: link:../core
 
   packages/key:
     dependencies:
-      '@deckuse/core':
+      '@deckflow/deckuse-core':
         specifier: workspace:*
         version: link:../core
 
   packages/numbers:
     dependencies:
-      '@deckuse/core':
+      '@deckflow/deckuse-core':
         specifier: workspace:*
         version: link:../core
 
@@ -96,10 +96,10 @@ importers:
 
   packages/pptx:
     dependencies:
-      '@deckuse/core':
+      '@deckflow/deckuse-core':
         specifier: workspace:*
         version: link:../core
-      '@deckuse/opc':
+      '@deckflow/deckuse-opc':
         specifier: workspace:*
         version: link:../opc
       '@xmldom/xmldom':
@@ -108,7 +108,7 @@ importers:
 
   packages/xlsx:
     dependencies:
-      '@deckuse/core':
+      '@deckflow/deckuse-core':
         specifier: workspace:*
         version: link:../core
 

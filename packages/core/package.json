@@ -1,5 +1,5 @@
 {
-  "name": "@deckuse/core",
+  "name": "@deckflow/deckuse-core",
   "version": "0.0.0",
   "type": "module",
   "private": false,

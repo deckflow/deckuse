@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Build, deploy a self-contained @deckuse/cli tree, then globally link it.
- * Mimics `npm i -g @deckuse/cli` after publish, without needing registry versions.
+ * Build, deploy a self-contained @deckflow/deckuse tree, then globally link it.
+ * Mimics `npm i -g @deckflow/deckuse` after publish, without needing registry versions.
  */
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
@@ -25,7 +25,7 @@ function run(command, args, options = {}) {
 
 rmSync(target, { recursive: true, force: true });
 run('pnpm', ['build']);
-run('pnpm', ['--filter', '@deckuse/cli', 'deploy', '--prod', '--legacy', target]);
+run('pnpm', ['--filter', '@deckflow/deckuse', 'deploy', '--prod', '--legacy', target]);
 // link (not install -g): keeps the deploy node_modules with workspace packages resolved,
 // and --force overwrites an existing global `deckuse` bin if present.
 run('npm', ['link', '--force'], { cwd: target });
@@ -36,5 +36,5 @@ if (deckusePath) {
   console.log(`\nGlobal deckuse ready: ${deckusePath}`);
   console.log('Try: deckuse init input.pptx ./workspace --json');
 } else {
-  console.log('\nLinked @deckuse/cli globally; ensure your npm global bin is on PATH.');
+  console.log('\nLinked @deckflow/deckuse globally; ensure your npm global bin is on PATH.');
 }

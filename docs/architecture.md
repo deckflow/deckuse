@@ -1,6 +1,6 @@
 # Deckuse architecture
 
-Deckuse is a schema-first document automation monorepo. `@deckuse/core` owns the versioned wire contract, validation, results, diagnostics, adapter registry, and dispatch. Format packages implement `FormatAdapter`; the CLI is only a JSON-in/JSON-out transport and does not define a second contract.
+Deckuse is a schema-first document automation monorepo. `@deckflow/deckuse-core` owns the versioned wire contract, validation, results, diagnostics, adapter registry, and dispatch. Format packages implement `FormatAdapter`; the CLI is only a JSON-in/JSON-out transport and does not define a second contract.
 
 ## Canonical model: OOXML plus derived indexes
 

@@ -1,5 +1,5 @@
 {
-  "name": "@deckuse/xlsx",
+  "name": "@deckflow/deckuse-xlsx",
   "version": "0.0.0",
   "type": "module",
   "private": true,
@@ -17,7 +17,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@deckuse/core": "workspace:*"
+    "@deckflow/deckuse-core": "workspace:*"
   },
   "engines": {
     "node": ">=24.0.0"

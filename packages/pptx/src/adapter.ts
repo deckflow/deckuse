@@ -7,8 +7,8 @@ import {
   type Diagnostic,
   type FormatAdapter,
   type WorkspaceManifest,
-} from '@deckuse/core';
-import { OpcArchive } from '@deckuse/opc';
+} from '@deckflow/deckuse-core';
+import { OpcArchive } from '@deckflow/deckuse-opc';
 import { buildIndex, findIndexed, matchesSelector } from './indexer.js';
 import { mutate } from './mutations.js';
 import {
