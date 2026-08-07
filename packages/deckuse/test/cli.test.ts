@@ -54,6 +54,25 @@ const run = (
     child.stdin.end(stdin);
   });
 describe('deckuse CLI', () => {
+  it('provides version and progressive command help', async () => {
+    const version = await run(['-V']);
+    expect(version).toMatchObject({ code: 0, stderr: '' });
+    expect(version.stdout).toBe('deckuse 0.0.0\n');
+
+    const help = await run(['--help']);
+    expect(help).toMatchObject({ code: 0, stderr: '' });
+    expect(help.stdout).toContain('usage: deckuse <command>');
+    expect(help.stdout).toContain('deckuse <command> --help');
+
+    const commitHelp = await run(['commit', '--help']);
+    expect(commitHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(commitHelp.stdout).toContain('usage: deckuse commit <workspace>');
+    expect(commitHelp.stdout).toContain('--force');
+
+    const helpAlias = await run(['help', 'apply']);
+    expect(helpAlias).toMatchObject({ code: 0, stderr: '' });
+    expect(helpAlias.stdout).toContain('usage: deckuse apply <workspace>');
+  });
   it('runs human init, inspect, apply, validate and commit commands', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),
       source = join(root, 'source.pptx'),
