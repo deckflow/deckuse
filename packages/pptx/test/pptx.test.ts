@@ -429,4 +429,81 @@ describe('pptx adapter', () => {
     expect(forced.ok).toBe(true);
     expect(await readFile(out)).toBeTruthy();
   });
+  it('setProperties applies fill, stroke, and text styles', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-props-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    expect(
+      (
+        await pptxAdapter.init(
+          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          {},
+        )
+      ).ok,
+    ).toBe(true);
+    const inspected = await pptxAdapter.execute(
+      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const value = inspected.value as {
+      document: { revision: string };
+      elements: Array<{
+        name?: string;
+        ref: { documentId: string; elementId?: string; path?: string; revision?: string };
+      }>;
+    };
+    const title = value.elements.find((item) => item.name === 'Title');
+    expect(title).toBeDefined();
+    if (!title) return;
+    const updated = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: value.document.revision,
+        ref: title.ref,
+        properties: {
+          border: { color: '0000FF', width: 2 },
+          fill: 'FFEEEE',
+          textColor: '003300',
+          fontSize: 20,
+          bold: true,
+          name: 'Styled Title',
+        },
+      },
+      {},
+    );
+    expect(updated, JSON.stringify(updated)).toMatchObject({ ok: true });
+    const rejected = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: (updated.value as { revision: string }).revision,
+        ref: {
+          documentId: title.ref.documentId,
+          elementId: title.ref.elementId,
+        },
+        properties: { glow: true },
+      },
+      {},
+    );
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) expect(rejected.error.code).toBe('INVALID_COMMAND');
+    const xml = new TextDecoder().decode(
+      (await OpcArchive.openFile(join(workspace, 'package.pptx'))).getPart(
+        '/ppt/slides/slide1.xml',
+      )!.data,
+    );
+    expect(xml).toContain('name="Styled Title"');
+    expect(xml).toContain('<a:srgbClr val="0000FF"/>');
+    expect(xml).toContain('<a:srgbClr val="FFEEEE"/>');
+    expect(xml).toContain('<a:srgbClr val="003300"/>');
+    expect(xml).toContain('w="25400"');
+    expect(xml).toContain('sz="2000"');
+    expect(xml).toContain('b="1"');
+  });
 });

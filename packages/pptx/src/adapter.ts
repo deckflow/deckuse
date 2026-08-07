@@ -19,13 +19,32 @@ import {
   readManifest,
   revision,
 } from './workspace.js';
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
 export const pptxCapabilities = {
   slides: { add: true, duplicate: true, remove: true },
   elements: ['shape', 'textbox', 'connector', 'group', 'picture', 'table', 'chart'],
   pictureInput: ['base64', 'path'],
   chart: { title: true, seriesCache: true, embeddedWorkbook: false },
-  properties: { text: true, srgbClr: true },
+  properties: {
+    text: true,
+    name: true,
+    srgbClr: true,
+    fill: true,
+    stroke: true,
+    textColor: true,
+    fontFamily: true,
+    fontSize: true,
+    bold: true,
+    italic: true,
+    underline: true,
+    hidden: true,
+    aliases: {
+      stroke: ['border', 'outline', 'line'],
+      fontFamily: ['font', 'typeface'],
+      fontSize: ['size'],
+      textColor: ['fontColor'],
+    },
+  },
   query: { matchAll: ['*', 'all'], textRegex: true, hasText: true },
   text: { setText: true, replaceText: true },
   commit: { overwrite: true },

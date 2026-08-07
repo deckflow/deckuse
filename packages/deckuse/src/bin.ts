@@ -165,9 +165,10 @@ try {
     else if (isHelpCommand(command)) writeHelp(command);
     else throw new Error(`Unknown command: ${command}`);
   } else {
-    const action = clean[0]!;
+    const action = clean[0];
     let ok = true;
-    if (!isHelpCommand(action)) throw new Error(`Unknown command: ${action ?? '(missing)'}`);
+    if (!action || !isHelpCommand(action))
+      throw new Error(`Unknown command: ${action ?? '(missing)'}`);
     if (isHelpFlag(clean[1])) {
       writeHelp(action);
     } else if (action === 'init') {

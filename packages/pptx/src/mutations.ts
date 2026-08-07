@@ -8,8 +8,9 @@ import {
 } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
-import { addElement, duplicateElement, setColor, updateChart } from './elements.js';
+import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector } from './indexer.js';
+import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import { attr, cNvPr, descendants, first, root, setNodeText } from './xml.js';
@@ -187,7 +188,12 @@ export async function mutate(
   } else if (command.type === 'setTransform') transform(node, command.transform);
   else if (command.type === 'setProperties') {
     if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
-      const result = updateChart(archive, item.payload['chartPart'], command.properties);
+      const checked = assertChartProperties(command.properties);
+      if (!checked.ok) return checked;
+      const chartProps = { ...command.properties };
+      if (typeof chartProps['text'] === 'string' && chartProps['title'] === undefined)
+        chartProps['title'] = chartProps['text'];
+      const result = updateChart(archive, item.payload['chartPart'], chartProps);
       if (result.workbook)
         diagnostics.push({
           severity: 'warning',
@@ -195,14 +201,10 @@ export async function mutate(
           message: 'Chart cache changed; embedded workbook was not modified',
         });
     } else {
-      const color = command.properties['color'];
-      if (typeof color === 'string') {
-        const from =
-          typeof command.properties['from'] === 'string' ? command.properties['from'] : '';
-        setColor(node, from, color);
-      }
-      if (typeof command.properties['text'] === 'string')
-        setNodeText(node, command.properties['text']);
+      const applied = applyShapeProperties(node, command.properties);
+      if (!applied.ok) return applied;
+      if (applied.value.applied.length === 0)
+        return err('INVALID_COMMAND', 'setProperties requires at least one supported property');
     }
   } else if (command.type === 'remove') node.parentNode?.removeChild(node);
   else if (command.type === 'duplicate') duplicateElement(doc, node);

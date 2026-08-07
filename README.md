@@ -37,14 +37,14 @@ deckuse commit ./ws -o deck.en.pptx --force --json
 
 `query` selector：
 
-| 写法 | 含义 |
-|------|------|
-| `*` / `all` | 匹配全部元素 |
-| `kind=textbox` | 按 kind 子串匹配（大小写不敏感） |
-| `text=季度` | 文本包含 |
-| `text~=正则` | 文本正则（`u` flag） |
-| `hasText=true` | 仅有文本的元素 |
-| `slide=256` / `id=256:10` / `name=Title` | 其它字段过滤；空格连接为 AND |
+| 写法                                     | 含义                             |
+| ---------------------------------------- | -------------------------------- |
+| `*` / `all`                              | 匹配全部元素                     |
+| `kind=textbox`                           | 按 kind 子串匹配（大小写不敏感） |
+| `text=季度`                              | 文本包含                         |
+| `text~=正则`                             | 文本正则（`u` flag）             |
+| `hasText=true`                           | 仅有文本的元素                   |
+| `slide=256` / `id=256:10` / `name=Title` | 其它字段过滤；空格连接为 AND     |
 
 ## PPTX 能力
 
@@ -57,7 +57,27 @@ deckuse commit ./ws -o deck.en.pptx --force --json
 - 表格单元格按 table ID、行、列稳定寻址；speaker notes 读取和文本修改。
 - chart 标题、系列名和数值 cache 修改。存在嵌入 workbook 时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` warning，workbook 不会被静默声称已同步。
 - master/layout/theme 文本和 `srgbClr` 常见颜色修改（`setText` / `setProperties`）。
+- `setProperties` 支持常见形状/文本属性：`fill`、`stroke`（别名 `border`/`outline`/`line`）、`textColor`、`fontFamily`、`fontSize`、`bold`/`italic`/`underline`、`name`、`hidden`；未知 key 会返回 `INVALID_COMMAND`。
 - 未知 part 和未触碰节点保留；ZIP 会重新压缩，因此仅保证未修改 entry 的解压数据摘要一致。
+
+#### setProperties 示例
+
+```json
+{
+  "type": "setProperties",
+  "ref": { "documentId": "./ws", "elementId": "256:8" },
+  "properties": {
+    "stroke": { "color": "0000FF", "width": 1.5 },
+    "fill": "none",
+    "textColor": "111111",
+    "fontSize": 18,
+    "fontFamily": "Noto Sans SC",
+    "bold": true
+  }
+}
+```
+
+`stroke` / `fill` 可用 hex 字符串，或 `none` / `false` / `null` 表示无描边/无填充。`stroke.width` 单位为 pt（默认 1）。
 
 完整命令 schema 位于 `packages/core/schema/command.schema.json`，API 入口为 `@deckflow/deckuse-core`、`@deckflow/deckuse-opc` 与 `@deckflow/deckuse-pptx`。
 
