@@ -3,6 +3,7 @@ import type { ElementRef } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
+import { mediaHref } from './workspace.js';
 import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';
 const classify = (node: Element): ElementKind | undefined =>
   node.localName === 'sp'
@@ -110,6 +111,30 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
                 }),
               );
           });
+        }
+        if (kind === 'picture') {
+          const blip = first(child, 'blip');
+          const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
+          const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
+          const rid = embed ?? link;
+          const rel = rid
+            ? archive.getRelationships(partUri).find((r) => r.id === rid)
+            : undefined;
+          if (rel) {
+            const mediaPart = rel.resolvedTarget ?? rel.target;
+            const external = Boolean(rel.external || (!embed && link));
+            indexed.payload = {
+              mediaPart,
+              href: external ? rel.target : mediaHref(documentId, mediaPart),
+              ...(external ? { external: true } : {}),
+              ...(!external && rel.resolvedTarget
+                ? {
+                    mediaType: archive.getPart(rel.resolvedTarget)?.mediaType,
+                    fileName: basename(rel.resolvedTarget),
+                  }
+                : {}),
+            };
+          }
         }
         if (kind === 'chart') {
           const crid =

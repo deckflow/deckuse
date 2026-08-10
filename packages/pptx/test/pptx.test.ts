@@ -299,6 +299,29 @@ describe('pptx adapter', () => {
       {},
     );
     expect(batch.ok).toBe(true);
+    const pictures = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'kind=picture',
+        limit: 10,
+      },
+      {},
+    );
+    expect(pictures.ok).toBe(true);
+    if (pictures.ok) {
+      const list = pictures.value as Array<{
+        name?: string;
+        payload?: { href?: string; mediaPart?: string; fileName?: string };
+      }>;
+      expect(list).toHaveLength(1);
+      expect(list[0]?.name).toBe('Pixel');
+      expect(list[0]?.payload?.mediaPart).toMatch(/^\/ppt\/media\/image\d+\./);
+      expect(list[0]?.payload?.href).toBeTruthy();
+      expect(list[0]?.payload?.fileName).toMatch(/^image\d+\./);
+      await expect(readFile(list[0]!.payload!.href!)).resolves.toBeInstanceOf(Buffer);
+    }
     const queried = await pptxAdapter.execute(
       {
         version: '1.0',

@@ -1,11 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { WorkspaceManifest } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { IndexFile } from './types.js';
 export const packagePath = (workspace: string) => join(resolve(workspace), 'package.pptx');
 export const deckuseDir = (workspace: string) => join(resolve(workspace), '.deckuse');
+export const mediaDir = (workspace: string) => join(deckuseDir(workspace), 'media');
+export const mediaHref = (workspace: string, mediaPart: string) =>
+  join(mediaDir(workspace), basename(mediaPart));
 export const manifestPath = (workspace: string) => join(deckuseDir(workspace), 'manifest.json');
 export const indexPath = (workspace: string) => join(deckuseDir(workspace), 'index.json');
 export const operationsPath = (workspace: string) =>
@@ -15,6 +18,16 @@ export const readManifest = async (workspace: string): Promise<WorkspaceManifest
   JSON.parse(await readFile(manifestPath(workspace), 'utf8')) as WorkspaceManifest;
 export const readIndex = async (workspace: string): Promise<IndexFile> =>
   JSON.parse(await readFile(indexPath(workspace), 'utf8')) as IndexFile;
+const extractMedia = async (workspace: string, archive: OpcArchive): Promise<void> => {
+  const dir = mediaDir(workspace);
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
+  await Promise.all(
+    [...archive.parts.values()]
+      .filter((part) => part.name.startsWith('/ppt/media/'))
+      .map((part) => writeFile(join(dir, basename(part.name)), part.data)),
+  );
+};
 export async function persist(
   workspace: string,
   archive: OpcArchive,
@@ -50,6 +63,7 @@ export async function persist(
     await rename(packageTmp, packagePath(workspace));
     await rename(indexTmp, indexPath(workspace));
     await rename(manifestTmp, manifestPath(workspace));
+    await extractMedia(workspace, archive);
     if (operation)
       await writeFile(
         operationsPath(workspace),
