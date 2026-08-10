@@ -529,4 +529,179 @@ describe('pptx adapter', () => {
     expect(xml).toContain('sz="2000"');
     expect(xml).toContain('b="1"');
   });
+  it('replacePicture keeps identity and remove cleans unreferenced media', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-picture-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    expect(
+      (
+        await pptxAdapter.init(
+          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          {},
+        )
+      ).ok,
+    ).toBe(true);
+    const inspected = await pptxAdapter.execute(
+      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const value = inspected.value as {
+      document: { revision: string };
+      elements: Array<{
+        kind: string;
+        ref: { documentId: string; elementId?: string; path?: string; revision?: string };
+      }>;
+    };
+    const slide = value.elements.find((x) => x.kind === 'slide');
+    expect(slide).toBeTruthy();
+    if (!slide) return;
+    const pixel =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const added = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'add',
+        workspaceId: workspace,
+        transactionId: value.document.revision,
+        parent: slide.ref,
+        element: { kind: 'picture', name: 'Pixel', base64: pixel, width: 100, height: 100 },
+      },
+      {},
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const pictures = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'kind=picture',
+        limit: 10,
+      },
+      {},
+    );
+    expect(pictures.ok).toBe(true);
+    if (!pictures.ok) return;
+    const picture = (pictures.value as Array<{
+      ref: { documentId: string; elementId?: string };
+      location?: { cNvPrId?: string };
+      payload?: { mediaPart?: string };
+    }>)[0];
+    expect(picture?.payload?.mediaPart).toBeTruthy();
+    const mediaPart = picture!.payload!.mediaPart!;
+    const before = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    const originalBytes = before.getPart(mediaPart)!.data.slice();
+    const replaced = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'replacePicture',
+        workspaceId: workspace,
+        transactionId: (added.value as { revision: string }).revision,
+        ref: picture!.ref,
+        base64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6aAAAAAElFTkSuQmCC',
+      },
+      {},
+    );
+    expect(replaced.ok).toBe(true);
+    if (!replaced.ok) return;
+    const afterReplace = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'kind=picture',
+        limit: 10,
+      },
+      {},
+    );
+    expect(afterReplace.ok).toBe(true);
+    if (!afterReplace.ok) return;
+    const nextPicture = (afterReplace.value as Array<{
+      ref: { documentId: string; elementId?: string };
+      location?: { cNvPrId?: string };
+      payload?: { mediaPart?: string };
+    }>)[0];
+    expect(nextPicture?.ref.elementId).toBe(picture!.ref.elementId);
+    expect(nextPicture?.location?.cNvPrId).toBe(picture!.location?.cNvPrId);
+    expect(nextPicture?.payload?.mediaPart).toBe(mediaPart);
+    const afterArchive = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    expect(Buffer.from(afterArchive.getPart(mediaPart)!.data).equals(Buffer.from(originalBytes))).toBe(
+      false,
+    );
+    const liveRef = {
+      documentId: nextPicture!.ref.documentId,
+      elementId: nextPicture!.ref.elementId,
+    };
+    const duplicated = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'duplicate',
+        workspaceId: workspace,
+        transactionId: (replaced.value as { revision: string }).revision,
+        ref: liveRef,
+      },
+      {},
+    );
+    expect(duplicated.ok).toBe(true);
+    if (!duplicated.ok) return;
+    const both = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'query',
+        workspaceId: workspace,
+        selector: 'kind=picture',
+        limit: 10,
+      },
+      {},
+    );
+    expect(both.ok).toBe(true);
+    if (!both.ok) return;
+    const list = both.value as Array<{
+      ref: { documentId: string; elementId?: string };
+      payload?: { mediaPart?: string };
+    }>;
+    expect(list).toHaveLength(2);
+    expect(list.every((item) => item.payload?.mediaPart === mediaPart)).toBe(true);
+    const firstRef = {
+      documentId: list[0]!.ref.documentId,
+      elementId: list[0]!.ref.elementId,
+    };
+    const secondRef = {
+      documentId: list[1]!.ref.documentId,
+      elementId: list[1]!.ref.elementId,
+    };
+    const removeOne = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'remove',
+        workspaceId: workspace,
+        transactionId: (duplicated.value as { revision: string }).revision,
+        ref: firstRef,
+      },
+      {},
+    );
+    expect(removeOne.ok).toBe(true);
+    if (!removeOne.ok) return;
+    expect(
+      (await OpcArchive.openFile(join(workspace, 'package.pptx'))).getPart(mediaPart),
+    ).toBeTruthy();
+    const removeTwo = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'remove',
+        workspaceId: workspace,
+        transactionId: (removeOne.value as { revision: string }).revision,
+        ref: secondRef,
+      },
+      {},
+    );
+    expect(removeTwo.ok).toBe(true);
+    expect(
+      (await OpcArchive.openFile(join(workspace, 'package.pptx'))).getPart(mediaPart),
+    ).toBeUndefined();
+  });
 });

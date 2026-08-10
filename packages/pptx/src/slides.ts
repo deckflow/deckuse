@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import { OpcArchive, type OpcRelationship } from '@deckflow/deckuse-opc';
+import { cleanupUnreferencedPart } from './picture.js';
 import { NS, REL, attr, descendants, first } from './xml.js';
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
 const nextNumber = (archive: OpcArchive, prefix: string): number =>
@@ -131,16 +132,14 @@ export function removeSlide(archive: OpcArchive, part: string): void {
   const targets = archive
     .getRelationships(part)
     .filter(
-      (r) => !r.external && r.resolvedTarget && (r.type === REL.chart || r.type === REL.notes),
+      (r) =>
+        !r.external &&
+        r.resolvedTarget &&
+        (r.type === REL.chart || r.type === REL.notes || r.type === REL.image),
     )
     .flatMap((r) => (r.resolvedTarget ? [r.resolvedTarget] : []));
   archive.deletePart(part);
-  for (const target of targets) {
-    const used = [...archive.relationships.values()].some((items) =>
-      items.some((r) => r.resolvedTarget === target),
-    );
-    if (!used) archive.deletePart(target);
-  }
+  for (const target of targets) cleanupUnreferencedPart(archive, target);
   archive.writeXml(
     '/ppt/presentation.xml',
     doc,

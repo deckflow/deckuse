@@ -165,6 +165,9 @@
       "$ref": "#/$defs/__schema17"
     },
     {
+      "$ref": "#/$defs/__schema18"
+    },
+    {
       "type": "object",
       "properties": {
         "version": {
@@ -195,7 +198,7 @@
           "maxItems": 1000,
           "type": "array",
           "items": {
-            "$ref": "#/$defs/__schema18"
+            "$ref": "#/$defs/__schema19"
           }
         }
       },
@@ -675,6 +678,49 @@
         },
         "type": {
           "type": "string",
+          "const": "replacePicture"
+        },
+        "ref": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base64": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "version",
+        "workspaceId",
+        "transactionId",
+        "type",
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "__schema18": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "requestId": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "dryRun": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "type": {
+          "type": "string",
           "const": "duplicate"
         },
         "ref": {
@@ -698,7 +744,7 @@
       ],
       "additionalProperties": false
     },
-    "__schema18": {
+    "__schema19": {
       "oneOf": [
         {
           "$ref": "#/$defs/__schema8"
@@ -720,6 +766,9 @@
         },
         {
           "$ref": "#/$defs/__schema17"
+        },
+        {
+          "$ref": "#/$defs/__schema18"
         }
       ]
     }

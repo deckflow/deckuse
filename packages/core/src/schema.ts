@@ -167,6 +167,16 @@ const addCommandSchema = z
 const removeCommandSchema = z
   .object({ ...commandBase, ...mutationBase, type: z.literal('remove'), ref: elementRefSchema })
   .strict();
+const replacePictureCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('replacePicture'),
+    ref: elementRefSchema,
+    path: z.string().min(1).optional(),
+    base64: z.string().min(1).optional(),
+  })
+  .strict();
 const duplicateCommandSchema = z
   .object({
     ...commandBase,
@@ -203,6 +213,7 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   setPropertiesCommandSchema,
   addCommandSchema,
   removeCommandSchema,
+  replacePictureCommandSchema,
   duplicateCommandSchema,
 ]);
 export type AtomicCommand = z.infer<typeof atomicCommandSchema>;
@@ -227,6 +238,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   setPropertiesCommandSchema,
   addCommandSchema,
   removeCommandSchema,
+  replacePictureCommandSchema,
   duplicateCommandSchema,
   batchCommandSchema,
   commitCommandSchema,

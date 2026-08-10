@@ -24,6 +24,7 @@ export const pptxCapabilities = {
   slides: { add: true, duplicate: true, remove: true },
   elements: ['shape', 'textbox', 'connector', 'group', 'picture', 'table', 'chart'],
   pictureInput: ['base64', 'path'],
+  picture: { replacePicture: true, cleanupUnreferencedMedia: true },
   chart: { title: true, seriesCache: true, embeddedWorkbook: false },
   properties: {
     text: true,

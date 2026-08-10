@@ -22,7 +22,7 @@ describe('command schema', () => {
   });
   it('exposes draft 2020-12 JSON schema', () => {
     expect(commandJsonSchema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect(commandJsonSchema.oneOf).toHaveLength(14);
+    expect(commandJsonSchema.oneOf).toHaveLength(15);
   });
   it('parses replaceText and commit overwrite', () => {
     expect(
@@ -46,5 +46,27 @@ describe('command schema', () => {
         overwrite: true,
       }).overwrite,
     ).toBe(true);
+  });
+  it('parses replacePicture with path or base64', () => {
+    expect(
+      commandSchema.parse({
+        version: '1.0',
+        type: 'replacePicture',
+        workspaceId: 'w',
+        transactionId: 'tx',
+        ref: { documentId: 'd', elementId: '256:4' },
+        path: '/tmp/a.png',
+      }).type,
+    ).toBe('replacePicture');
+    expect(
+      commandSchema.parse({
+        version: '1.0',
+        type: 'replacePicture',
+        workspaceId: 'w',
+        transactionId: 'tx',
+        ref: { documentId: 'd', elementId: '256:4' },
+        base64: 'iVBORw0KGgo=',
+      }).type,
+    ).toBe('replacePicture');
   });
 });

@@ -54,6 +54,8 @@ deckuse commit ./ws -o deck.en.pptx --force --json
 - `commit.overwrite` / CLI `--force`：允许覆盖已存在的输出文件。
 - 新增空白 slide、复制 slide、删除 slide。复制 slide 时克隆 notes/chart 可变 part，layout 和 media 可安全共享。
 - shape/textbox、connector、group、picture（文件路径或 base64）、table 的新增；元素文本、位置、删除和复制。
+- `replacePicture`：按 `path` 或 `base64` 原地替换 picture 的嵌入媒体，保留元素引用与图层顺序；扩展名不变时覆盖原 media part，变化时写入新 part 并清理未引用旧媒体。
+- 删除 picture 或 slide 时，会移除未再被引用的 image relationship / media part（共享媒体在仍有引用时保留）。
 - 表格单元格按 table ID、行、列稳定寻址；speaker notes 读取和文本修改。
 - chart 标题、系列名和数值 cache 修改。存在嵌入 workbook 时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` warning，workbook 不会被静默声称已同步。
 - master/layout/theme 文本和 `srgbClr` 常见颜色修改（`setText` / `setProperties`）。

@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises';
-import { extname, posix } from 'node:path';
-import { OpcArchive, parseXml, type OpcRelationship } from '@deckflow/deckuse-opc';
+import { OpcArchive, parseXml } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
+import { addPicturePart } from './picture.js';
 import {
   NS,
   REL,
@@ -33,53 +32,18 @@ const tableXml = (id: number, e: Record<string, unknown>) => {
   const cols = Math.max(1, ...rows.map((r) => r.length));
   return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${xfrm(e)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${String(Math.floor(num(e, 'width', 914400 * cols) / cols))}"/>`).join('')}</a:tblGrid>${rows.map((row) => `<a:tr h="370840">${Array.from({ length: cols }, (_, i) => `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${esc(typeof row[i] === 'string' ? row[i] : '')}</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc>`).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };
-const mediaType = (extension: string) =>
-  extension === '.png'
-    ? 'image/png'
-    : extension === '.gif'
-      ? 'image/gif'
-      : extension === '.jpg' || extension === '.jpeg'
-        ? 'image/jpeg'
-        : 'application/octet-stream';
-const nextMedia = (archive: OpcArchive, ext: string) => {
-  let n = 1;
-  while (archive.getPart(`/ppt/media/image${String(n)}${ext}`)) n++;
-  return `/ppt/media/image${String(n)}${ext}`;
-};
-const nextRid = (rels: readonly OpcRelationship[]) => {
-  let n = 1;
-  const ids = new Set(rels.map((r) => r.id));
-  while (ids.has(`rId${String(n)}`)) n++;
-  return `rId${String(n)}`;
-};
 async function pictureXml(
   archive: OpcArchive,
   slidePart: string,
   id: number,
   e: Record<string, unknown>,
 ): Promise<string> {
-  let data: Uint8Array;
-  let ext = '.png';
-  if (typeof e['path'] === 'string') {
-    data = await readFile(e['path']);
-    ext = extname(e['path']).toLowerCase() || ext;
-  } else if (typeof e['base64'] === 'string') {
-    data = Buffer.from(e['base64'].replace(/^data:[^,]+,/, ''), 'base64');
-    const match = /^data:image\/(png|jpeg|gif)/.exec(e['base64']);
-    if (match?.[1]) ext = match[1] === 'jpeg' ? '.jpg' : `.${match[1]}`;
-  } else throw new Error('Picture requires path or base64');
-  const target = nextMedia(archive, ext);
-  archive.setPart(target, data, mediaType(ext));
-  const rels = [...archive.getRelationships(slidePart)],
-    rid = nextRid(rels);
-  rels.push({
-    id: rid,
-    type: REL.image,
-    target: posix.relative(posix.dirname(slidePart), target),
-    external: false,
-    resolvedTarget: target,
+  const added = await addPicturePart(archive, slidePart, {
+    ...(typeof e['path'] === 'string' ? { path: e['path'] } : {}),
+    ...(typeof e['base64'] === 'string' ? { base64: e['base64'] } : {}),
   });
-  archive.setRelationships(slidePart, rels);
+  if (!added.ok) throw new Error(added.error.message);
+  const rid = added.value.rid;
   return `<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Picture ${String(id)}`))}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(e)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
 export async function addElement(

@@ -10,6 +10,11 @@ import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector } from './indexer.js';
+import {
+  detachPictureAndCleanup,
+  loadPictureBytes,
+  replacePictureMedia,
+} from './picture.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
@@ -206,8 +211,26 @@ export async function mutate(
       if (applied.value.applied.length === 0)
         return err('INVALID_COMMAND', 'setProperties requires at least one supported property');
     }
-  } else if (command.type === 'remove') node.parentNode?.removeChild(node);
-  else if (command.type === 'duplicate') duplicateElement(doc, node);
+  } else if (command.type === 'replacePicture') {
+    if (item.kind !== 'picture')
+      return err('INVALID_COMMAND', 'replacePicture requires a picture element');
+    const loaded = await loadPictureBytes({
+      ...(command.path !== undefined ? { path: command.path } : {}),
+      ...(command.base64 !== undefined ? { base64: command.base64 } : {}),
+    });
+    if (!loaded.ok) return loaded;
+    const replaced = replacePictureMedia(
+      archive,
+      item.partUri,
+      node,
+      loaded.value.data,
+      loaded.value.ext,
+    );
+    if (!replaced.ok) return replaced;
+  } else if (command.type === 'remove') {
+    if (item.kind === 'picture') detachPictureAndCleanup(archive, item.partUri, doc, node);
+    else node.parentNode?.removeChild(node);
+  } else if (command.type === 'duplicate') duplicateElement(doc, node);
   else {
     const parent = item.kind === 'slide' ? (first(doc, 'spTree') ?? node) : node;
     await addElement(archive, item.partUri, doc, parent, command.element);
