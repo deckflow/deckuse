@@ -38,11 +38,30 @@ export const textOf = (node: Node): string =>
   descendants(node, 't')
     .map((item) => item.textContent ?? '')
     .join('');
+const textContainer = (text: Element, boundary: Node): Element | undefined => {
+  let current: Node | null = text.parentNode;
+  while (current && current !== boundary) {
+    if (
+      current.nodeType === 1 &&
+      (current as Element).namespaceURI === NS.a &&
+      ['r', 'fld'].includes((current as Element).localName ?? '')
+    )
+      return current as Element;
+    current = current.parentNode;
+  }
+  return undefined;
+};
 export const setNodeText = (node: Node, text: string): void => {
-  const runs = descendants(node, 't');
-  if (runs[0]) {
-    runs[0].textContent = text;
-    for (const run of runs.slice(1)) run.parentNode?.removeChild(run);
+  const values = descendants(node, 't');
+  if (values[0]) {
+    values[0].textContent = text;
+    const staleContainers = new Set<Element>();
+    for (const value of values.slice(1)) {
+      const container = textContainer(value, node);
+      if (container) staleContainers.add(container);
+      else value.parentNode?.removeChild(value);
+    }
+    for (const container of staleContainers) container.parentNode?.removeChild(container);
     return;
   }
   const doc = node.ownerDocument;
