@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Strip Cursor agent attribution trailers from commit messages.
+set -euo pipefail
+
+msg_file=$1
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+# Remove Cursor attribution lines and collapse trailing blank lines.
+awk '
+  BEGIN { skip_blank = 0 }
+  /^[[:space:]]*Co-authored-by:[[:space:]]*Cursor[[:space:]]*<cursoragent@cursor\.com>[[:space:]]*$/ { next }
+  /^[[:space:]]*Made-with:[[:space:]]*Cursor[[:space:]]*$/ { next }
+  /^[[:space:]]*$/ { blank[++n] = $0; next }
+  {
+    for (i = 1; i <= n; i++) print blank[i]
+    n = 0
+    print
+  }
+  END {
+    # drop trailing blanks intentionally
+  }
+' "$msg_file" >"$tmp"
+
+mv "$tmp" "$msg_file"
+trap - EXIT

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# If Cursor injects attribution after commit-msg, strip it via amend.
+set -euo pipefail
+
+# Avoid infinite amend loops.
+if [[ "${STRIPPING_CURSOR_ATTRIBUTION:-}" == "1" ]]; then
+  exit 0
+fi
+
+msg=$(git log -1 --format=%B)
+if ! printf '%s\n' "$msg" | grep -Eq '^[[:space:]]*(Co-authored-by:[[:space:]]*Cursor[[:space:]]*<cursoragent@cursor\.com>|Made-with:[[:space:]]*Cursor)[[:space:]]*$'; then
+  exit 0
+fi
+
+cleaned=$(printf '%s\n' "$msg" | awk '
+  /^[[:space:]]*Co-authored-by:[[:space:]]*Cursor[[:space:]]*<cursoragent@cursor\.com>[[:space:]]*$/ { next }
+  /^[[:space:]]*Made-with:[[:space:]]*Cursor[[:space:]]*$/ { next }
+  /^[[:space:]]*$/ { blank[++n] = $0; next }
+  {
+    for (i = 1; i <= n; i++) print blank[i]
+    n = 0
+    print
+  }
+')
+
+export STRIPPING_CURSOR_ATTRIBUTION=1
+# Preserve authorship metadata from the just-created commit.
+GIT_COMMITTER_DATE=$(git log -1 --format=%cI) \
+  git commit --amend -F - --no-verify <<EOF
+${cleaned}
+EOF
