@@ -7,6 +7,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "build": "tsc -b && node scripts/generate-schema.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
