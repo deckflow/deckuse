@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -27,19 +27,13 @@ existing.pptx → init → inspect / query → apply JSON commands → validate 
 
 ## 설치
 
-요구 사항: Node.js 24 이상 및 pnpm 10.
+요구 사항: Node.js 18 이상.
 
 ```sh
-pnpm install
-pnpm install:global
+npm install -g @deckflow/deckuse
 ```
 
-두 번째 명령은 로컬 `deckuse` CLI를 전역 설치합니다. 저장소 개발 중에는 CLI를 다시 빌드한 후 이 명령을 다시 실행하세요.
-
-```sh
-pnpm build
-pnpm install:global
-```
+이 명령은 `deckuse` CLI를 전역으로 설치합니다.
 
 ```sh
 # 프레젠테이션에서 영구 작업 공간을 만듭니다.

@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -27,19 +27,13 @@ Il préserve autant que possible le XML intact et les parties inconnues du packa
 
 ## Installation
 
-Prérequis : Node.js 24 ou ultérieur et pnpm 10.
+Prérequis : Node.js 18 ou ultérieur.
 
 ```sh
-pnpm install
-pnpm install:global
+npm install -g @deckflow/deckuse
 ```
 
-La deuxième commande installe globalement le CLI local `deckuse`. Pendant le développement du dépôt, exécutez-la à nouveau après avoir reconstruit le CLI.
-
-```sh
-pnpm build
-pnpm install:global
-```
+Cette commande installe globalement le CLI `deckuse`.
 
 ```sh
 # Créer un espace de travail persistant depuis une présentation.

@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -27,19 +27,13 @@ It preserves untouched XML and unknown package parts where possible. It is not a
 
 ## Installation
 
-Requirements: Node.js 24 or later and pnpm 10.
+Requirements: Node.js 18 or later.
 
 ```sh
-pnpm install
-pnpm install:global
+npm install -g @deckflow/deckuse
 ```
 
-The second command installs the local `deckuse` CLI globally. During repository development, run it again after rebuilding the CLI.
-
-```sh
-pnpm build
-pnpm install:global
-```
+This installs the `deckuse` CLI globally.
 
 ## CLI workflow
 

@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -27,19 +27,13 @@ existing.pptx → init → inspect / query → apply JSON commands → validate 
 
 ## インストール
 
-要件：Node.js 24 以降および pnpm 10。
+要件：Node.js 18 以降。
 
 ```sh
-pnpm install
-pnpm install:global
+npm install -g @deckflow/deckuse
 ```
 
-2 番目のコマンドはローカルの `deckuse` CLI をグローバルにインストールします。リポジトリ開発中は、CLI を再ビルドした後にもう一度実行してください。
-
-```sh
-pnpm build
-pnpm install:global
-```
+このコマンドは `deckuse` CLI をグローバルにインストールします。
 
 ```sh
 # プレゼンテーションから永続ワークスペースを作成します。

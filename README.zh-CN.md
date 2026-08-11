@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -27,19 +27,13 @@ Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是渲�
 
 ## 安装
 
-要求：Node.js 24 或更高版本，以及 pnpm 10。
+要求：Node.js 18 或更高版本。
 
 ```sh
-pnpm install
-pnpm install:global
+npm install -g @deckflow/deckuse
 ```
 
-第二条命令全局安装本地 `deckuse` CLI。开发仓库时，请在重新构建 CLI 后再次运行它。
-
-```sh
-pnpm build
-pnpm install:global
-```
+该命令会全局安装 `deckuse` CLI。
 
 ```sh
 # 从演示文稿创建持久工作空间。
