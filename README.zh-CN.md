@@ -81,18 +81,192 @@ Query results provide stable element references. A reference includes a document
 
 ## 通用智能体工作流
 
-Deckuse primitives support these reproducible agent workflows. The agent is responsible for reasoning, copywriting, and visual review; Deckuse does not claim to perform them independently.
+这些示例仅使用当前 PPTX 功能。它们描述了智能体如何从 Deckuse 基元组合出工作流，而非声称 Deckuse 可独立进行推理、文案撰写或视觉审查。
 
-1. **Update an outdated year:** query `FY2025`, then perform a literal `replaceText` to `FY2026`, validate, and export.
-2. **Rename a company or product:** review the exact old name first, then apply a literal replacement; use regular expressions only after reviewing the query output.
-3. **Extract a presentation outline:** run `inspect` and query `hasText=true`; the agent groups returned objects by slide and identifies titles.
-4. **Run pre-delivery content QA:** query old customer names, dates, product names, URLs, and required disclaimer text. This is structural/content QA, not visual QA.
-5. **Change one item on one slide:** query the target, use the returned `ref` in `setText`, then validate.
-6. **Standardize title typography:** query and approve title references, then apply `setProperties` to each reference.
-7. **Adjust geometry precisely:** inspect target objects and issue explicit `setTransform` commands with EMU coordinates.
-8. **Personalize an approved sales deck:** create a separate workspace per customer, apply reviewed replacements only, validate, and commit to a distinct file.
-9. **Produce regional or audience variants:** initialize a fresh workspace per variant and use an atomic `batch` when all changes must succeed together.
-10. **Let a coding agent operate an existing presentation:** initialize, inspect/query before each change, generate explicit JSON commands, apply, validate, and commit.
+### 1. 跨整个演示文稿更新过期年份
+
+**Request：**“将每处 `FY2025` 引用改为 `FY2026`，不要改动其他内容。”
+
+先使用 `query` 审查受影响的元素，然后执行字面量 `replaceText`，并在导出前验证。
+
+```sh
+deckuse init master.pptx ./year-update --json
+deckuse query ./year-update 'text=FY2025' --limit 1000 --json
+cat > year-update.json <<'EOF'
+{
+  "type": "replaceText",
+  "find": "FY2025",
+  "replace": "FY2026"
+}
+EOF
+deckuse apply ./year-update --input year-update.json --json
+deckuse validate ./year-update --json
+deckuse commit ./year-update -o master-fy2026.pptx --json
+```
+
+审查查询将变更限定在已知出现位置；`replaceText` 执行经批准的批量修改，同时保持无关对象不变。
+
+### 2. 重命名公司或产品
+
+**Request：**“将旧产品名称在所有位置替换为新产品名称。”
+
+这沿用同一套安全的“审查后替换”模式。先搜索准确的旧名称，再用字面量值执行 `replaceText`。对于标点或空格等变体，只有在检查查询输出后才使用正则表达式替换。
+
+```json
+{
+  "type": "replaceText",
+  "find": "Legacy Platform",
+  "replace": "Unified Platform"
+}
+```
+
+若要进一步收窄变更范围，请在命令中加入选择器，例如 `"selector": "slide=256"`，使其仅对一张幻灯片生效。
+
+### 3. 为智能体提取演示文稿大纲
+
+**Request：**“列出各页幻灯片标题并总结此演示文稿涵盖的内容。”
+
+运行 `inspect` 获取已索引的演示文稿结构，然后查询含有文本的对象。调用方智能体可按幻灯片 ID 对返回对象分组，根据其名称、位置或文本识别标题类对象，并基于提取出的文本生成摘要。
+
+```sh
+deckuse init briefing.pptx ./outline --json
+deckuse inspect ./outline --depth 2 --json
+deckuse query ./outline 'hasText=true' --limit 10000 --json
+```
+
+Deckuse 提供结构化源数据。由智能体而非 Deckuse 决定哪些文本是标题，并撰写摘要。
+
+### 4. 执行交付前内容 QA
+
+**Request：**“在发送此演示文稿前，找出旧客户名称、日期、产品名称、URL 和必需的免责声明文本。”
+
+查询每项已知风险并检查返回的引用。缺失检查的工作方式相同：查询所需文本，并标记空结果。智能体可以在不修改演示文稿的前提下生成 QA 报告，也可以为经批准的修复准备精确定位的 `setText` / `replaceText` 命令。
+
+```sh
+deckuse query ./workspace 'text=Customer A' --limit 1000 --json
+deckuse query ./workspace 'text~=https?://' --limit 1000 --json
+deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
+```
+
+这是内容和结构 QA，不是视觉 QA。Deckuse 不渲染幻灯片，也不判断文本是否与其他内容重叠。
+
+### 5. 仅修改一张幻灯片上的一个项目
+
+**Request：**“在第 7 张幻灯片上，将标题改为 `Enterprise Strategy`；不要改动其他内容。”
+
+先查询该幻灯片及标题文本，然后取返回的 `ref` 发送 `setText` 命令。`ref` 可避免含义不明确的全局替换。
+
+```json
+{
+  "type": "setText",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:10"
+  },
+  "text": "Enterprise Strategy"
+}
+```
+
+元素 ID 是特定于演示文稿的示例。务必使用当前工作区返回的 ID，而不要复制此值。
+
+### 6. 统一标题排版
+
+**Request：**“将每个经批准的标题设为 28 pt，并使用已批准的字体。”
+
+使用查询识别标题对象，让智能体审查或筛选返回的引用，然后对每个已批准的引用分别应用一次 `setProperties`。`setProperties` 一次只针对一个引用；它本身不接受选择器。
+
+```json
+{
+  "type": "setProperties",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
+  "properties": {
+    "fontSize": 28,
+    "fontFamily": "Approved Sans",
+    "bold": true
+  }
+}
+```
+
+同一命令还可设置 `fill`、`stroke`（也可写作 `border`、`outline` 或 `line`）、`textColor`、`italic`、`underline`、`name` 和 `hidden`。未知属性键会以 `INVALID_COMMAND` 失败。
+
+### 7. 精确调整对象几何属性
+
+**Request：**“将每个经批准的标题稍微向下移动。”
+
+查询并选择目标标题引用，检查它们当前的几何属性，然后为每个对象发出一条带有明确坐标的 `setTransform` 命令。这是结构化的几何操作；未经视觉验证，不应将其表述为自动版式修复。
+
+```json
+{
+  "type": "setTransform",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
+  "transform": {
+    "x": 914400,
+    "y": 731520,
+    "width": 8229600,
+    "height": 685800
+  }
+}
+```
+
+变换坐标使用 OOXML EMU。若仅更改其垂直位置，请保留检查所得对象的 `x`、`width` 和 `height`。
+
+### 8. 将已批准的销售演示文稿个性化
+
+**Request：**“为潜在客户创建一个版本。更新客户名称和已批准的特定客户文案，但保留设计。”
+
+从已批准的母版为每份输出创建独立工作区。查询占位符或现有客户文本，仅应用经审查的替换，验证后提交到单独的文件。
+
+```sh
+deckuse init approved-master.pptx ./customer-a --json
+deckuse query ./customer-a 'text=Customer Name' --json
+# 仅应用针对此客户的经审查替换。
+deckuse apply ./customer-a --input customer-a.jsonl --json
+deckuse validate ./customer-a --json
+deckuse commit ./customer-a -o customer-a-deck.pptx --json
+```
+
+独立工作区可防止某一客户的编辑泄漏到另一份输出中。仅替换审批流程允许智能体修改的对象。
+
+### 9. 从同一母版生成区域或受众变体
+
+**Request：**“从已批准的演示文稿生成区域版和企业版变体。”
+
+从同一母版为每个变体初始化新的工作区。每个变体都有自己的命令文件和输出路径。当一个变体的全部更改必须具备原子性时，使用 `batch`：若任一命令失败，批次中的所有变更均不会持久化。
+
+```json
+{
+  "type": "batch",
+  "atomic": true,
+  "commands": [
+    {
+      "type": "replaceText",
+      "find": "Default Message",
+      "replace": "Regional Message"
+    },
+    {
+      "type": "replaceText",
+      "find": "Default Offer",
+      "replace": "Enterprise Offer"
+    }
+  ]
+}
+```
+
+这既保留了一份已批准的源演示文稿，也使每个变体都能从显式变更集复现。
+
+### 10. 让编程智能体操作现有演示文稿
+
+**Request：**“检查此演示文稿，识别所需编辑，完成编辑并导出修订后的 PPTX。”
+
+向智能体提供以下循环：初始化工作区；在每次针对性变更前执行检查或查询；生成显式 JSON 命令；应用命令；验证包；提交新的输出。当可审计性很重要时，将命令文件和命令结果与任务一同保存。
+
+Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性的导出路径。智能体负责理解任务，并决定哪些操作适用。
 
 ### `setProperties` example
 

@@ -81,18 +81,192 @@ Query results provide stable element references. A reference includes a document
 
 ## Fluxos de trabalho comuns para agentes
 
-Deckuse primitives support these reproducible agent workflows. The agent is responsible for reasoning, copywriting, and visual review; Deckuse does not claim to perform them independently.
+Estes exemplos usam apenas os recursos atuais de PPTX. Eles descrevem fluxos de trabalho que um agente pode compor a partir dos elementos básicos do Deckuse, sem afirmar que o Deckuse realiza de modo independente raciocínio, redação ou revisão visual.
 
-1. **Update an outdated year:** query `FY2025`, then perform a literal `replaceText` to `FY2026`, validate, and export.
-2. **Rename a company or product:** review the exact old name first, then apply a literal replacement; use regular expressions only after reviewing the query output.
-3. **Extract a presentation outline:** run `inspect` and query `hasText=true`; the agent groups returned objects by slide and identifies titles.
-4. **Run pre-delivery content QA:** query old customer names, dates, product names, URLs, and required disclaimer text. This is structural/content QA, not visual QA.
-5. **Change one item on one slide:** query the target, use the returned `ref` in `setText`, then validate.
-6. **Standardize title typography:** query and approve title references, then apply `setProperties` to each reference.
-7. **Adjust geometry precisely:** inspect target objects and issue explicit `setTransform` commands with EMU coordinates.
-8. **Personalize an approved sales deck:** create a separate workspace per customer, apply reviewed replacements only, validate, and commit to a distinct file.
-9. **Produce regional or audience variants:** initialize a fresh workspace per variant and use an atomic `batch` when all changes must succeed together.
-10. **Let a coding agent operate an existing presentation:** initialize, inspect/query before each change, generate explicit JSON commands, apply, validate, and commit.
+### 1. Atualizar um ano desatualizado em toda uma apresentação
+
+**Solicitação:** “Altere todas as referências a `FY2025` para `FY2026` e não mude mais nada.”
+
+Primeiro, use `query` para revisar os elementos afetados; em seguida, execute um `replaceText` literal e valide antes de exportar.
+
+```sh
+deckuse init master.pptx ./year-update --json
+deckuse query ./year-update 'text=FY2025' --limit 1000 --json
+cat > year-update.json <<'EOF'
+{
+  "type": "replaceText",
+  "find": "FY2025",
+  "replace": "FY2026"
+}
+EOF
+deckuse apply ./year-update --input year-update.json --json
+deckuse validate ./year-update --json
+deckuse commit ./year-update -o master-fy2026.pptx --json
+```
+
+A consulta de revisão limita a alteração às ocorrências conhecidas; `replaceText` executa a mutação em massa aprovada, mantendo intactos os objetos não relacionados.
+
+### 2. Renomear uma empresa ou produto
+
+**Solicitação:** “Substitua o nome antigo do produto pelo novo nome em todos os lugares.”
+
+Este é o mesmo padrão seguro de revisar e substituir. Primeiro, pesquise o nome antigo exato; depois, use `replaceText` com um valor literal. Para variações como pontuação ou espaçamento, use uma substituição por expressão regular somente após verificar a saída da consulta.
+
+```json
+{
+  "type": "replaceText",
+  "find": "Legacy Platform",
+  "replace": "Unified Platform"
+}
+```
+
+Para uma alteração mais restrita, inclua um seletor no comando, por exemplo, `"selector": "slide=256"`, para que somente um slide possa ser afetado.
+
+### 3. Extrair um esboço de apresentação para um agente
+
+**Solicitação:** “Liste os títulos dos slides e resuma o que esta apresentação aborda.”
+
+Execute `inspect` para recuperar a estrutura indexada da apresentação e, depois, consulte objetos que contenham texto. O agente que chama o Deckuse pode agrupar os objetos retornados por ID de slide, identificar objetos semelhantes a títulos por seus nomes, posições ou texto e gerar um resumo a partir do texto extraído.
+
+```sh
+deckuse init briefing.pptx ./outline --json
+deckuse inspect ./outline --depth 2 --json
+deckuse query ./outline 'hasText=true' --limit 10000 --json
+```
+
+O Deckuse fornece os dados-fonte estruturados. O agente, e não o Deckuse, é responsável por decidir qual texto é um título e por redigir o resumo.
+
+### 4. Executar QA de conteúdo antes da entrega
+
+**Solicitação:** “Encontre nomes antigos de clientes, datas, nomes de produtos, URLs e o texto obrigatório de aviso legal antes de enviar esta apresentação.”
+
+Consulte cada risco conhecido e inspecione as referências retornadas. As verificações de ausência funcionam da mesma forma: consulte o texto obrigatório e sinalize um resultado vazio. Um agente pode gerar um relatório de QA sem modificar a apresentação ou preparar comandos `setText` / `replaceText` estritamente direcionados para correções aprovadas.
+
+```sh
+deckuse query ./workspace 'text=Customer A' --limit 1000 --json
+deckuse query ./workspace 'text~=https?://' --limit 1000 --json
+deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
+```
+
+Trata-se de QA de conteúdo e estrutura, e não de QA visual. O Deckuse não renderiza slides nem determina se o texto se sobrepõe a outro conteúdo.
+
+### 5. Alterar exatamente um item em um slide
+
+**Solicitação:** “No slide 7, altere o título para `Enterprise Strategy`; não altere mais nada.”
+
+Primeiro, consulte esse slide e o texto do título; depois, use o `ref` retornado para enviar um comando `setText`. O `ref` evita uma substituição global ambígua.
+
+```json
+{
+  "type": "setText",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:10"
+  },
+  "text": "Enterprise Strategy"
+}
+```
+
+Os IDs de elemento são exemplos específicos de uma apresentação. Sempre use um ID retornado pelo espaço de trabalho atual, em vez de copiar este valor.
+
+### 6. Padronizar a tipografia dos títulos
+
+**Solicitação:** “Defina todos os títulos aprovados como 28 pt e use a família tipográfica aprovada.”
+
+Use uma consulta para identificar os objetos de título, faça o agente revisar ou filtrar as referências retornadas e aplique `setProperties` uma vez para cada referência aprovada. `setProperties` tem como alvo uma referência por vez; ele não aceita um seletor diretamente.
+
+```json
+{
+  "type": "setProperties",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
+  "properties": {
+    "fontSize": 28,
+    "fontFamily": "Approved Sans",
+    "bold": true
+  }
+}
+```
+
+O mesmo comando pode definir `fill`, `stroke` (também `border`, `outline` ou `line`), `textColor`, `italic`, `underline`, `name` e `hidden`. Chaves de propriedade desconhecidas falham com `INVALID_COMMAND`.
+
+### 7. Ajustar com precisão a geometria de um objeto
+
+**Solicitação:** “Mova cada título aprovado um pouco mais para baixo.”
+
+Consulte e selecione as referências dos títulos pretendidos, inspecione a geometria atual deles e emita um comando `setTransform` por objeto com coordenadas explícitas. Esta é uma operação estrutural de geometria; não a apresente como correção automática de layout sem validação visual.
+
+```json
+{
+  "type": "setTransform",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
+  "transform": {
+    "x": 914400,
+    "y": 731520,
+    "width": 8229600,
+    "height": 685800
+  }
+}
+```
+
+As coordenadas de transformação são EMUs do OOXML. Preserve `x`, `width` e `height` do objeto inspecionado quando alterar apenas sua posição vertical.
+
+### 8. Personalizar uma apresentação de vendas aprovada
+
+**Solicitação:** “Crie uma versão para um cliente em potencial. Atualize o nome do cliente e o texto aprovado específico da conta, mas preserve o design.”
+
+Crie um espaço de trabalho separado para cada saída a partir do modelo mestre aprovado. Consulte os placeholders ou o texto existente do cliente, aplique apenas as substituições revisadas, valide e faça commit em um arquivo distinto.
+
+```sh
+deckuse init approved-master.pptx ./customer-a --json
+deckuse query ./customer-a 'text=Customer Name' --json
+# Aplicar somente as substituições revisadas para este cliente.
+deckuse apply ./customer-a --input customer-a.jsonl --json
+deckuse validate ./customer-a --json
+deckuse commit ./customer-a -o customer-a-deck.pptx --json
+```
+
+Espaços de trabalho separados impedem que as edições de um cliente vazem para a saída de outro. Substitua apenas os objetos que o processo de aprovação permite que o agente modifique.
+
+### 9. Produzir variantes regionais ou para públicos diferentes a partir de um único modelo mestre
+
+**Solicitação:** “Gere variantes regionais e empresariais a partir da apresentação aprovada.”
+
+Inicialize um novo espaço de trabalho a partir do mesmo modelo mestre para cada variante. Cada variante recebe seu próprio arquivo de comandos e caminho de saída. Use `batch` quando as alterações de uma variante precisarem ser atômicas: se um comando falhar, nenhuma alteração do lote será persistida.
+
+```json
+{
+  "type": "batch",
+  "atomic": true,
+  "commands": [
+    {
+      "type": "replaceText",
+      "find": "Default Message",
+      "replace": "Regional Message"
+    },
+    {
+      "type": "replaceText",
+      "find": "Default Offer",
+      "replace": "Enterprise Offer"
+    }
+  ]
+}
+```
+
+Isso preserva uma única apresentação-fonte aprovada e, ao mesmo tempo, torna cada variante reproduzível a partir de um conjunto explícito de alterações.
+
+### 10. Permitir que um agente de código opere uma apresentação existente
+
+**Solicitação:** “Inspecione esta apresentação, identifique as edições solicitadas, realize-as e exporte um PPTX revisado.”
+
+Forneça ao agente este ciclo: inicializar um espaço de trabalho, inspecionar ou consultar antes de cada alteração direcionada, gerar comandos JSON explícitos, aplicá-los, validar o pacote e fazer commit de uma nova saída. Armazene o arquivo de comandos e os resultados dos comandos junto com a tarefa quando a auditabilidade for importante.
+
+O Deckuse fornece ao agente referências estáveis, seletores, transações, validação e um caminho de exportação determinístico. O agente fornece a interpretação da tarefa e decide quais operações são adequadas.
 
 ### Exemplo de `setProperties`
 
