@@ -1,96 +1,315 @@
 # Deckuse
 
-Deckuse 是一个以版本化 JSON 命令驱动的 Node.js Office 自动化工具。当前真实可用的格式为 PPTX；DOCX、XLSX、Keynote 和 Numbers adapter 仍会明确返回 `FORMAT_NOT_IMPLEMENTED`。
+Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure, applies explicit JSON commands, validates the result, and exports a new document.
 
-## CLI
+PPTX is the currently implemented format. DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
+
+## Why Deckuse
+
+Deckuse lets an agent modify an existing presentation without recreating it from scratch. Its workflow is deliberately structural rather than visual:
+
+```text
+existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+```
+
+It preserves untouched XML and unknown package parts where possible. It is not a rendering engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct.
+
+## Installation
+
+Requirements: Node.js 24 or later and pnpm 10.
 
 ```sh
+pnpm install
+pnpm install:global
+```
+
+The second command installs the local `deckuse` CLI globally. During repository development, run it again after rebuilding the CLI.
+
+```sh
+pnpm build
+pnpm install:global
+```
+
+## CLI workflow
+
+```sh
+# Create a persistent workspace from a presentation.
 deckuse init input.pptx ./workspace --json
+
+# Inspect the indexed document and query target elements.
 deckuse inspect ./workspace --json
-deckuse query ./workspace 'kind=textbox text=季度' --json
+deckuse query ./workspace 'kind=textbox text=Quarter' --json
 deckuse query ./workspace '*' --limit 500 --json
 deckuse query ./workspace 'hasText=true text~=[\u4e00-\u9fff]' --json
+
+# Apply one JSON command, a JSON array, or JSONL.
 deckuse apply ./workspace --input operations.jsonl --json
+
+# Verify the package and export it.
 deckuse validate ./workspace --json
 deckuse commit ./workspace -o output.pptx --json
+# Use --force only when replacing an existing output file.
 deckuse commit ./workspace -o output.pptx --force --json
 ```
 
-不带子命令时仍接受 stdin 中的单个 JSON command。`apply` 接受单 JSON、JSON 数组或 JSONL，`--input -` 表示 stdin。stdout 只输出结果 JSON，参数和输入错误写 stderr；退出码 0/1/2 分别表示成功、命令执行失败、CLI 使用或解析错误。
+`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command. When invoked without a subcommand, the CLI instead accepts one complete JSON command on standard input.
 
-### Agent 工作流示例（翻译）
+Command results are written to standard output as JSON. Errors caused by invalid arguments or input are written to standard error. Exit status `0` means success, `1` means that a command failed, and `2` means CLI usage or parsing failure.
+
+### Selectors
+
+`query` accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
+
+| Syntax                                 | Meaning                                              |
+| -------------------------------------- | ---------------------------------------------------- |
+| `*` or `all`                           | Match every indexed element.                         |
+| `kind=textbox`                         | Match an element kind by case-insensitive substring. |
+| `text=Quarter`                         | Match text that contains the literal value.          |
+| `text~=pattern`                        | Match text with a Unicode regular expression.        |
+| `hasText=true`                         | Match elements that contain text.                    |
+| `slide=256`, `id=256:10`, `name=Title` | Filter by slide ID, element ID, or name.             |
+
+Use query results as the source of stable element references. A reference includes a document ID and an element ID or structural path; array positions are not stable identifiers.
+
+## Common agent workflows
+
+These examples use only the current PPTX capabilities. They describe workflows that an agent can compose from Deckuse primitives, rather than claiming that Deckuse independently performs reasoning, copywriting, or visual review.
+
+### 1. Update an outdated year across a presentation
+
+**Request:** “Change every `FY2025` reference to `FY2026`, and do not change anything else.”
+
+Use `query` first to review the affected elements, then perform a literal `replaceText` and validate before exporting.
 
 ```sh
-deckuse init deck.pptx ./ws --json
-deckuse query ./ws 'hasText=true text~=[\u4e00-\u9fff]' --limit 1000 --json
-# 根据 query 结果准备 replaceText 操作，再一次 apply：
-cat > ops.json <<'EOF'
-[
-  {"type":"replaceText","find":"季度目标","replace":"Quarterly Goals"},
-  {"type":"replaceText","find":"温度","replace":"Temperature"}
-]
+deckuse init master.pptx ./year-update --json
+deckuse query ./year-update 'text=FY2025' --limit 1000 --json
+cat > year-update.json <<'EOF'
+{
+  "type": "replaceText",
+  "find": "FY2025",
+  "replace": "FY2026"
+}
 EOF
-deckuse apply ./ws --input ops.json --json
-deckuse validate ./ws --json
-deckuse commit ./ws -o deck.en.pptx --force --json
+deckuse apply ./year-update --input year-update.json --json
+deckuse validate ./year-update --json
+deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
 
-`query` selector：
+The review query limits the change to known occurrences; `replaceText` performs the approved bulk mutation while leaving unrelated objects intact.
 
-| 写法                                     | 含义                             |
-| ---------------------------------------- | -------------------------------- |
-| `*` / `all`                              | 匹配全部元素                     |
-| `kind=textbox`                           | 按 kind 子串匹配（大小写不敏感） |
-| `text=季度`                              | 文本包含                         |
-| `text~=正则`                             | 文本正则（`u` flag）             |
-| `hasText=true`                           | 仅有文本的元素                   |
-| `slide=256` / `id=256:10` / `name=Title` | 其它字段过滤；空格连接为 AND     |
+### 2. Rename a company or product
 
-## PPTX 能力
+**Request:** “Replace the old product name with the new product name everywhere.”
 
-- 持久化 workspace、revision 冲突检测、dry-run、原子 batch 和操作日志。
-- inspect/query/getText；稳定引用包含 slide ID、part URI、cNvPr ID/祖先链。
-- `replaceText`：按字面量或正则在可选 selector 范围内批量替换文本（可放入 `batch`）。
-- `commit.overwrite` / CLI `--force`：允许覆盖已存在的输出文件。
-- 新增空白 slide、复制 slide、删除 slide。复制 slide 时克隆 notes/chart 可变 part，layout 和 media 可安全共享。
-- shape/textbox、connector、group、picture（文件路径或 base64）、table 的新增；元素文本、位置、删除和复制。
-- `replacePicture`：按 `path` 或 `base64` 原地替换 picture 的嵌入媒体，保留元素引用与图层顺序；扩展名不变时覆盖原 media part，变化时写入新 part 并清理未引用旧媒体。
-- 删除 picture 或 slide 时，会移除未再被引用的 image relationship / media part（共享媒体在仍有引用时保留）。
-- 表格单元格按 table ID、行、列稳定寻址；speaker notes 读取和文本修改。
-- chart 标题、系列名和数值 cache 修改。存在嵌入 workbook 时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` warning，workbook 不会被静默声称已同步。
-- master/layout/theme 文本和 `srgbClr` 常见颜色修改（`setText` / `setProperties`）。
-- `setProperties` 支持常见形状/文本属性：`fill`、`stroke`（别名 `border`/`outline`/`line`）、`textColor`、`fontFamily`、`fontSize`、`bold`/`italic`/`underline`、`name`、`hidden`；未知 key 会返回 `INVALID_COMMAND`。
-- 未知 part 和未触碰节点保留；ZIP 会重新压缩，因此仅保证未修改 entry 的解压数据摘要一致。
+This is the same safe review-and-replace pattern. Search the exact old name first, then use `replaceText` with a literal value. For variations such as punctuation or spacing, use a regular-expression replacement only after checking the query output.
 
-#### setProperties 示例
+```json
+{
+  "type": "replaceText",
+  "find": "Legacy Platform",
+  "replace": "Unified Platform"
+}
+```
+
+For a more constrained change, include a selector in the command, for example `"selector": "slide=256"`, so only one slide is eligible.
+
+### 3. Extract a presentation outline for an agent
+
+**Request:** “List the slide titles and summarize what this deck covers.”
+
+Run `inspect` to retrieve the indexed presentation structure, then query text-bearing objects. The calling agent can group the returned objects by slide ID, identify title-like objects by their names, positions, or text, and generate a summary from the extracted text.
+
+```sh
+deckuse init briefing.pptx ./outline --json
+deckuse inspect ./outline --depth 2 --json
+deckuse query ./outline 'hasText=true' --limit 10000 --json
+```
+
+Deckuse supplies the structured source data. The agent, not Deckuse, is responsible for deciding which text is a title and for writing the summary.
+
+### 4. Run pre-delivery content QA
+
+**Request:** “Find old customer names, dates, product names, URLs, and required disclaimer text before this deck is sent.”
+
+Query for each known risk and inspect the returned references. Absence checks work the same way: query for the required text and flag an empty result. An agent can produce a QA report without modifying the presentation, or prepare narrowly targeted `setText` / `replaceText` commands for approved fixes.
+
+```sh
+deckuse query ./workspace 'text=Customer A' --limit 1000 --json
+deckuse query ./workspace 'text~=https?://' --limit 1000 --json
+deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
+```
+
+This is content and structural QA, not visual QA. Deckuse does not render slides or determine whether text overlaps other content.
+
+### 5. Change exactly one item on one slide
+
+**Request:** “On slide 7, change the title to `Enterprise Strategy`; change nothing else.”
+
+First query that slide and title text, then take the returned `ref` and send a `setText` command. The `ref` prevents an ambiguous global replacement.
+
+```json
+{
+  "type": "setText",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:10"
+  },
+  "text": "Enterprise Strategy"
+}
+```
+
+Element IDs are presentation-specific examples. Always use an ID returned by the current workspace rather than copying this value.
+
+### 6. Standardize title typography
+
+**Request:** “Make every approved title 28 pt and use the approved typeface.”
+
+Use a query to identify title objects, have the agent review or filter the returned references, and apply `setProperties` once for each approved reference. `setProperties` targets one reference at a time; it does not accept a selector itself.
 
 ```json
 {
   "type": "setProperties",
-  "ref": { "documentId": "./ws", "elementId": "256:8" },
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
   "properties": {
-    "stroke": { "color": "0000FF", "width": 1.5 },
-    "fill": "none",
-    "textColor": "111111",
-    "fontSize": 18,
-    "fontFamily": "Noto Sans SC",
+    "fontSize": 28,
+    "fontFamily": "Approved Sans",
     "bold": true
   }
 }
 ```
 
-`stroke` / `fill` 可用 hex 字符串，或 `none` / `false` / `null` 表示无描边/无填充。`stroke.width` 单位为 pt（默认 1）。
+The same command can set `fill`, `stroke` (also `border`, `outline`, or `line`), `textColor`, `italic`, `underline`, `name`, and `hidden`. Unknown property keys fail with `INVALID_COMMAND`.
 
-完整命令 schema 位于 `packages/core/schema/command.schema.json`，API 入口为 `@deckflow/deckuse-core`、`@deckflow/deckuse-opc` 与 `@deckflow/deckuse-pptx`。
+### 7. Adjust an object’s geometry precisely
 
-## 限制
+**Request:** “Move every approved title slightly lower.”
 
-- 不实现 PowerPoint 的全部 DrawingML、动画、SmartArt、OLE 和宏编辑。
-- 图表仅同步 OOXML chart cache；不重写嵌入 Excel workbook。
-- 复制 slide 会克隆 notes/chart，复用 layout/theme/media。复杂自定义 XML 扩展会原样保留，但不会做语义级编辑。
-- `setText` / `replaceText` 会把目标节点的多 run 文本折叠为单个 run（保留首 run 样式）。
+Query and select the intended title references, inspect their current geometry, and issue one `setTransform` command per object with explicit coordinates. This is a structural geometry operation; do not market it as automatic layout correction without visual validation.
+
+```json
+{
+  "type": "setTransform",
+  "ref": {
+    "documentId": "./workspace",
+    "elementId": "256:8"
+  },
+  "transform": {
+    "x": 914400,
+    "y": 731520,
+    "width": 8229600,
+    "height": 685800
+  }
+}
+```
+
+Transform coordinates are OOXML EMUs. Preserve `x`, `width`, and `height` from the inspected object when only changing its vertical position.
+
+### 8. Personalize an approved sales deck
+
+**Request:** “Create a version for a prospective customer. Update the customer name and approved account-specific copy, but preserve the design.”
+
+Create a separate workspace for each output from the approved master. Query the placeholders or existing customer text, apply only reviewed replacements, validate, and commit to a distinct file.
 
 ```sh
-pnpm install
-pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+deckuse init approved-master.pptx ./customer-a --json
+deckuse query ./customer-a 'text=Customer Name' --json
+# Apply reviewed replacements for this customer only.
+deckuse apply ./customer-a --input customer-a.jsonl --json
+deckuse validate ./customer-a --json
+deckuse commit ./customer-a -o customer-a-deck.pptx --json
+```
+
+Separate workspaces prevent one customer’s edits from leaking into another output. Replace only the objects the approval process allows the agent to modify.
+
+### 9. Produce regional or audience variants from one master
+
+**Request:** “Generate regional and enterprise variants from the approved presentation.”
+
+Initialize a fresh workspace from the same master for every variant. Each variant receives its own command file and output path. Use `batch` when a variant’s changes must be atomic: if one command fails, none of the batch changes are persisted.
+
+```json
+{
+  "type": "batch",
+  "atomic": true,
+  "commands": [
+    {
+      "type": "replaceText",
+      "find": "Default Message",
+      "replace": "Regional Message"
+    },
+    {
+      "type": "replaceText",
+      "find": "Default Offer",
+      "replace": "Enterprise Offer"
+    }
+  ]
+}
+```
+
+This preserves a single approved source deck while making every variant reproducible from an explicit change set.
+
+### 10. Let a coding agent operate an existing presentation
+
+**Request:** “Inspect this deck, identify the requested edits, make them, and export a revised PPTX.”
+
+Give the agent this loop: initialize a workspace, inspect or query before every targeted change, generate explicit JSON commands, apply them, validate the package, and commit a new output. Store the command file and command results alongside the task when auditability matters.
+
+Deckuse gives the agent stable references, selectors, transactions, validation, and a deterministic export path. The agent provides task interpretation and decides which operations are appropriate.
+
+## PPTX capabilities
+
+- Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
+- `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setTransform` for explicit object position, size, rotation, and flip changes.
+- `setProperties` for common shape and text properties.
+- Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
+- Add shapes/text boxes, connectors, groups, pictures (from a file path or base64), and tables; duplicate or remove elements.
+- `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
+- Table-cell addressing by table ID, row, and column; speaker-note reading and text editing.
+- Chart title, series-name, and cached-value edits. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated.
+- Common text and `srgbClr` color edits in master, layout, and theme parts.
+- Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
+
+### `setProperties` example
+
+```json
+{
+  "type": "setProperties",
+  "ref": { "documentId": "./workspace", "elementId": "256:8" },
+  "properties": {
+    "stroke": { "color": "0000FF", "width": 1.5 },
+    "fill": "none",
+    "textColor": "111111",
+    "fontSize": 18,
+    "fontFamily": "Approved Sans",
+    "bold": true
+  }
+}
+```
+
+`stroke` and `fill` accept a hexadecimal color string. Use `none`, `false`, or `null` for no stroke or fill. `stroke.width` is in points and defaults to `1`.
+
+The complete command schema is at `packages/core/schema/command.schema.json`. The TypeScript package entry points are `@deckflow/deckuse-core`, `@deckflow/deckuse-opc`, and `@deckflow/deckuse-pptx`.
+
+## Limitations
+
+- Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
+- It does not render presentations. Do not rely on it to assess visual quality, detect overlap, or automatically improve slide design.
+- Chart edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
+- Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
+- `setText` and `replaceText` collapse multi-run text in the targeted node into one run while retaining the first run’s style.
+
+## Development checks
+
+```sh
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
 ```
