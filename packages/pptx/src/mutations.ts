@@ -10,11 +10,7 @@ import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector } from './indexer.js';
-import {
-  detachPictureAndCleanup,
-  loadPictureBytes,
-  replacePictureMedia,
-} from './picture.js';
+import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';

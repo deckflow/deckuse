@@ -124,8 +124,7 @@ export const pptxAdapter: FormatAdapter = {
               kind: item.kind,
               geometry: item.transform,
               location: item.location,
-              payload:
-                item.kind === 'chart' || item.kind === 'picture' ? item.payload : undefined,
+              payload: item.kind === 'chart' || item.kind === 'picture' ? item.payload : undefined,
             })
           : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
       }

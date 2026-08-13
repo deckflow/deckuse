@@ -60,7 +60,10 @@ export async function loadPictureBytes(input: {
       const data = await readFile(input.path);
       return ok({ data, ext: extname(input.path).toLowerCase() || '.png' });
     } catch (cause) {
-      return err('IO_ERROR', cause instanceof Error ? cause.message : 'Failed to read picture path');
+      return err(
+        'IO_ERROR',
+        cause instanceof Error ? cause.message : 'Failed to read picture path',
+      );
     }
   }
   if (typeof input.base64 === 'string') {
@@ -102,8 +105,7 @@ export function replacePictureMedia(
   ext: string,
 ): Result<{ mediaPart: string }> {
   const rid = pictureEmbedId(pictureNode);
-  if (!rid)
-    return err('INVALID_COMMAND', 'Picture has no embedded image relationship (r:embed)');
+  if (!rid) return err('INVALID_COMMAND', 'Picture has no embedded image relationship (r:embed)');
   const rels = [...archive.getRelationships(slidePart)];
   const index = rels.findIndex((rel) => rel.id === rid);
   const current = index >= 0 ? rels[index] : undefined;
@@ -135,9 +137,7 @@ export function detachPictureAndCleanup(
   pictureNode: Element,
 ): void {
   const rid = pictureEmbedId(pictureNode);
-  const rel = rid
-    ? archive.getRelationships(slidePart).find((item) => item.id === rid)
-    : undefined;
+  const rel = rid ? archive.getRelationships(slidePart).find((item) => item.id === rid) : undefined;
   const mediaPart = rel?.resolvedTarget;
   pictureNode.parentNode?.removeChild(pictureNode);
   if (rid && !embedIdUsed(doc, rid)) {

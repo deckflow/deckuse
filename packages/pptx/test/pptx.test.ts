@@ -588,11 +588,13 @@ describe('pptx adapter', () => {
     );
     expect(pictures.ok).toBe(true);
     if (!pictures.ok) return;
-    const picture = (pictures.value as Array<{
-      ref: { documentId: string; elementId?: string };
-      location?: { cNvPrId?: string };
-      payload?: { mediaPart?: string };
-    }>)[0];
+    const picture = (
+      pictures.value as Array<{
+        ref: { documentId: string; elementId?: string };
+        location?: { cNvPrId?: string };
+        payload?: { mediaPart?: string };
+      }>
+    )[0];
     expect(picture?.payload?.mediaPart).toBeTruthy();
     const mediaPart = picture!.payload!.mediaPart!;
     const before = await OpcArchive.openFile(join(workspace, 'package.pptx'));
@@ -623,18 +625,20 @@ describe('pptx adapter', () => {
     );
     expect(afterReplace.ok).toBe(true);
     if (!afterReplace.ok) return;
-    const nextPicture = (afterReplace.value as Array<{
-      ref: { documentId: string; elementId?: string };
-      location?: { cNvPrId?: string };
-      payload?: { mediaPart?: string };
-    }>)[0];
+    const nextPicture = (
+      afterReplace.value as Array<{
+        ref: { documentId: string; elementId?: string };
+        location?: { cNvPrId?: string };
+        payload?: { mediaPart?: string };
+      }>
+    )[0];
     expect(nextPicture?.ref.elementId).toBe(picture!.ref.elementId);
     expect(nextPicture?.location?.cNvPrId).toBe(picture!.location?.cNvPrId);
     expect(nextPicture?.payload?.mediaPart).toBe(mediaPart);
     const afterArchive = await OpcArchive.openFile(join(workspace, 'package.pptx'));
-    expect(Buffer.from(afterArchive.getPart(mediaPart)!.data).equals(Buffer.from(originalBytes))).toBe(
-      false,
-    );
+    expect(
+      Buffer.from(afterArchive.getPart(mediaPart)!.data).equals(Buffer.from(originalBytes)),
+    ).toBe(false);
     const liveRef = {
       documentId: nextPicture!.ref.documentId,
       elementId: nextPicture!.ref.elementId,

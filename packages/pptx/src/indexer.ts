@@ -117,9 +117,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
           const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
           const rid = embed ?? link;
-          const rel = rid
-            ? archive.getRelationships(partUri).find((r) => r.id === rid)
-            : undefined;
+          const rel = rid ? archive.getRelationships(partUri).find((r) => r.id === rid) : undefined;
           if (rel) {
             const mediaPart = rel.resolvedTarget ?? rel.target;
             const external = Boolean(rel.external || (!embed && link));

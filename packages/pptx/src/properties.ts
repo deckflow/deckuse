@@ -37,7 +37,9 @@ const normalizeColor = (value: string): string => {
 
 const isNone = (value: unknown): boolean => {
   if (value === null || value === false || value === 'none') return true;
-  return typeof value === 'object' && 'type' in value && (value as { type?: unknown }).type === 'none';
+  return (
+    typeof value === 'object' && 'type' in value && (value as { type?: unknown }).type === 'none'
+  );
 };
 
 const pickAlias = <T extends string>(
