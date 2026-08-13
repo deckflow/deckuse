@@ -57,7 +57,7 @@ describe('deckuse CLI', () => {
   it('provides version and progressive command help', async () => {
     const version = await run(['-V']);
     expect(version).toMatchObject({ code: 0, stderr: '' });
-    expect(version.stdout).toBe('deckuse 0.0.0\n');
+    expect(version.stdout).toBe('deckuse 1.0.1\n');
 
     const help = await run(['--help']);
     expect(help).toMatchObject({ code: 0, stderr: '' });

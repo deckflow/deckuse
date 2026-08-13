@@ -34,7 +34,7 @@ function run(command, args, options = {}) {
 
 rmSync(target, { recursive: true, force: true });
 run('pnpm', ['build']);
-run('pnpm', ['--filter', '@deckflow/deckuse', 'deploy', '--prod', target]);
+run('pnpm', ['--filter', './packages/deckuse', 'deploy', '--prod', target]);
 // tsc emits 644; npm link creates a direct symlink to the bin, so it must be executable.
 chmodSync(join(target, 'dist/bin.js'), 0o755);
 // link (not install -g): keeps the deploy node_modules with workspace packages resolved,

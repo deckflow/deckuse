@@ -8,7 +8,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
-    "build": "tsc -b && node scripts/generate-schema.mjs",
+    "build": "node scripts/generate-cli-version.mjs && tsc -b && node scripts/generate-schema.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",

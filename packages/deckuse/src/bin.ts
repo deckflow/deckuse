@@ -2,11 +2,11 @@
 import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 import { runCommand } from './index.js';
+import { version } from './version.js';
 
 const args = process.argv.slice(2);
 const json = args.includes('--json');
 const clean = args.filter((arg) => arg !== '--json');
-const version = '0.0.0';
 
 type HelpCommand = 'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'commit';
 
