@@ -2,7 +2,6 @@
   "name": "@deckflow/deckuse-numbers",
   "version": "1.0.0",
   "type": "module",
-  "private": true,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
