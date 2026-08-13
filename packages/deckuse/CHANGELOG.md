@@ -1,5 +1,15 @@
 # @deckflow/deckuse
 
+## 1.0.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @deckflow/deckuse-docx@0.1.0
+  - @deckflow/deckuse-key@0.1.0
+  - @deckflow/deckuse-numbers@0.1.0
+  - @deckflow/deckuse-xlsx@0.1.0
+
 ## 1.0.0
 
 ### Major Changes
