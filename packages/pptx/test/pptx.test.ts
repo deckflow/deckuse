@@ -79,6 +79,17 @@ describe('pptx adapter', () => {
       {},
     );
     expect(init, JSON.stringify(init)).toMatchObject({ ok: true });
+    if (init.ok) {
+      expect(init.value).toMatchObject({
+        workspaceId: workspace,
+        format: 'pptx',
+        source,
+        revision: expect.any(String),
+        elementCount: expect.any(Number),
+      });
+      expect(init.value).not.toHaveProperty('elements');
+      expect(init.value).not.toHaveProperty('metadata');
+    }
     await expect(stat(join(workspace, 'source', 'ppt', 'presentation.xml'))).resolves.toBeDefined();
     await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain('package.*');
     const inspected = await pptxAdapter.execute(

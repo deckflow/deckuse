@@ -109,13 +109,15 @@ export const pptxAdapter: FormatAdapter = {
         files: [],
         metadata: { capabilities: pptxCapabilities },
       };
-      const saved = await initializeWorkspace(
-        workspace,
-        archive,
-        manifest,
-        buildIndex(archive, workspace, rev),
-      );
-      return ok(saved);
+      const index = buildIndex(archive, workspace, rev);
+      const saved = await initializeWorkspace(workspace, archive, manifest, index);
+      return ok({
+        workspaceId: saved.workspaceId,
+        format: saved.format,
+        source: saved.source,
+        revision: saved.revision,
+        elementCount: index.elements.length,
+      });
     } catch (cause) {
       return err('IO_ERROR', cause instanceof Error ? cause.message : 'PPTX init failed');
     }

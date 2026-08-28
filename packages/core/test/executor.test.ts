@@ -19,15 +19,11 @@ describe('executor', () => {
       version: '1',
       async init(command) {
         return ok({
-          schemaVersion: '1.0',
           workspaceId: command.workspaceId,
           format: 'test',
           source: command.source,
           revision: 'r1',
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-          adapterVersion: '1',
-          files: [],
+          elementCount: 0,
         });
       },
       execute,

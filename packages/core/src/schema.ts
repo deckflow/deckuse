@@ -259,6 +259,17 @@ export const commandJsonSchema = z.toJSONSchema(commandSchema, {
   reused: 'ref',
 });
 
+export const initResultSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    format: z.string().min(1),
+    source: z.string().min(1),
+    revision: z.string().min(1),
+    elementCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type InitResult = z.infer<typeof initResultSchema>;
+
 export const workspaceManifestSchema = z
   .object({
     schemaVersion: protocolVersionSchema,

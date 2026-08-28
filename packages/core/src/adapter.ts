@@ -1,4 +1,4 @@
-import type { Command, Result, WorkspaceManifest } from './schema.js';
+import type { Command, InitResult, Result } from './schema.js';
 
 export interface AdapterContext {
   readonly signal?: AbortSignal;
@@ -16,7 +16,7 @@ export interface FormatAdapter {
   init(
     command: Extract<Command, { type: 'init' }>,
     context: AdapterContext,
-  ): Promise<Result<WorkspaceManifest>>;
+  ): Promise<Result<InitResult>>;
   execute(
     command: Exclude<Command, { type: 'init' }>,
     context: AdapterContext,
