@@ -1,10 +1,16 @@
-import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { ensureGitignore, hasWorkspaceGitRepo, initGitRepo } from '../src/index.js';
+import {
+  commitWorkspace,
+  ensureGitignore,
+  hasWorkspaceGitRepo,
+  initGitRepo,
+  resetGit,
+} from '../src/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,5 +27,20 @@ describe('deckuse workspace', () => {
     await initGitRepo(workspace, 'deckuse: init');
     expect(await hasWorkspaceGitRepo(workspace)).toBe(true);
     await expect(access(join(workspace, '.git'))).resolves.toBeUndefined();
+  });
+
+  it('commits and hard-resets workspace history', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'deckuse-git-'));
+    await writeFile(join(workspace, 'example.txt'), 'v1\n');
+    await initGitRepo(workspace, 'deckuse: init');
+    await writeFile(join(workspace, 'example.txt'), 'v2\n');
+    const second = await commitWorkspace(workspace, 'deckuse: write');
+    await writeFile(join(workspace, 'example.txt'), 'v3\n');
+    await commitWorkspace(workspace, 'deckuse: write');
+
+    await resetGit(workspace, 1);
+
+    await expect(readFile(join(workspace, 'example.txt'), 'utf8')).resolves.toBe('v2\n');
+    expect(second).toMatch(/^[0-9a-f]{40}$/);
   });
 });

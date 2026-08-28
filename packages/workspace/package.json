@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@deckflow/deckuse-core": "workspace:*",
-    "simple-git": "latest"
+    "isomorphic-git": "latest"
   },
   "engines": {
     "node": ">=18.0.0"
