@@ -103,9 +103,18 @@ importers:
       '@deckflow/deckuse-opc':
         specifier: workspace:*
         version: file:packages/opc
+      '@deckflow/deckuse-workspace':
+        specifier: workspace:*
+        version: link:../workspace
       '@xmldom/xmldom':
         specifier: latest
         version: 0.9.10
+
+  packages/workspace:
+    dependencies:
+      '@deckflow/deckuse-core':
+        specifier: workspace:*
+        version: link:../core
       simple-git:
         specifier: latest
         version: 3.36.0
@@ -187,6 +196,10 @@ packages:
 
   '@deckflow/deckuse-pptx@file:packages/pptx':
     resolution: {directory: packages/pptx, type: directory}
+    engines: {node: '>=18.0.0'}
+
+  '@deckflow/deckuse-workspace@file:packages/workspace':
+    resolution: {directory: packages/workspace, type: directory}
     engines: {node: '>=18.0.0'}
 
   '@eslint-community/eslint-utils@4.10.1':
@@ -1418,7 +1431,14 @@ snapshots:
     dependencies:
       '@deckflow/deckuse-core': file:packages/core
       '@deckflow/deckuse-opc': file:packages/opc
+      '@deckflow/deckuse-workspace': file:packages/workspace
       '@xmldom/xmldom': 0.9.12
+    transitivePeerDependencies:
+      - supports-color
+
+  '@deckflow/deckuse-workspace@file:packages/workspace':
+    dependencies:
+      '@deckflow/deckuse-core': file:packages/core
       simple-git: 3.36.0
     transitivePeerDependencies:
       - supports-color

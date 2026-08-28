@@ -368,3 +368,12 @@ export class OpcArchive {
     }
   }
 }
+
+export async function snapshotArchive(
+  archive: OpcArchive,
+  outputPath: string,
+): Promise<{ checksum: string }> {
+  await archive.writeFile(outputPath, true);
+  const bytes = await readFile(resolve(outputPath));
+  return { checksum: createHash('sha256').update(bytes).digest('hex') };
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@deckflow/deckuse-pptx",
+  "name": "@deckflow/deckuse-workspace",
   "version": "1.0.0",
   "type": "module",
   "private": false,
@@ -18,9 +18,7 @@
   },
   "dependencies": {
     "@deckflow/deckuse-core": "workspace:*",
-    "@deckflow/deckuse-opc": "workspace:*",
-    "@deckflow/deckuse-workspace": "workspace:*",
-    "@xmldom/xmldom": "latest"
+    "simple-git": "latest"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -28,7 +26,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deckflow/deckuse.git",
-    "directory": "packages/pptx"
+    "directory": "packages/workspace"
   },
   "homepage": "https://github.com/deckflow/deckuse#readme"
 }

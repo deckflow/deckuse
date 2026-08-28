@@ -3,6 +3,7 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/workspace" },
     { "path": "./packages/opc" },
     { "path": "./packages/pptx" },
     { "path": "./packages/deckuse" },
