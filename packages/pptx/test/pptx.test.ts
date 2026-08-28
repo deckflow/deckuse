@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -336,7 +336,9 @@ describe('pptx adapter', () => {
       expect(list).toHaveLength(1);
       expect(list[0]?.name).toBe('Pixel');
       expect(list[0]?.payload?.mediaPart).toMatch(/^\/ppt\/media\/image\d+\./);
-      expect(list[0]?.payload?.href).toBeTruthy();
+      expect(list[0]?.payload?.href).toBe(
+        join(workspace, 'source', 'ppt', 'media', list[0]!.payload!.fileName!),
+      );
       expect(list[0]?.payload?.fileName).toMatch(/^image\d+\./);
       await expect(readFile(list[0]!.payload!.href!)).resolves.toBeInstanceOf(Buffer);
     }
@@ -434,7 +436,7 @@ describe('pptx adapter', () => {
     });
     const committed = await OpcArchive.openFile(join(workspace, 'package.pptx'));
     const slideXml = new TextDecoder().decode(committed.getPart('/ppt/slides/slide1.xml')!.data);
-    expect(slideXml).toContain('<a:t>Bonjour</a:t>');
+    expect(slideXml).toMatch(/<a:t>Bonjour\s*<\/a:t>/);
     expect(slideXml).not.toMatch(/<a:r>\s*<a:rPr[^>]*\/>\s*<\/a:r>/);
   });
   it('setProperties applies fill, stroke, and text styles', async () => {
@@ -692,5 +694,43 @@ describe('pptx adapter', () => {
     expect(
       (await OpcArchive.openFile(join(workspace, 'package.pptx'))).getPart(mediaPart),
     ).toBeUndefined();
+  });
+  it('rebuilds stale index.json when revision does not match manifest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-index-sync-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await fixture(source);
+    const init = await pptxAdapter.init(
+      { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const indexPath = join(workspace, '.deckuse', 'index.json');
+    const manifestPath = join(workspace, '.deckuse', 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { revision: string };
+    const stale = JSON.parse(await readFile(indexPath, 'utf8')) as {
+      revision: string;
+      elements: unknown[];
+    };
+    stale.revision = 'stale-revision';
+    stale.elements = [];
+    await writeFile(indexPath, `${JSON.stringify(stale, null, 2)}\n`);
+    const inspected = await pptxAdapter.execute(
+      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const elements = (inspected.value as { elements: unknown[] }).elements;
+    expect(elements.length).toBeGreaterThan(0);
+    expect((inspected.value as { document: { revision: string } }).document.revision).toBe(
+      manifest.revision,
+    );
+    const persisted = JSON.parse(await readFile(indexPath, 'utf8')) as {
+      revision: string;
+      elements: unknown[];
+    };
+    expect(persisted.revision).toBe(manifest.revision);
+    expect(persisted.elements.length).toBeGreaterThan(0);
   });
 });

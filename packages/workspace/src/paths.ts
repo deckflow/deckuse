@@ -2,7 +2,6 @@ import { join, resolve } from 'node:path';
 
 export const sourceDir = (workspace: string) => join(resolve(workspace), 'source');
 export const deckuseDir = (workspace: string) => join(resolve(workspace), '.deckuse');
-export const mediaDir = (workspace: string) => join(deckuseDir(workspace), 'media');
 export const manifestPath = (workspace: string) => join(deckuseDir(workspace), 'manifest.json');
 export const indexPath = (workspace: string) => join(deckuseDir(workspace), 'index.json');
 export const operationsPath = (workspace: string) => join(deckuseDir(workspace), 'operations.jsonl');

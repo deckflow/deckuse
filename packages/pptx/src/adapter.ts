@@ -8,12 +8,12 @@ import {
 } from '@deckflow/deckuse-core';
 import { OpcArchive } from '@deckflow/deckuse-opc';
 import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
+import { loadIndex } from './index-sync.js';
 import { mutate } from './mutations.js';
 import {
   initializeWorkspace,
   persistWrite,
   readHistory,
-  readIndex,
   readManifest,
   revision,
   sourceDir,
@@ -142,12 +142,7 @@ export const pptxAdapter: FormatAdapter = {
 
       const manifest = await readManifest(workspace);
       const archive = await openWorkspaceArchive(workspace);
-      let index;
-      try {
-        index = await readIndex(workspace);
-      } catch {
-        index = buildIndex(archive, manifest.workspaceId, manifest.revision);
-      }
+      const index = await loadIndex(workspace, archive, manifest, { persist: true });
 
       if (command.type === 'inspect') {
         if (command.ref) {
@@ -198,12 +193,7 @@ export const pptxAdapter: FormatAdapter = {
           return err('TRANSACTION_CONFLICT', `Expected transactionId ${currentManifest.revision}`);
 
         const working = await openWorkspaceArchive(workspace);
-        let currentIndex;
-        try {
-          currentIndex = await readIndex(workspace);
-        } catch {
-          currentIndex = buildIndex(working, currentManifest.workspaceId, currentManifest.revision);
-        }
+        const currentIndex = await loadIndex(workspace, working, currentManifest);
 
         if (command.type === 'batch') {
           const results: unknown[] = [];

@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { WorkspaceManifest } from '@deckflow/deckuse-core';
@@ -8,7 +8,6 @@ import {
   deckuseDir,
   indexPath,
   initGitRepo,
-  mediaDir,
   readHistory,
   readManifest,
   readOperations,
@@ -19,6 +18,7 @@ import {
   writeMetadata,
   writeOperations,
 } from '@deckflow/deckuse-workspace';
+import { loadIndex } from './index-sync.js';
 import type { IndexFile } from './types.js';
 
 const PPTX_MEDIA_TYPE =
@@ -35,21 +35,10 @@ export type { OperationRecord } from '@deckflow/deckuse-workspace';
 
 export const packagePath = (workspace: string) => join(resolve(workspace), 'package.pptx');
 export const mediaHref = (workspace: string, mediaPart: string) =>
-  join(mediaDir(workspace), basename(mediaPart));
+  join(sourceDir(workspace), mediaPart.replace(/^\//, ''));
 
 export const readIndex = async (workspace: string): Promise<IndexFile> =>
   JSON.parse(await readFile(indexPath(workspace), 'utf8')) as IndexFile;
-
-const extractMedia = async (workspace: string, archive: OpcArchiveType): Promise<void> => {
-  const dir = mediaDir(workspace);
-  await rm(dir, { recursive: true, force: true });
-  await mkdir(dir, { recursive: true });
-  await Promise.all(
-    [...archive.parts.values()]
-      .filter((part) => part.name.startsWith('/ppt/media/'))
-      .map((part) => writeFile(join(dir, basename(part.name)), part.data)),
-  );
-};
 
 const packPackage = async (
   workspace: string,
@@ -80,7 +69,6 @@ export async function initializeWorkspace(
   await mkdir(root, { recursive: true });
   await mkdir(deckuseDir(root), { recursive: true });
   await archive.writeDirectory(sourceDir(root), true);
-  await extractMedia(root, archive);
   const packed = await packPackage(root, archive, manifest);
   const next: WorkspaceManifest = {
     ...packed,
@@ -109,7 +97,6 @@ export async function persistWrite(
     await archive.writeDirectory(sourceTmp);
     await rm(source, { recursive: true, force: true });
     await rename(sourceTmp, source);
-    await extractMedia(root, archive);
     const next: WorkspaceManifest = {
       ...manifest,
       revision: rev,
@@ -140,8 +127,8 @@ export async function undoWrites(
     throw new Error(`Cannot undo ${String(steps)} step(s); only ${String(records.length)} available`);
   await resetGit(root, steps);
   const manifest = await readManifest(root);
-  const index = await readIndex(root);
   const archive = await OpcArchive.openDirectory(sourceDir(root));
+  const index = await loadIndex(root, archive, manifest, { persist: true });
   await packPackage(root, archive, manifest);
   return { undone: steps, revision: index.revision };
 }

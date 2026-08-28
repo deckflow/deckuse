@@ -1,7 +1,6 @@
 export {
   sourceDir,
   deckuseDir,
-  mediaDir,
   manifestPath,
   indexPath,
   operationsPath,
