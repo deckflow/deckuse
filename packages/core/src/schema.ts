@@ -187,14 +187,21 @@ const duplicateCommandSchema = z
     index: z.number().int().nonnegative().optional(),
   })
   .strict();
-const commitCommandSchema = z
+const undoCommandSchema = z
   .object({
     ...commandBase,
-    type: z.literal('commit'),
+    type: z.literal('undo'),
     workspaceId: z.string().min(1),
-    transactionId: z.string().min(1),
-    destination: z.string().min(1).optional(),
-    overwrite: z.boolean().optional(),
+    steps: z.number().int().positive().max(1000).default(1),
+  })
+  .strict();
+const historyCommandSchema = z
+  .object({
+    ...commandBase,
+    type: z.literal('history'),
+    workspaceId: z.string().min(1),
+    limit: z.number().int().positive().max(10000).default(100),
+    offset: z.number().int().nonnegative().max(1000000).default(0),
   })
   .strict();
 const validateCommandSchema = z
@@ -241,7 +248,8 @@ export const commandSchema = z.discriminatedUnion('type', [
   replacePictureCommandSchema,
   duplicateCommandSchema,
   batchCommandSchema,
-  commitCommandSchema,
+  undoCommandSchema,
+  historyCommandSchema,
   validateCommandSchema,
 ]);
 export type Command = z.infer<typeof commandSchema>;

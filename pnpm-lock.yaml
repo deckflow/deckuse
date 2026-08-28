@@ -59,14 +59,14 @@ importers:
         version: link:../numbers
       '@deckflow/deckuse-pptx':
         specifier: workspace:*
-        version: link:../pptx
+        version: file:packages/pptx
       '@deckflow/deckuse-xlsx':
         specifier: workspace:*
         version: link:../xlsx
     devDependencies:
       '@deckflow/deckuse-opc':
         specifier: workspace:*
-        version: link:../opc
+        version: file:packages/opc
 
   packages/docx:
     dependencies:
@@ -102,10 +102,13 @@ importers:
         version: link:../core
       '@deckflow/deckuse-opc':
         specifier: workspace:*
-        version: link:../opc
+        version: file:packages/opc
       '@xmldom/xmldom':
         specifier: latest
         version: 0.9.10
+      simple-git:
+        specifier: latest
+        version: 3.36.0
 
   packages/xlsx:
     dependencies:
@@ -173,6 +176,18 @@ packages:
 
   '@changesets/write@0.4.0':
     resolution: {integrity: sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q==}
+
+  '@deckflow/deckuse-core@file:packages/core':
+    resolution: {directory: packages/core, type: directory}
+    engines: {node: '>=18.0.0'}
+
+  '@deckflow/deckuse-opc@file:packages/opc':
+    resolution: {directory: packages/opc, type: directory}
+    engines: {node: '>=18.0.0'}
+
+  '@deckflow/deckuse-pptx@file:packages/pptx':
+    resolution: {directory: packages/pptx, type: directory}
+    engines: {node: '>=18.0.0'}
 
   '@eslint-community/eslint-utils@4.10.1':
     resolution: {integrity: sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg==}
@@ -244,6 +259,12 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@kwsites/file-exists@1.1.1':
+    resolution: {integrity: sha512-m9/5YGR18lIwxSFDwfE3oA7bWuq9kdau6ugN4H2rJeyhFQZcG9AgSHkQtSD15a8WvTgfz9aikZMrKPHvbpqFiw==}
+
+  '@kwsites/promise-deferred@1.1.1':
+    resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
 
   '@manypkg/find-root@1.1.0':
     resolution: {integrity: sha512-mki5uBvhHzO8kYYix/WRy2WX8S3B5wdVSc9D6KcU5lQNglP2yt58/VfLuAK49glRXChosY8ap2oJ1qgma3GUVA==}
@@ -352,6 +373,12 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@simple-git/args-pathspec@1.0.3':
+    resolution: {integrity: sha512-ngJMaHlsWDTfjyq9F3VIQ8b7NXbBLq5j9i5bJ6XLYtD6qlDXT7fdKY2KscWWUF8t18xx052Y/PUO1K1TRc9yKA==}
+
+  '@simple-git/argv-parser@1.1.1':
+    resolution: {integrity: sha512-Q9lBcfQ+VQCpQqGJFHe5yooOS5hGdLFFbJ5R+R5aDsnkPCahtn1hSkMcORX65J2Z5lxSkD0lQorMsncuBQxYUw==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -467,6 +494,10 @@ packages:
 
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
+    engines: {node: '>=14.6'}
+
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
 
   '@zip.js/zip.js@2.8.34':
@@ -1036,6 +1067,9 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
+  simple-git@3.36.0:
+    resolution: {integrity: sha512-cGQjLjK8bxJw4QuYT7gxHw3/IouVESbhahSsHrX97MzCL1gu2u7oy38W6L2ZIGECEfIBG4BabsWDPjBxJENv9Q==}
+
   slash@3.0.0:
     resolution: {integrity: sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==}
     engines: {node: '>=8'}
@@ -1371,6 +1405,24 @@ snapshots:
       human-id: 4.2.0
       prettier: 2.8.8
 
+  '@deckflow/deckuse-core@file:packages/core':
+    dependencies:
+      zod: 4.4.3
+
+  '@deckflow/deckuse-opc@file:packages/opc':
+    dependencies:
+      '@xmldom/xmldom': 0.9.12
+      '@zip.js/zip.js': 2.8.34
+
+  '@deckflow/deckuse-pptx@file:packages/pptx':
+    dependencies:
+      '@deckflow/deckuse-core': file:packages/core
+      '@deckflow/deckuse-opc': file:packages/opc
+      '@xmldom/xmldom': 0.9.12
+      simple-git: 3.36.0
+    transitivePeerDependencies:
+      - supports-color
+
   '@eslint-community/eslint-utils@4.10.1(eslint@10.8.0)':
     dependencies:
       eslint: 10.8.0
@@ -1429,6 +1481,14 @@ snapshots:
       '@types/node': 26.1.2
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@kwsites/file-exists@1.1.1':
+    dependencies:
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+
+  '@kwsites/promise-deferred@1.1.1': {}
 
   '@manypkg/find-root@1.1.0':
     dependencies:
@@ -1503,6 +1563,12 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@simple-git/args-pathspec@1.0.3': {}
+
+  '@simple-git/argv-parser@1.1.1':
+    dependencies:
+      '@simple-git/args-pathspec': 1.0.3
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -1658,6 +1724,8 @@ snapshots:
       tinyrainbow: 3.1.1
 
   '@xmldom/xmldom@0.9.10': {}
+
+  '@xmldom/xmldom@0.9.12': {}
 
   '@zip.js/zip.js@2.8.34': {}
 
@@ -2157,6 +2225,16 @@ snapshots:
   siginfo@2.0.0: {}
 
   signal-exit@4.1.0: {}
+
+  simple-git@3.36.0:
+    dependencies:
+      '@kwsites/file-exists': 1.1.1
+      '@kwsites/promise-deferred': 1.1.1
+      '@simple-git/args-pathspec': 1.0.3
+      '@simple-git/argv-parser': 1.1.1
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   slash@3.0.0: {}
 

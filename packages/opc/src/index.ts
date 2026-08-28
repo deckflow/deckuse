@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, posix, resolve } from 'node:path';
 import { DOMParser, XMLSerializer, type Document, type Element, type Node } from '@xmldom/xmldom';
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader, ZipWriter } from '@zip.js/zip.js';
@@ -57,8 +57,50 @@ export const parseXml = (input: string | Uint8Array): XmlDocument => {
   if (!document.documentElement) throw new Error('Invalid XML: missing document element');
   return document as XmlDocument;
 };
+const isXmlPart = (part: OpcPart): boolean =>
+  part.mediaType.includes('xml') || part.name.endsWith('.xml') || part.name.endsWith('.rels');
+
+export const prettyPrintXml = (source: string): string => {
+  const compact = source.replace(/>\s+</g, '><').trim();
+  if (!compact) return '\n';
+  const lines: string[] = [];
+  let indent = 0;
+  const tokens = compact.split(/(?=<)/).filter(Boolean);
+  for (const token of tokens) {
+    if (/^<\?/.test(token) || /^<!/.test(token)) {
+      lines.push(token);
+      continue;
+    }
+    if (/^<\//.test(token)) {
+      indent = Math.max(0, indent - 1);
+      lines.push(`${'  '.repeat(indent)}${token}`);
+      continue;
+    }
+    if (/^<[^!?/][^>]*\/>/.test(token)) {
+      lines.push(`${'  '.repeat(indent)}${token}`);
+      continue;
+    }
+    if (/^<[^!?/]/.test(token)) {
+      lines.push(`${'  '.repeat(indent)}${token}`);
+      indent += 1;
+      continue;
+    }
+    const text = token.trim();
+    if (text) lines.push(`${'  '.repeat(indent)}${text}`);
+  }
+  return `${lines.join('\n')}\n`;
+};
+
+export const formatXmlBytes = (data: Uint8Array): Uint8Array => {
+  try {
+    return encoder.encode(prettyPrintXml(decoder.decode(data)));
+  } catch {
+    return data;
+  }
+};
+
 export const serializeXml = (document: Node): Uint8Array =>
-  encoder.encode(new XMLSerializer().serializeToString(document));
+  formatXmlBytes(encoder.encode(new XMLSerializer().serializeToString(document)));
 
 export const relationshipPartName = (source: string): string => {
   if (source === '/') return '/_rels/.rels';
@@ -79,6 +121,36 @@ export class OpcArchive {
   readonly contentTypes: ContentTypes = { defaults: new Map(), overrides: new Map() };
   readonly originalDigests = new Map<string, string>();
 
+  static async openDirectory(path: string, limitsInput: Partial<OpcLimits> = {}): Promise<OpcArchive> {
+    const limits = { ...DEFAULT_OPC_LIMITS, ...limitsInput };
+    const archive = new OpcArchive();
+    let total = 0;
+    const walk = async (dir: string, prefix = ''): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const absolute = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(absolute, relative);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (archive.parts.size >= limits.maxEntries)
+          throw new Error(`OPC entry limit exceeded: ${String(archive.parts.size)}`);
+        const name = normalizePartName(`/${relative.replaceAll('\\', '/')}`);
+        if (archive.parts.has(name)) throw new Error(`Duplicate OPC entry: ${name}`);
+        const data = await readFile(absolute);
+        if (data.length > limits.maxEntrySize) throw new Error(`OPC entry too large: ${name}`);
+        total += data.length;
+        if (total > limits.maxTotalSize) throw new Error('OPC total uncompressed size limit exceeded');
+        archive.parts.set(name, { name, mediaType: 'application/octet-stream', data });
+        archive.originalDigests.set(name, createHash('sha256').update(data).digest('hex'));
+      }
+    };
+    await walk(resolve(path));
+    if (!archive.parts.size) throw new Error('OPC directory is empty');
+    archive.loadMetadata();
+    return archive;
+  }
   static async openFile(path: string, limits: Partial<OpcLimits> = {}): Promise<OpcArchive> {
     return OpcArchive.open(await readFile(path), limits);
   }
@@ -249,6 +321,31 @@ export class OpcArchive {
     for (const part of this.parts.values())
       await zip.add(part.name.slice(1), new Uint8ArrayReader(part.data));
     return zip.close();
+  }
+  async writeDirectory(path: string, overwrite = false): Promise<void> {
+    const destination = resolve(path);
+    if (!overwrite) {
+      try {
+        await stat(destination);
+        throw new Error(`Destination exists: ${destination}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    const temporary = `${destination}.${randomUUID()}.tmp`;
+    try {
+      for (const part of this.parts.values()) {
+        const file = resolve(temporary, part.name.slice(1));
+        await mkdir(dirname(file), { recursive: true });
+        const data = isXmlPart(part) ? formatXmlBytes(part.data) : part.data;
+        await writeFile(file, data);
+      }
+      await rm(destination, { recursive: true, force: true });
+      await rename(temporary, destination);
+    } catch (error) {
+      await rm(temporary, { recursive: true, force: true });
+      throw error;
+    }
   }
   async writeFile(path: string, overwrite = false): Promise<void> {
     const destination = resolve(path);

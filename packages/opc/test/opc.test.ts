@@ -4,7 +4,9 @@ import {
   OpcArchive,
   normalizePartName,
   parseXml,
+  prettyPrintXml,
   resolveRelationshipTarget,
+  serializeXml,
 } from '../src/index.js';
 const enc = new TextEncoder();
 const digest = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -45,5 +47,14 @@ describe('OPC archive', () => {
     await expect(OpcArchive.open(await archive.toUint8Array(), { maxEntries: 1 })).rejects.toThrow(
       'entry limit',
     );
+  });
+  it('pretty prints XML for readable git diffs', () => {
+    const formatted = prettyPrintXml(contentTypes);
+    expect(formatted).toContain('\n');
+    expect(formatted).toMatch(/<Types[\s\S]*>\n/);
+    const roundTrip = parseXml(formatted);
+    expect(roundTrip.documentElement.tagName).toBe('Types');
+    const serialized = new TextDecoder().decode(serializeXml(roundTrip));
+    expect(serialized.split('\n').length).toBeGreaterThan(1);
   });
 });

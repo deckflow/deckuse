@@ -22,9 +22,9 @@ describe('command schema', () => {
   });
   it('exposes draft 2020-12 JSON schema', () => {
     expect(commandJsonSchema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect(commandJsonSchema.oneOf).toHaveLength(15);
+    expect(commandJsonSchema.oneOf).toHaveLength(16);
   });
-  it('parses replaceText and commit overwrite', () => {
+  it('parses replaceText, undo, and history', () => {
     expect(
       commandSchema.parse({
         version: '1.0',
@@ -40,12 +40,20 @@ describe('command schema', () => {
     expect(
       commandSchema.parse({
         version: '1.0',
-        type: 'commit',
+        type: 'undo',
         workspaceId: 'w',
-        transactionId: 'tx',
-        overwrite: true,
-      }).overwrite,
-    ).toBe(true);
+        steps: 2,
+      }).steps,
+    ).toBe(2);
+    expect(
+      commandSchema.parse({
+        version: '1.0',
+        type: 'history',
+        workspaceId: 'w',
+        limit: 20,
+        offset: 5,
+      }).limit,
+    ).toBe(20);
   });
   it('parses replacePicture with path or base64', () => {
     expect(

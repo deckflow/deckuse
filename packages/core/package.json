@@ -23,5 +23,11 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deckflow/deckuse.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/deckflow/deckuse#readme"
 }

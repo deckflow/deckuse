@@ -19,9 +19,16 @@
   "dependencies": {
     "@deckflow/deckuse-core": "workspace:*",
     "@deckflow/deckuse-opc": "workspace:*",
-    "@xmldom/xmldom": "latest"
+    "@xmldom/xmldom": "latest",
+    "simple-git": "latest"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deckflow/deckuse.git",
+    "directory": "packages/pptx"
+  },
+  "homepage": "https://github.com/deckflow/deckuse#readme"
 }

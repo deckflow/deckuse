@@ -200,6 +200,35 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
       }
   return { revision: rev, elements };
 }
+export const slidePageMap = (index: IndexFile): Map<string, number> => {
+  const map = new Map<string, number>();
+  let page = 1;
+  for (const item of index.elements) {
+    if (item.kind !== 'slide') continue;
+    map.set(item.partUri, page);
+    if (item.slideId) map.set(item.slideId, page);
+    page += 1;
+  }
+  return map;
+};
+export const slidesForItem = (index: IndexFile, item: IndexedElement): number[] => {
+  const pages = slidePageMap(index);
+  if (item.kind === 'slide') {
+    const page = pages.get(item.partUri) ?? (item.slideId ? pages.get(item.slideId) : undefined);
+    return page ? [page] : [];
+  }
+  if (item.slideId) {
+    const page = pages.get(item.slideId);
+    return page ? [page] : [];
+  }
+  return [];
+};
+export const slidesForRef = (index: IndexFile, ref: ElementRef): number[] => {
+  const item = findIndexed(index, ref);
+  return item ? slidesForItem(index, item) : [];
+};
+export const mergeSlides = (...groups: number[][]): number[] =>
+  [...new Set(groups.flat())].sort((a, b) => a - b);
 export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement | undefined =>
   index.elements.find((e) => e.ref.elementId === ref.elementId || e.ref.path === ref.path);
 export function matchesSelector(

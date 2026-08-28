@@ -8,7 +8,7 @@ const args = process.argv.slice(2);
 const json = args.includes('--json');
 const clean = args.filter((arg) => arg !== '--json');
 
-type HelpCommand = 'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'commit';
+type HelpCommand = 'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'undo' | 'history';
 
 const HELP: Record<'main' | HelpCommand, string> = {
   main: `usage: deckuse <command> [<args>] [--json]
@@ -21,7 +21,8 @@ Common commands:
   query <workspace> [selector]   Query document elements
   apply <workspace>              Apply JSON command objects
   validate <workspace>           Validate workspace changes
-  commit <workspace>             Export the workspace to a document
+  undo <workspace>               Undo recent write operations
+  history <workspace>            View write operation history
 
 Run 'deckuse <command> --help' for details about a command.
 Run 'deckuse help <command>' for the same command reference.
@@ -73,8 +74,8 @@ Example:
   apply: `usage: deckuse apply <workspace> [--input <file|->] [--json]
 
 Apply one or more JSON command objects to a workspace. Input may be a JSON
-object, a JSON array, or newline-delimited JSON. Commands read from standard
-input by default.
+object, a JSON array, or newline-delimited JSON. Multiple commands are applied
+as one atomic batch. Commands read from standard input by default.
 
 Arguments:
   <workspace>      Existing deckuse workspace
@@ -99,20 +100,32 @@ Options:
 Example:
   deckuse validate ./presentation --level full
 `,
-  commit: `usage: deckuse commit <workspace> [-o <output>] [--force] [--json]
+  undo: `usage: deckuse undo <workspace> [--steps <n>] [--json]
 
-Export workspace changes to an Office document.
+Undo recent successful write operations.
 
 Arguments:
   <workspace>      Existing deckuse workspace
 
 Options:
-  -o, --output <output>
-                   Destination document path
-  -f, --force      Overwrite an existing destination
+  --steps <n>      Number of write operations to undo (default: 1)
 
 Example:
-  deckuse commit ./presentation -o updated.pptx
+  deckuse undo ./presentation --steps 2
+`,
+  history: `usage: deckuse history <workspace> [--limit <n>] [--offset <n>] [--json]
+
+View successful write operation history.
+
+Arguments:
+  <workspace>      Existing deckuse workspace
+
+Options:
+  --limit <n>      Maximum records to return (default: 100)
+  --offset <n>     Number of records to skip (default: 0)
+
+Example:
+  deckuse history ./presentation --limit 20
 `,
 };
 
@@ -149,6 +162,18 @@ const revisionFor = async (workspace: string): Promise<string> => {
   ) as { revision: string };
   return manifest.revision;
 };
+
+const WRITE_TYPES = new Set([
+  'setText',
+  'replaceText',
+  'setTransform',
+  'setProperties',
+  'add',
+  'remove',
+  'replacePicture',
+  'duplicate',
+  'batch',
+]);
 
 try {
   if (clean.length === 0) {
@@ -203,19 +228,24 @@ try {
                 : { level: option('--level') ?? 'full' }),
             },
       );
-    } else if (action === 'commit') {
+    } else if (action === 'undo') {
       const workspace = clean[1];
-      if (!workspace) throw new Error('Usage: deckuse commit workspace/ -o output.pptx [--force]');
-      const force = clean.includes('--force') || clean.includes('-f');
+      if (!workspace) throw new Error('Usage: deckuse undo workspace/ [--steps <n>]');
       ok = await execute({
         version: '1.0',
-        type: 'commit',
+        type: 'undo',
         workspaceId: workspace,
-        transactionId: await revisionFor(workspace),
-        ...(option('-o') || option('--output')
-          ? { destination: option('-o') ?? option('--output') }
-          : {}),
-        ...(force ? { overwrite: true } : {}),
+        steps: Number(option('--steps') ?? 1),
+      });
+    } else if (action === 'history') {
+      const workspace = clean[1];
+      if (!workspace) throw new Error('Usage: deckuse history workspace/ [--limit <n>] [--offset <n>]');
+      ok = await execute({
+        version: '1.0',
+        type: 'history',
+        workspaceId: workspace,
+        limit: Number(option('--limit') ?? 100),
+        offset: Number(option('--offset') ?? 0),
       });
     } else {
       const workspace = clean[1],
@@ -232,18 +262,37 @@ try {
           .filter(Boolean)
           .map((line) => JSON.parse(line) as unknown);
       }
-      for (const value of values) {
+      const transactionId = await revisionFor(workspace);
+      const commands = values.map((value) => {
         if (typeof value !== 'object' || value === null)
           throw new Error('apply input must contain command objects');
-        const command = {
+        const record = value as Record<string, unknown>;
+        if (record['type'] === 'batch') return record;
+        if (!WRITE_TYPES.has(String(record['type'])))
+          throw new Error(`apply input contains non-write command: ${String(record['type'])}`);
+        return {
           version: '1.0',
           workspaceId: workspace,
-          transactionId: await revisionFor(workspace),
-          ...(value as Record<string, unknown>),
+          transactionId,
+          ...record,
         };
-        ok = (await execute(command)) && ok;
-        if (!ok) break;
-      }
+      });
+      const payload =
+        commands.length === 1 && commands[0]?.['type'] !== 'batch'
+          ? commands[0]
+          : {
+              version: '1.0',
+              type: 'batch',
+              workspaceId: workspace,
+              transactionId,
+              atomic: true,
+              commands: commands.flatMap((command) =>
+                command['type'] === 'batch'
+                  ? (command as { commands: unknown[] }).commands
+                  : [command],
+              ),
+            };
+      ok = await execute(payload);
     }
     if (!ok) process.exitCode = 1;
   }

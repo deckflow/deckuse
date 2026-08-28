@@ -9,7 +9,7 @@ import {
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { addElement, duplicateElement, updateChart } from './elements.js';
-import { findIndexed, matchesSelector } from './indexer.js';
+import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
@@ -119,14 +119,19 @@ const applyReplaceText = (
   const selected = candidates.slice(0, limit);
   const diagnostics: Diagnostic[] = [];
   const refs: ElementRef[] = [];
+  const slidePages: number[] = [];
   for (const item of selected) {
     const next = replaced(item.text ?? '');
     if (next === item.text) continue;
     const written = writeText(archive, item, next, diagnostics);
     if (!written.ok) return written;
     refs.push(item.ref);
+    slidePages.push(...slidesForItem(index, item));
   }
-  return ok({ changed: refs.length > 0, matched: refs.length, refs, diagnostics }, diagnostics);
+  return ok(
+    { changed: refs.length > 0, matched: refs.length, refs, slides: mergeSlides(slidePages), diagnostics },
+    diagnostics,
+  );
 };
 export async function mutate(
   command: AtomicCommand,
@@ -146,12 +151,13 @@ export async function mutate(
   if (item.kind === 'slide') {
     if (command.type === 'remove') {
       removeSlide(archive, item.partUri);
-      return ok({ changed: true });
+      return ok({ changed: true, slides: slidesForItem(index, item) });
     }
     if (command.type === 'duplicate') {
       return ok({
         changed: true,
         partUri: duplicateSlide(archive, item.partUri),
+        slides: slidesForItem(index, item),
       });
     }
     if (command.type === 'add') {
@@ -165,7 +171,7 @@ export async function mutate(
             typeof command.element['layoutPart'] === 'string'
               ? command.element['layoutPart']
               : undefined;
-        return ok({ changed: true, partUri: addSlide(archive, template, layout) });
+        return ok({ changed: true, partUri: addSlide(archive, template, layout), slides: [] });
       }
     }
   }
@@ -232,5 +238,5 @@ export async function mutate(
     await addElement(archive, item.partUri, doc, parent, command.element);
   }
   archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
-  return ok({ changed: true, diagnostics }, diagnostics);
+  return ok({ changed: true, slides: slidesForItem(index, item), diagnostics }, diagnostics);
 }

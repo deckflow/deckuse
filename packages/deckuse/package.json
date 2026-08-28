@@ -1,6 +1,6 @@
 {
   "name": "@deckflow/deckuse",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "private": false,
   "exports": {
@@ -36,5 +36,11 @@
   },
   "devDependencies": {
     "@deckflow/deckuse-opc": "workspace:*"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deckflow/deckuse.git",
+    "directory": "packages/deckuse"
+  },
+  "homepage": "https://github.com/deckflow/deckuse#readme"
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -69,17 +69,18 @@ async function fixture(path: string) {
   await a.writeFile(path);
 }
 describe('pptx adapter', () => {
-  it('init inspect edit batch commit reopen', async () => {
+  it('init inspect edit batch auto package reopen', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-'));
     const source = join(root, 'source.pptx'),
-      workspace = join(root, 'workspace'),
-      out = join(root, 'out.pptx');
+      workspace = join(root, 'workspace');
     await fixture(source);
     const init = await pptxAdapter.init(
       { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},
     );
     expect(init, JSON.stringify(init)).toMatchObject({ ok: true });
+    await expect(stat(join(workspace, 'source', 'ppt', 'presentation.xml'))).resolves.toBeDefined();
+    await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain('package.*');
     const inspected = await pptxAdapter.execute(
       { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
@@ -129,27 +130,33 @@ describe('pptx adapter', () => {
       {},
     );
     expect(batch, JSON.stringify(batch)).toMatchObject({ ok: true });
-    const newRev = (batch as any).value.revision;
-    expect(
-      (
-        await pptxAdapter.execute(
-          {
-            version: '1.0',
-            type: 'commit',
-            workspaceId: workspace,
-            transactionId: newRev,
-            destination: out,
-          },
-          {},
-        )
-      ).ok,
-    ).toBe(true);
-    const reopened = await OpcArchive.openFile(out);
+    const reopened = await OpcArchive.openFile(join(workspace, 'package.pptx'));
     expect(new TextDecoder().decode(reopened.getPart('/ppt/slides/slide1.xml')!.data)).toContain(
       'Changed',
     );
     expect(new TextDecoder().decode(reopened.getPart('/custom/unknown.bin')!.data)).toBe('keep me');
-    expect((await readFile(out)).length).toBeGreaterThan(0);
+    const history = await pptxAdapter.execute(
+      { version: '1.0', type: 'history', workspaceId: workspace, limit: 10, offset: 0 },
+      {},
+    );
+    expect(history.ok).toBe(true);
+    if (history.ok) {
+      expect((history.value as { total: number }).total).toBe(1);
+      expect(
+        (history.value as { records: Array<{ operation: { type: string }; slides: number[] }> })
+          .records[0],
+      ).toMatchObject({ operation: { type: 'batch' }, slides: [1] });
+    }
+    const undone = await pptxAdapter.execute(
+      { version: '1.0', type: 'undo', workspaceId: workspace, steps: 1 },
+      {},
+    );
+    expect(undone.ok).toBe(true);
+    const afterUndo = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    expect(new TextDecoder().decode(afterUndo.getPart('/ppt/slides/slide1.xml')!.data)).not.toContain(
+      'Changed',
+    );
+    expect((await readFile(join(workspace, 'package.pptx'))).length).toBeGreaterThan(0);
   });
   it('adds, duplicates and removes slides while maintaining presentation relationships', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-slide-'));
@@ -342,11 +349,10 @@ describe('pptx adapter', () => {
       '99',
     );
   });
-  it('queries with *, hasText, text~, replaceText, and commit overwrite', async () => {
+  it('queries with *, hasText, text~, replaceText, and auto package export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-replace-'));
     const source = join(root, 'source.pptx'),
-      workspace = join(root, 'workspace'),
-      out = join(root, 'out.pptx');
+      workspace = join(root, 'workspace');
     await fixture(source);
     expect(
       (
@@ -413,44 +419,9 @@ describe('pptx adapter', () => {
     );
     expect(replaced, JSON.stringify(replaced)).toMatchObject({
       ok: true,
-      value: { matched: 1, changed: true },
+      value: { matched: 1, changed: true, slides: [1] },
     });
-    const newRev = (replaced.value as { revision: string }).revision;
-    const firstCommit = await pptxAdapter.execute(
-      {
-        version: '1.0',
-        type: 'commit',
-        workspaceId: workspace,
-        transactionId: newRev,
-        destination: out,
-      },
-      {},
-    );
-    expect(firstCommit.ok).toBe(true);
-    const blocked = await pptxAdapter.execute(
-      {
-        version: '1.0',
-        type: 'commit',
-        workspaceId: workspace,
-        transactionId: newRev,
-        destination: out,
-      },
-      {},
-    );
-    expect(blocked.ok).toBe(false);
-    const forced = await pptxAdapter.execute(
-      {
-        version: '1.0',
-        type: 'commit',
-        workspaceId: workspace,
-        transactionId: newRev,
-        destination: out,
-        overwrite: true,
-      },
-      {},
-    );
-    expect(forced.ok).toBe(true);
-    const committed = await OpcArchive.openFile(out);
+    const committed = await OpcArchive.openFile(join(workspace, 'package.pptx'));
     const slideXml = new TextDecoder().decode(committed.getPart('/ppt/slides/slide1.xml')!.data);
     expect(slideXml).toContain('<a:t>Bonjour</a:t>');
     expect(slideXml).not.toMatch(/<a:r>\s*<a:rPr[^>]*\/>\s*<\/a:r>/);

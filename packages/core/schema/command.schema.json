@@ -223,29 +223,63 @@
         },
         "type": {
           "type": "string",
-          "const": "commit"
+          "const": "undo"
         },
         "workspaceId": {
           "type": "string",
           "minLength": 1
         },
-        "transactionId": {
-          "type": "string",
-          "minLength": 1
-        },
-        "destination": {
-          "type": "string",
-          "minLength": 1
-        },
-        "overwrite": {
-          "type": "boolean"
+        "steps": {
+          "default": 1,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1000
         }
       },
       "required": [
         "version",
         "type",
         "workspaceId",
-        "transactionId"
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "requestId": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "type": {
+          "type": "string",
+          "const": "history"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "default": 100,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 10000
+        },
+        "offset": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "required": [
+        "version",
+        "type",
+        "workspaceId",
+        "limit",
+        "offset"
       ],
       "additionalProperties": false
     },

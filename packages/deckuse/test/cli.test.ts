@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -57,29 +57,32 @@ describe('deckuse CLI', () => {
   it('provides version and progressive command help', async () => {
     const version = await run(['-V']);
     expect(version).toMatchObject({ code: 0, stderr: '' });
-    expect(version.stdout).toBe('deckuse 1.0.1\n');
+    expect(version.stdout).toMatch(/^deckuse \d+\.\d+\.\d+\n$/);
 
     const help = await run(['--help']);
     expect(help).toMatchObject({ code: 0, stderr: '' });
     expect(help.stdout).toContain('usage: deckuse <command>');
     expect(help.stdout).toContain('deckuse <command> --help');
+    expect(help.stdout).toContain('undo <workspace>');
+    expect(help.stdout).toContain('history <workspace>');
 
-    const commitHelp = await run(['commit', '--help']);
-    expect(commitHelp).toMatchObject({ code: 0, stderr: '' });
-    expect(commitHelp.stdout).toContain('usage: deckuse commit <workspace>');
-    expect(commitHelp.stdout).toContain('--force');
+    const undoHelp = await run(['undo', '--help']);
+    expect(undoHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(undoHelp.stdout).toContain('usage: deckuse undo <workspace>');
+    expect(undoHelp.stdout).toContain('--steps');
 
     const helpAlias = await run(['help', 'apply']);
     expect(helpAlias).toMatchObject({ code: 0, stderr: '' });
     expect(helpAlias.stdout).toContain('usage: deckuse apply <workspace>');
   });
-  it('runs human init, inspect, apply, validate and commit commands', async () => {
+  it('runs init, inspect, apply, validate, history, undo and auto package export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),
       source = join(root, 'source.pptx'),
-      workspace = join(root, 'workspace'),
-      output = join(root, 'output.pptx');
+      workspace = join(root, 'workspace');
     await fixture(source);
     expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+    await expect(access(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'))).resolves.toBeUndefined();
+    await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain('package.*');
     const inspect = await run(['inspect', workspace, '--json']);
     expect(inspect.code).toBe(0);
     expect(JSON.parse(inspect.stdout) as { ok: boolean }).toMatchObject({ ok: true });
@@ -93,9 +96,32 @@ describe('deckuse CLI', () => {
     );
     expect(apply.code).toBe(0);
     expect((await run(['validate', workspace, '--json'])).code).toBe(0);
-    expect((await run(['commit', workspace, '-o', output, '--json'])).code).toBe(0);
-    expect((await readFile(output)).length).toBeGreaterThan(0);
-    expect((await run(['commit', workspace, '-o', output, '--json'])).code).toBe(1);
-    expect((await run(['commit', workspace, '-o', output, '--force', '--json'])).code).toBe(0);
+    const packaged = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    expect(new TextDecoder().decode(packaged.getPart('/ppt/slides/slide1.xml')!.data)).toContain(
+      'CLI',
+    );
+    const history = await run(['history', workspace, '--json']);
+    expect(history.code).toBe(0);
+    const historyValue = JSON.parse(history.stdout) as {
+      ok: boolean;
+      value: { total: number; records: Array<{ slides: number[]; operation: { type: string } }> };
+    };
+    expect(historyValue).toMatchObject({ ok: true });
+    expect(historyValue.value.total).toBe(1);
+    expect(historyValue.value.records[0]?.operation.type).toBe('add');
+    expect(historyValue.value.records[0]?.slides).toEqual([1]);
+    const undo = await run(['undo', workspace, '--json']);
+    expect(undo.code).toBe(0);
+    const afterUndo = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    expect(new TextDecoder().decode(afterUndo.getPart('/ppt/slides/slide1.xml')!.data)).not.toContain(
+      'CLI',
+    );
+    const historyAfterUndo = JSON.parse((await run(['history', workspace, '--json'])).stdout) as {
+      value: { total: number };
+    };
+    expect(historyAfterUndo.value.total).toBe(0);
+    await expect(stat(join(workspace, 'package.pptx'))).resolves.toMatchObject({
+      size: expect.any(Number),
+    });
   });
 });

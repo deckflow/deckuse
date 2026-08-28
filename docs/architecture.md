@@ -6,9 +6,22 @@ Deckuse is a schema-first document automation monorepo. `@deckflow/deckuse-core`
 
 For OPC formats, the canonical state is the original package parts, relationships, content types, and unknown extension data—not a lossy normalized scene graph. Query indexes and convenient element views are derived, disposable, and rebuilt or incrementally invalidated after mutations. This preserves producer-specific XML, unsupported elements, ordering, and extension lists wherever a command does not intentionally change them.
 
+## Workspace layout
+
+An initialized workspace contains:
+
+- `source/`: the unpacked OPC package; adapters mutate these files directly.
+- `package.pptx` (or future format snapshots): a generated archive rebuilt after every successful write. It is ignored by Git.
+- `.deckuse/`: manifest, derived index, and `operations.jsonl`.
+- `.git/`: version history managed by `simple-git`.
+
 ## Transactions
 
-Mutations require a transaction ID. Adapters stage changes in an isolated workspace revision; `batch` is atomic by default, and `commit` validates, checks the base revision for conflicts, writes to a temporary destination, and atomically replaces the target. Failed validation or writes leave the source and committed revision unchanged. Implementations should support cancellation and clean temporary resources.
+Mutations require a transaction ID. Write operations acquire an exclusive workspace lock, apply changes against a temporary copy of `source/`, validate, atomically replace `source/`, update derived metadata, append one record to `operations.jsonl`, create a Git commit, and rebuild the package snapshot. `batch` is atomic by default. Failed validation or writes leave the workspace unchanged. Concurrent writes are serialized by the lock.
+
+`operations.jsonl` records one entry per successful write command (a `batch` counts as one entry). Each record stores the original command, revision, affected slide page numbers (1-based, empty when unknown), and the Git commit hash when available.
+
+`undo --steps N` resets the workspace Git history by `N` successful writes and rebuilds the package snapshot. `history` reads the operation log.
 
 ## Fidelity
 

@@ -20,8 +20,10 @@ Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office �
 Deckuse 可在不从零重建演示文稿的情况下修改现有 PPT。其工作流刻意以结构为中心，而非视觉为中心：
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
 ```
+
+每次成功的写操作会自动提交 Git 版本、更新 `operations.jsonl`，并立即重新打包 `package.pptx`。可使用 `undo` 撤销、`history` 查看操作历史。
 
 Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是渲染引擎，无法可靠判断幻灯片是否美观或版式是否正确。
 
@@ -47,14 +49,26 @@ deckuse query ./workspace '*' --limit 500 --json
 # 应用一个 JSON 命令、JSON 数组或 JSONL。
 deckuse apply ./workspace --input operations.jsonl --json
 
-# 验证包并导出。
+# 验证工作区、查看历史、撤销写操作。
 deckuse validate ./workspace --json
-deckuse commit ./workspace -o output.pptx --json
+deckuse history ./workspace --json
+deckuse undo ./workspace --steps 1 --json
+```
+
+工作区布局：
+
+```text
+workspace/
+  source/           # 解压后的 OPC 包，写操作直接修改此处
+  package.pptx      # 由 source 即时打包的 Office 快照（不在 Git 中）
+  .deckuse/         # manifest、index、operations.jsonl
+  .git/             # 工作区版本历史
+  .gitignore        # 忽略 package.* 等生成文件
 ```
 
 ## CLI 工作流
 
-`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command.
+`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Multiple commands in one `apply` invocation are executed as one atomic batch. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before the batch.
 
 命令结果以 JSON 写入标准输出；无效参数或输入导致的错误写入标准错误。退出状态 `0` 表示成功，`1` 表示命令失败，`2` 表示 CLI 用法或解析失败。
 
@@ -95,8 +109,9 @@ cat > year-update.json <<'EOF'
 EOF
 deckuse apply ./year-update --input year-update.json --json
 deckuse validate ./year-update --json
-deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
+
+写操作完成后，`./year-update/package.pptx` 会自动更新为最新快照。
 
 审查查询将变更限定在已知出现位置；`replaceText` 执行经批准的批量修改，同时保持无关对象不变。
 
@@ -214,7 +229,7 @@ deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
 
 **Request：**“为潜在客户创建一个版本。更新客户名称和已批准的特定客户文案，但保留设计。”
 
-从已批准的母版为每份输出创建独立工作区。查询占位符或现有客户文本，仅应用经审查的替换，验证后提交到单独的文件。
+从已批准的母版为每份输出创建独立工作区。查询占位符或现有客户文本，仅应用经审查的替换，验证后使用自动更新的 `package.pptx`。
 
 ```sh
 deckuse init approved-master.pptx ./customer-a --json
@@ -222,7 +237,6 @@ deckuse query ./customer-a 'text=Customer Name' --json
 # 仅应用针对此客户的经审查替换。
 deckuse apply ./customer-a --input customer-a.jsonl --json
 deckuse validate ./customer-a --json
-deckuse commit ./customer-a -o customer-a-deck.pptx --json
 ```
 
 独立工作区可防止某一客户的编辑泄漏到另一份输出中。仅替换审批流程允许智能体修改的对象。

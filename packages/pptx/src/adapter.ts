@@ -1,6 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import {
   err,
   ok,
@@ -9,17 +7,33 @@ import {
   type WorkspaceManifest,
 } from '@deckflow/deckuse-core';
 import { OpcArchive } from '@deckflow/deckuse-opc';
-import { buildIndex, findIndexed, matchesSelector } from './indexer.js';
+import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
 import { mutate } from './mutations.js';
 import {
-  deckuseDir,
-  packagePath,
-  persist,
+  initializeWorkspace,
+  persistWrite,
+  readHistory,
   readIndex,
   readManifest,
   revision,
+  sourceDir,
+  undoWrites,
+  withWriteLock,
 } from './workspace.js';
-const VERSION = '0.3.0';
+
+const VERSION = '0.4.0';
+const WRITE_TYPES = new Set([
+  'setText',
+  'replaceText',
+  'setTransform',
+  'setProperties',
+  'add',
+  'remove',
+  'replacePicture',
+  'duplicate',
+  'batch',
+]);
+
 export const pptxCapabilities = {
   slides: { add: true, duplicate: true, remove: true },
   elements: ['shape', 'textbox', 'connector', 'group', 'picture', 'table', 'chart'],
@@ -48,16 +62,36 @@ export const pptxCapabilities = {
   },
   query: { matchAll: ['*', 'all'], textRegex: true, hasText: true },
   text: { setText: true, replaceText: true },
-  commit: { overwrite: true },
+  history: { undo: true },
   preservation: 'unknown parts and untouched XML are preserved; ZIP entries are recompressed',
 } as const;
+
+const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>
+  OpcArchive.openDirectory(sourceDir(workspace));
+
+const validateArchive = (archive: OpcArchive): Diagnostic[] => {
+  const diagnostics: Diagnostic[] = [];
+  for (const [source, rels] of archive.relationships)
+    for (const rel of rels)
+      if (!rel.external && rel.resolvedTarget && !archive.getPart(rel.resolvedTarget))
+        diagnostics.push({
+          severity: 'error',
+          code: 'BROKEN_RELATIONSHIP',
+          message: `Missing target ${rel.resolvedTarget}`,
+          details: { source, relationshipId: rel.id },
+        });
+  return diagnostics;
+};
+
+const slidesFromOutcome = (outcome: { slides?: number[] } | undefined): number[] =>
+  outcome?.slides ?? [];
+
 export const pptxAdapter: FormatAdapter = {
   format: 'pptx',
   version: VERSION,
   async init(command) {
     try {
       const workspace = resolve(command.workspaceId);
-      await mkdir(deckuseDir(workspace), { recursive: true });
       const archive = await OpcArchive.openFile(resolve(command.source));
       if (!archive.getPart('/ppt/presentation.xml'))
         return err('VALIDATION_FAILED', 'Not a PPTX presentation');
@@ -75,12 +109,11 @@ export const pptxAdapter: FormatAdapter = {
         files: [],
         metadata: { capabilities: pptxCapabilities },
       };
-      const saved = await persist(
+      const saved = await initializeWorkspace(
         workspace,
         archive,
         manifest,
         buildIndex(archive, workspace, rev),
-        { type: 'init', source: command.source },
       );
       return ok(saved);
     } catch (cause) {
@@ -90,14 +123,30 @@ export const pptxAdapter: FormatAdapter = {
   async execute(command) {
     const workspace = resolve(command.workspaceId);
     try {
-      const manifest = await readManifest(workspace),
-        archive = await OpcArchive.openFile(packagePath(workspace));
+      if (command.type === 'undo') {
+        return await withWriteLock(workspace, async () => {
+          try {
+            const result = await undoWrites(workspace, command.steps);
+            return ok(result);
+          } catch (cause) {
+            return err('VALIDATION_FAILED', cause instanceof Error ? cause.message : 'Undo failed');
+          }
+        });
+      }
+      if (command.type === 'history') {
+        const { records, total } = await readHistory(workspace, command.limit, command.offset);
+        return ok({ records, total });
+      }
+
+      const manifest = await readManifest(workspace);
+      const archive = await openWorkspaceArchive(workspace);
       let index;
       try {
         index = await readIndex(workspace);
       } catch {
         index = buildIndex(archive, manifest.workspaceId, manifest.revision);
       }
+
       if (command.type === 'inspect') {
         if (command.ref) {
           const item = findIndexed(index, command.ref);
@@ -129,103 +178,81 @@ export const pptxAdapter: FormatAdapter = {
           : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
       }
       if (command.type === 'validate') {
-        const diagnostics: Diagnostic[] = [];
-        for (const [source, rels] of archive.relationships)
-          for (const rel of rels)
-            if (!rel.external && rel.resolvedTarget && !archive.getPart(rel.resolvedTarget))
-              diagnostics.push({
-                severity: 'error',
-                code: 'BROKEN_RELATIONSHIP',
-                message: `Missing target ${rel.resolvedTarget}`,
-                details: { source, relationshipId: rel.id },
-              });
+        const diagnostics = validateArchive(archive);
         return diagnostics.length
           ? err('VALIDATION_FAILED', 'PPTX validation failed', diagnostics)
           : ok({ valid: true, revision: index.revision, capabilities: pptxCapabilities });
       }
-      if (command.type === 'commit') {
-        if (command.transactionId !== manifest.revision && command.transactionId !== 'latest')
-          return err('TRANSACTION_CONFLICT', `Expected transactionId ${manifest.revision}`);
-        const destination = resolve(
-          command.destination ??
-            join(dirname(manifest.source), `${basename(manifest.source, '.pptx')}.deckuse.pptx`),
-        );
-        if (!command.overwrite) {
-          try {
-            await readFile(destination);
-            return err('IO_ERROR', `Destination exists: ${destination}`);
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-          }
-        }
-        await mkdir(dirname(destination), { recursive: true });
-        const temp = `${destination}.${randomUUID()}.tmp`;
-        await copyFile(packagePath(workspace), temp);
-        await OpcArchive.openFile(temp);
-        await rename(temp, destination);
-        return ok({ destination, revision: manifest.revision });
-      }
+
+      if (!WRITE_TYPES.has(command.type))
+        return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
+
       if (command.transactionId !== manifest.revision && command.transactionId !== 'latest')
         return err('TRANSACTION_CONFLICT', `Expected transactionId ${manifest.revision}`);
-      if (command.type === 'batch') {
-        const working = await OpcArchive.open(await archive.toUint8Array()),
-          results: unknown[] = [],
-          diagnostics: Diagnostic[] = [];
-        for (const nested of command.commands) {
-          const result = await mutate(nested, working, index);
-          diagnostics.push(...result.diagnostics);
-          if (!result.ok) {
-            if (!command.atomic && results.length) {
-              const rev = revision();
-              await persist(
-                workspace,
-                working,
-                manifest,
-                buildIndex(working, manifest.workspaceId, rev),
-                { ...command, partial: true, failed: nested.type },
-              );
-              return err('VALIDATION_FAILED', 'Non-atomic batch partially applied', [
-                ...diagnostics,
-                {
-                  severity: 'warning',
-                  code: 'PARTIAL_BATCH_APPLIED',
-                  message: `${String(results.length)} operation(s) were committed before failure`,
-                },
-              ]);
-            }
-            return result;
-          }
-          results.push(result.value);
+
+      return await withWriteLock(workspace, async () => {
+        const currentManifest = await readManifest(workspace);
+        if (command.transactionId !== currentManifest.revision && command.transactionId !== 'latest')
+          return err('TRANSACTION_CONFLICT', `Expected transactionId ${currentManifest.revision}`);
+
+        const working = await openWorkspaceArchive(workspace);
+        let currentIndex;
+        try {
+          currentIndex = await readIndex(workspace);
+        } catch {
+          currentIndex = buildIndex(working, currentManifest.workspaceId, currentManifest.revision);
         }
-        if (command.dryRun)
-          return ok({ results, revision: manifest.revision, dryRun: true }, diagnostics);
-        const rev = revision(),
-          saved = await persist(
+
+        if (command.type === 'batch') {
+          const results: unknown[] = [];
+          const diagnostics: Diagnostic[] = [];
+          const slidePages: number[] = [];
+          for (const nested of command.commands) {
+            const result = await mutate(nested, working, currentIndex);
+            diagnostics.push(...result.diagnostics);
+            if (!result.ok) return result;
+            results.push(result.value);
+            slidePages.push(...slidesFromOutcome(result.value));
+          }
+          const validation = validateArchive(working);
+          if (validation.length)
+            return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
+          if (command.dryRun)
+            return ok({ results, revision: currentManifest.revision, dryRun: true }, diagnostics);
+          const rev = revision();
+          const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+          const saved = await persistWrite(
             workspace,
             working,
-            manifest,
-            buildIndex(working, manifest.workspaceId, rev),
+            currentManifest,
+            nextIndex,
             command,
+            mergeSlides(slidePages),
           );
-        return ok({ results, revision: saved.revision }, diagnostics);
-      }
-      const working = await OpcArchive.open(await archive.toUint8Array()),
-        result = await mutate(command, working, index);
-      if (!result.ok) return result;
-      if (command.dryRun)
-        return ok(
-          { ...result.value, revision: manifest.revision, dryRun: true },
-          result.diagnostics,
-        );
-      const rev = revision(),
-        saved = await persist(
+          return ok({ results, revision: saved.revision }, diagnostics);
+        }
+
+        const result = await mutate(command, working, currentIndex);
+        if (!result.ok) return result;
+        const validation = validateArchive(working);
+        if (validation.length) return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
+        if (command.dryRun)
+          return ok(
+            { ...result.value, revision: currentManifest.revision, dryRun: true },
+            result.diagnostics,
+          );
+        const rev = revision();
+        const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+        const saved = await persistWrite(
           workspace,
           working,
-          manifest,
-          buildIndex(working, manifest.workspaceId, rev),
+          currentManifest,
+          nextIndex,
           command,
+          slidesFromOutcome(result.value),
         );
-      return ok({ ...result.value, revision: saved.revision }, result.diagnostics);
+        return ok({ ...result.value, revision: saved.revision }, result.diagnostics);
+      });
     } catch (cause) {
       return err('IO_ERROR', cause instanceof Error ? cause.message : 'PPTX operation failed');
     }

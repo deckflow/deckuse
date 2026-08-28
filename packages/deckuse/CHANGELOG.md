@@ -1,5 +1,11 @@
 # @deckflow/deckuse
 
+## 1.0.2
+
+### Patch Changes
+
+- 417cb9a: Fix global installation and report the package version from the CLI.
+
 ## 1.0.1
 
 ### Patch Changes
