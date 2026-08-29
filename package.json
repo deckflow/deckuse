@@ -1,6 +1,7 @@
 {
   "name": "@deckflow/deckuse",
   "private": true,
+  "license": "AGPL-3.0",
   "type": "module",
   "packageManager": "pnpm@10.6.3",
   "engines": {

@@ -1,6 +1,7 @@
 {
   "name": "@deckflow/deckuse-xlsx",
   "version": "0.1.0",
+  "license": "AGPL-3.0",
   "type": "module",
   "exports": {
     ".": {
