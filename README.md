@@ -20,8 +20,10 @@ PPTX is the currently implemented format. DOCX, XLSX, Keynote, and Numbers adapt
 Deckuse lets an agent modify an existing presentation without recreating it from scratch. Its workflow is deliberately structural rather than visual:
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
 ```
+
+Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
 
 It preserves untouched XML and unknown package parts where possible. It is not a rendering engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct.
 
@@ -50,11 +52,21 @@ deckuse query ./workspace 'hasText=true text~=[\u4e00-\u9fff]' --json
 # Apply one JSON command, a JSON array, or JSONL.
 deckuse apply ./workspace --input operations.jsonl --json
 
-# Verify the package and export it.
+# Validate the workspace, inspect history, and undo writes.
 deckuse validate ./workspace --json
-deckuse commit ./workspace -o output.pptx --json
-# Use --force only when replacing an existing output file.
-deckuse commit ./workspace -o output.pptx --force --json
+deckuse history ./workspace --json
+deckuse undo ./workspace --steps 1 --json
+```
+
+Workspace layout:
+
+```text
+workspace/
+  source/           # unpacked OPC package; writes modify this directory
+  package.pptx      # live Office snapshot rebuilt from source (not in Git)
+  .deckuse/         # manifest, index, operations.jsonl
+  .git/             # workspace version history
+  .gitignore        # ignores package.* and other generated files
 ```
 
 `apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command. When invoked without a subcommand, the CLI instead accepts one complete JSON command on standard input.
@@ -98,10 +110,11 @@ cat > year-update.json <<'EOF'
 EOF
 deckuse apply ./year-update --input year-update.json --json
 deckuse validate ./year-update --json
-deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
 
-The review query limits the change to known occurrences; `replaceText` performs the approved bulk mutation while leaving unrelated objects intact.
+After the write completes, `./year-update/package.pptx` is rebuilt automatically as the latest snapshot.
+
+The review query limits the change to known occurrences; `replaceText` performs the approved bulk mutation while leaving unrelated objects intact. Without a selector, it updates the most specific indexed text nodes rather than ancestor containers that aggregate descendant text.
 
 ### 2. Rename a company or product
 
@@ -217,7 +230,7 @@ Transform coordinates are OOXML EMUs. Preserve `x`, `width`, and `height` from t
 
 **Request:** “Create a version for a prospective customer. Update the customer name and approved account-specific copy, but preserve the design.”
 
-Create a separate workspace for each output from the approved master. Query the placeholders or existing customer text, apply only reviewed replacements, validate, and commit to a distinct file.
+Create a separate workspace for each output from the approved master. Query the placeholders or existing customer text, apply only reviewed replacements, validate, and use the automatically updated `package.pptx`.
 
 ```sh
 deckuse init approved-master.pptx ./customer-a --json
@@ -225,7 +238,6 @@ deckuse query ./customer-a 'text=Customer Name' --json
 # Apply reviewed replacements for this customer only.
 deckuse apply ./customer-a --input customer-a.jsonl --json
 deckuse validate ./customer-a --json
-deckuse commit ./customer-a -o customer-a-deck.pptx --json
 ```
 
 Separate workspaces prevent one customer’s edits from leaking into another output. Replace only the objects the approval process allows the agent to modify.
@@ -261,7 +273,7 @@ This preserves a single approved source deck while making every variant reproduc
 
 **Request:** “Inspect this deck, identify the requested edits, make them, and export a revised PPTX.”
 
-Give the agent this loop: initialize a workspace, inspect or query before every targeted change, generate explicit JSON commands, apply them, validate the package, and commit a new output. Store the command file and command results alongside the task when auditability matters.
+Give the agent this loop: initialize a workspace, inspect or query before every targeted change, generate explicit JSON commands, apply them, validate the package, and use the rebuilt `package.pptx` as the export. Store the command file and command results alongside the task when auditability matters.
 
 Deckuse gives the agent stable references, selectors, transactions, validation, and a deterministic export path. The agent provides task interpretation and decides which operations are appropriate.
 
@@ -269,7 +281,7 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.

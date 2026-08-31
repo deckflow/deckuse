@@ -15,26 +15,30 @@ import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import { attr, cNvPr, descendants, first, root, setNodeText } from './xml.js';
+const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
+const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
+  descendants(doc).find(
+    (node) => node.localName != null && SHAPE_LOCAL_NAMES.has(node.localName) && attr(cNvPr(node), 'id') === id,
+  );
 const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
   if (['slide', 'notes', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
   if (item.kind === 'tableCell') {
     const rawTableId = item.location?.['tableId'],
       tableId = typeof rawTableId === 'string' ? rawTableId : '',
-      tableTail = tableId.split('.').at(-1),
-      table = descendants(doc).find((n) => attr(cNvPr(n), 'id') === tableTail);
+      tableTail = tableId.split('.').at(-1) ?? '';
+    if (!tableTail) return undefined;
+    const table = shapeByCNvPrId(doc, tableTail);
     if (!table) return;
     const row = descendants(table, 'tr')[Number(item.location?.['row'])];
     return row ? descendants(row, 'tc')[Number(item.location?.['column'])] : undefined;
   }
-  // elementId is `${slideId}:${ancestors.cNvPrId joined by .}`; cNvPr ids are the leaf only.
-  const raw = item.location?.['cNvPrId'];
-  const tail =
-    typeof raw === 'string'
-      ? raw
+  const id =
+    typeof item.location?.['cNvPrId'] === 'string'
+      ? item.location['cNvPrId']
       : item.ref.elementId?.includes(':')
         ? item.ref.elementId.split(':').slice(1).join(':').split('.').at(-1)
         : item.ref.elementId?.split('.').at(-1);
-  return descendants(doc).find((n) => attr(cNvPr(n), 'id') === tail);
+  return id ? shapeByCNvPrId(doc, id) : undefined;
 };
 const transform = (node: Element, t: Record<string, unknown>): void => {
   const x = first(node, 'xfrm');
@@ -88,6 +92,24 @@ const writeText = (
   archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
   return ok(undefined, diagnostics);
 };
+const isDescendantOf = (item: IndexedElement, ancestorId: string): boolean => {
+  if (item.parentId === ancestorId) return true;
+  const elementId = item.ref.elementId;
+  return Boolean(elementId?.startsWith(`${ancestorId}.`));
+};
+
+/** Without a selector, skip ancestor elements whose text aggregates descendant matches. */
+const narrowReplaceTextCandidates = (candidates: IndexedElement[]): IndexedElement[] => {
+  if (candidates.length <= 1) return candidates;
+  return candidates.filter((item) => {
+    const id = item.ref.elementId;
+    if (!id) return true;
+    return !candidates.some(
+      (other) => other.ref.elementId !== id && isDescendantOf(other, id),
+    );
+  });
+};
+
 const applyReplaceText = (
   command: Extract<AtomicCommand, { type: 'replaceText' }>,
   archive: OpcArchive,
@@ -109,12 +131,13 @@ const applyReplaceText = (
     command.regex
       ? text.replace(new RegExp(command.find, 'gu'), command.replace)
       : text.split(command.find).join(command.replace);
-  const candidates = index.elements.filter(
+  let candidates = index.elements.filter(
     (item) =>
       Boolean(item.text?.length) &&
       (!command.selector || matchesSelector(item, command.selector)) &&
       matches(item.text ?? ''),
   );
+  if (!command.selector) candidates = narrowReplaceTextCandidates(candidates);
   const limit = command.limit ?? 1000;
   const selected = candidates.slice(0, limit);
   const diagnostics: Diagnostic[] = [];

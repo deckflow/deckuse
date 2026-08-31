@@ -20,8 +20,10 @@ PPTX es el formato implementado actualmente. Los adaptadores de DOCX, XLSX, Keyn
 Deckuse permite modificar una presentación existente sin recrearla desde cero. Su flujo de trabajo prioriza deliberadamente la estructura sobre lo visual:
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
 ```
+
+Cada escritura exitosa confirma automáticamente una revisión Git, actualiza `operations.jsonl` y reconstruye `package.pptx`. Usa `undo` para revertir escrituras y `history` para consultar el registro de operaciones.
 
 Conserva el XML intacto y las partes desconocidas del paquete siempre que es posible. No es un motor de renderizado y no puede juzgar de forma fiable si una diapositiva es atractiva o si el diseño visual es correcto.
 
@@ -47,9 +49,10 @@ deckuse query ./workspace '*' --limit 500 --json
 # Aplicar un comando JSON, una matriz JSON o JSONL.
 deckuse apply ./workspace --input operations.jsonl --json
 
-# Validar el paquete y exportar.
+# Validar el espacio de trabajo, consultar el historial y deshacer escrituras.
 deckuse validate ./workspace --json
-deckuse commit ./workspace -o output.pptx --json
+deckuse history ./workspace --json
+deckuse undo ./workspace --steps 1 --json
 ```
 
 ## Flujo de trabajo de la CLI
@@ -95,10 +98,11 @@ cat > year-update.json <<'EOF'
 EOF
 deckuse apply ./year-update --input year-update.json --json
 deckuse validate ./year-update --json
-deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
 
-La consulta de revisión limita el cambio a las apariciones conocidas; `replaceText` realiza la modificación masiva aprobada y deja intactos los objetos no relacionados.
+Cuando termina la escritura, `./year-update/package.pptx` se reconstruye automáticamente como la instantánea más reciente.
+
+La consulta de revisión limita el cambio a las apariciones conocidas; `replaceText` realiza la modificación masiva aprobada y deja intactos los objetos no relacionados. Sin selector, actualiza los nodos de texto indexados más específicos en lugar de contenedores ancestros que agregan texto descendiente.
 
 ### 2. Renombrar una empresa o un producto
 
@@ -214,7 +218,7 @@ Las coordenadas de transformación son EMU de OOXML. Conserva `x`, `width` y `he
 
 **Solicitud:** «Crea una versión para un cliente potencial. Actualiza el nombre del cliente y el texto aprobado específico de la cuenta, pero conserva el diseño».
 
-Crea un espacio de trabajo independiente para cada salida a partir del original aprobado. Consulta los marcadores de posición o el texto actual del cliente, aplica únicamente sustituciones revisadas, valida y confirma en un archivo distinto.
+Crea un espacio de trabajo independiente para cada salida a partir del original aprobado. Consulta los marcadores de posición o el texto actual del cliente, aplica únicamente sustituciones revisadas, valida y usa el `package.pptx` actualizado automáticamente.
 
 ```sh
 deckuse init approved-master.pptx ./customer-a --json
@@ -222,7 +226,6 @@ deckuse query ./customer-a 'text=Customer Name' --json
 # Apply reviewed replacements for this customer only.
 deckuse apply ./customer-a --input customer-a.jsonl --json
 deckuse validate ./customer-a --json
-deckuse commit ./customer-a -o customer-a-deck.pptx --json
 ```
 
 Los espacios de trabajo independientes evitan que las modificaciones de un cliente se filtren a la salida de otro. Sustituye únicamente los objetos cuya modificación el proceso de aprobación permite al agente.
@@ -258,7 +261,7 @@ Esto conserva una única presentación fuente aprobada y hace que cada variante 
 
 **Solicitud:** «Inspecciona esta presentación, identifica las modificaciones solicitadas, realízalas y exporta un PPTX revisado».
 
-Proporciona al agente este ciclo: inicializar un espacio de trabajo, inspeccionar o consultar antes de cada cambio dirigido, generar comandos JSON explícitos, aplicarlos, validar el paquete y confirmar una salida nueva. Cuando la auditabilidad sea importante, guarda el archivo de comandos y los resultados de los comandos junto con la tarea.
+Proporciona al agente este ciclo: inicializar un espacio de trabajo, inspeccionar o consultar antes de cada cambio dirigido, generar comandos JSON explícitos, aplicarlos, validar el paquete y usar el `package.pptx` reconstruido como exportación. Cuando la auditabilidad sea importante, guarda el archivo de comandos y los resultados de los comandos junto con la tarea.
 
 Deckuse proporciona al agente referencias estables, selectores, transacciones, validación y una ruta de exportación determinista. El agente aporta la interpretación de la tarea y decide qué operaciones son adecuadas.
 
@@ -285,7 +288,7 @@ Deckuse proporciona al agente referencias estables, selectores, transacciones, v
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.

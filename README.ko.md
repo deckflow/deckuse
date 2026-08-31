@@ -20,8 +20,10 @@ Deckuse는 코딩 에이전트를 위한 로컬 우선, 스키마 기반 Office 
 Deckuse는 프레젠테이션을 처음부터 다시 만들지 않고 기존 파일을 수정합니다. 이 워크플로는 시각적 판단보다 구조를 우선하도록 설계되었습니다.
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
 ```
+
+Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
 
 가능한 경우 변경하지 않은 XML과 알려지지 않은 패키지 파트를 보존합니다. 렌더링 엔진이 아니므로 슬라이드의 시각적 품질이나 레이아웃 정확성을 신뢰성 있게 판단할 수 없습니다.
 
@@ -49,7 +51,8 @@ deckuse apply ./workspace --input operations.jsonl --json
 
 # 패키지를 검증하고 내보냅니다.
 deckuse validate ./workspace --json
-deckuse commit ./workspace -o output.pptx --json
+deckuse history ./workspace --json
+deckuse undo ./workspace --steps 1 --json
 ```
 
 ## CLI 워크플로
@@ -95,10 +98,11 @@ cat > year-update.json <<'EOF'
 EOF
 deckuse apply ./year-update --input year-update.json --json
 deckuse validate ./year-update --json
-deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
 
-검토 쿼리는 변경 범위를 확인된 항목으로 제한합니다. `replaceText`는 승인된 일괄 변경을 수행하면서 관련 없는 객체는 그대로 유지합니다.
+After the write completes, `./year-update/package.pptx` is rebuilt automatically as the latest snapshot.
+
+검토 쿼리는 변경 범위를 확인된 항목으로 제한합니다. `replaceText`는 승인된 일괄 변경을 수행하면서 관련 없는 객체는 그대로 유지합니다. selector가 없으면 하위 텍스트를 집계하는 조상 컨테이너 대신 가장 구체적인 인덱스된 텍스트 노드를 업데이트합니다.
 
 ### 2. 회사 또는 제품 이름 변경
 
@@ -214,7 +218,7 @@ deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
 
 **요청:** “잠재 고객용 버전을 만드세요. 고객 이름과 승인된 계정별 문구는 업데이트하되 디자인은 유지하세요.”
 
-승인된 마스터에서 각 출력물마다 별도의 작업 공간을 만듭니다. 플레이스홀더 또는 기존 고객 텍스트를 쿼리하고, 검토된 교체만 적용한 뒤 검증하고 별도의 파일에 커밋합니다.
+승인된 마스터에서 각 출력물마다 별도의 작업 공간을 만듭니다. 플레이스홀더 또는 기존 고객 텍스트를 쿼리하고, 검토된 교체만 적용한 뒤 검증하고 자동으로 갱신되는 `package.pptx`를 사용합니다.
 
 ```sh
 deckuse init approved-master.pptx ./customer-a --json
@@ -222,7 +226,6 @@ deckuse query ./customer-a 'text=Customer Name' --json
 # Apply reviewed replacements for this customer only.
 deckuse apply ./customer-a --input customer-a.jsonl --json
 deckuse validate ./customer-a --json
-deckuse commit ./customer-a -o customer-a-deck.pptx --json
 ```
 
 별도 작업 공간은 한 고객의 편집 내용이 다른 출력물로 새어 나가는 것을 방지합니다. 승인 절차가 에이전트의 수정을 허용한 객체만 교체하세요.
@@ -258,7 +261,7 @@ deckuse commit ./customer-a -o customer-a-deck.pptx --json
 
 **요청:** “이 덱을 검사하고, 요청된 편집을 식별하여 적용한 뒤 수정된 PPTX를 내보내세요.”
 
-에이전트에 다음 루프를 제공합니다. 작업 공간을 초기화하고, 대상 변경 전마다 inspect 또는 query를 실행하며, 명시적인 JSON 명령을 생성하고 적용한 뒤 패키지를 검증하고 새 출력물로 커밋합니다. 감사 가능성이 중요한 경우 명령 파일과 명령 결과를 작업과 함께 저장하세요.
+에이전트에 다음 루프를 제공합니다. 작업 공간을 초기화하고, 대상 변경 전마다 inspect 또는 query를 실행하며, 명시적인 JSON 명령을 생성하고 적용한 뒤 패키지를 검증하고 재구성된 `package.pptx`를 내보내기로 사용합니다. 감사 가능성이 중요한 경우 명령 파일과 명령 결과를 작업과 함께 저장하세요.
 
 Deckuse는 에이전트에 안정적인 참조, 선택자, 트랜잭션, 검증 및 결정론적인 내보내기 경로를 제공합니다. 작업을 해석하고 어떤 작업이 적절한지 결정하는 것은 에이전트입니다.
 
@@ -285,7 +288,7 @@ Deckuse는 에이전트에 안정적인 참조, 선택자, 트랜잭션, 검증 
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.

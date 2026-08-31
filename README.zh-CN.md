@@ -113,7 +113,7 @@ deckuse validate ./year-update --json
 
 写操作完成后，`./year-update/package.pptx` 会自动更新为最新快照。
 
-审查查询将变更限定在已知出现位置；`replaceText` 执行经批准的批量修改，同时保持无关对象不变。
+审查查询将变更限定在已知出现位置；`replaceText` 执行经批准的批量修改，同时保持无关对象不变。无 selector 时，它会更新最具体的索引文本节点，而不是聚合了子节点文本的祖先容器。
 
 ### 2. 重命名公司或产品
 
@@ -272,7 +272,7 @@ deckuse validate ./customer-a --json
 
 **Request：**“检查此演示文稿，识别所需编辑，完成编辑并导出修订后的 PPTX。”
 
-向智能体提供以下循环：初始化工作区；在每次针对性变更前执行检查或查询；生成显式 JSON 命令；应用命令；验证包；提交新的输出。当可审计性很重要时，将命令文件和命令结果与任务一同保存。
+向智能体提供以下循环：初始化工作区；在每次针对性变更前执行检查或查询；生成显式 JSON 命令；应用命令；验证包；使用自动重建的 `package.pptx` 作为导出结果。当可审计性很重要时，将命令文件和命令结果与任务一同保存。
 
 Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性的导出路径。智能体负责理解任务，并决定哪些操作适用。
 
@@ -299,7 +299,7 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setText` and `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.

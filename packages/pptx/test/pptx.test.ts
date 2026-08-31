@@ -439,6 +439,80 @@ describe('pptx adapter', () => {
     expect(slideXml).toMatch(/<a:t>Bonjour\s*<\/a:t>/);
     expect(slideXml).not.toMatch(/<a:r>\s*<a:rPr[^>]*\/>\s*<\/a:r>/);
   });
+  it('replaceText without selector prefers leaf text nodes over aggregated ancestors', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-replace-leaf-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    archive.setPart(
+      '/ppt/presentation.xml',
+      e.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+      ),
+      CT,
+    );
+    archive.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>FY2025 Overview</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/></p:nvGraphicFramePr><a:graphic><a:graphicData><a:tbl><a:tr><a:tc><a:txBody><a:p><a:r><a:t>Cell</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    await archive.writeFile(source);
+    expect(
+      (
+        await pptxAdapter.init(
+          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          {},
+        )
+      ).ok,
+    ).toBe(true);
+    const rev = (
+      (
+        await pptxAdapter.execute(
+          { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+          {},
+        )
+      ).value as { document: { revision: string } }
+    ).document.revision;
+    const replaced = await pptxAdapter.execute(
+      {
+        version: '1.0',
+        type: 'replaceText',
+        workspaceId: workspace,
+        transactionId: rev,
+        find: 'FY2025',
+        replace: 'FY2026',
+      },
+      {},
+    );
+    expect(replaced, JSON.stringify(replaced)).toMatchObject({
+      ok: true,
+      value: { matched: 1, changed: true, slides: [1] },
+    });
+    const slideXml = new TextDecoder().decode(
+      (await OpcArchive.openFile(join(workspace, 'package.pptx'))).getPart(
+        '/ppt/slides/slide1.xml',
+      )!.data,
+    );
+    expect(slideXml).toContain('FY2026 Overview');
+    expect(slideXml).toContain('Cell');
+  });
   it('setProperties applies fill, stroke, and text styles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-props-'));
     const source = join(root, 'source.pptx'),

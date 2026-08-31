@@ -20,8 +20,10 @@ Deckuse — локальный, управляемый схемами движо
 Deckuse позволяет изменять существующую презентацию, не создавая её заново. Рабочий процесс намеренно ориентирован на структуру, а не на визуальное представление:
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → commit → updated.pptx
+existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
 ```
+
+Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
 
 По возможности сохраняются неизменённые XML и неизвестные части пакета. Это не движок рендеринга: он не может надёжно оценить привлекательность слайда или правильность макета.
 
@@ -49,7 +51,8 @@ deckuse apply ./workspace --input operations.jsonl --json
 
 # Проверить пакет и экспортировать.
 deckuse validate ./workspace --json
-deckuse commit ./workspace -o output.pptx --json
+deckuse history ./workspace --json
+deckuse undo ./workspace --steps 1 --json
 ```
 
 ## Рабочий процесс CLI
@@ -95,10 +98,11 @@ cat > year-update.json <<'EOF'
 EOF
 deckuse apply ./year-update --input year-update.json --json
 deckuse validate ./year-update --json
-deckuse commit ./year-update -o master-fy2026.pptx --json
 ```
 
-Проверочный запрос ограничивает изменение известными вхождениями; `replaceText` выполняет утверждённое массовое изменение, не затрагивая посторонние объекты.
+After the write completes, `./year-update/package.pptx` is rebuilt automatically as the latest snapshot.
+
+Проверочный запрос ограничивает изменение известными вхождениями; `replaceText` выполняет утверждённое массовое изменение, не затрагивая посторонние объекты. Без selector он обновляет наиболее конкретные индексированные текстовые узлы, а не предков-контейнеры, агрегирующие текст потомков.
 
 ### 2. Переименовать компанию или продукт
 
@@ -214,7 +218,7 @@ ID элементов в примере зависят от конкретной
 
 **Запрос:** «Создай версию для потенциального клиента. Обнови имя клиента и утверждённый текст для его аккаунта, но сохрани дизайн».
 
-Создавайте отдельное рабочее пространство для каждого результата на основе утверждённого исходника. Запросите заполнители или существующий текст клиента, применяйте только проверенные замены, выполните валидацию и зафиксируйте результат в отдельном файле.
+Создавайте отдельное рабочее пространство для каждого результата на основе утверждённого исходника. Запросите заполнители или существующий текст клиента, применяйте только проверенные замены, выполните валидацию и используйте автоматически обновляемый `package.pptx`.
 
 ```sh
 deckuse init approved-master.pptx ./customer-a --json
@@ -222,7 +226,6 @@ deckuse query ./customer-a 'text=Customer Name' --json
 # Apply reviewed replacements for this customer only.
 deckuse apply ./customer-a --input customer-a.jsonl --json
 deckuse validate ./customer-a --json
-deckuse commit ./customer-a -o customer-a-deck.pptx --json
 ```
 
 Отдельные рабочие пространства не позволяют изменениям одного клиента попасть в результат другого. Заменяйте только объекты, которые процесс согласования разрешает агенту изменять.
@@ -258,7 +261,7 @@ deckuse commit ./customer-a -o customer-a-deck.pptx --json
 
 **Запрос:** «Проверь эту презентацию, определи требуемые изменения, внеси их и экспортируй пересмотренный PPTX».
 
-Задайте агенту такой цикл: инициализировать рабочее пространство, выполнять `inspect` или `query` перед каждым целевым изменением, генерировать явные JSON-команды, применять их, валидировать пакет и фиксировать новый результат. Когда важна аудируемость, храните файл команд и результаты команд вместе с задачей.
+Задайте агенту такой цикл: инициализировать рабочее пространство, выполнять `inspect` или `query` перед каждым целевым изменением, генерировать явные JSON-команды, применять их, валидировать пакет и использовать пересобранный `package.pptx` как экспорт. Когда важна аудируемость, храните файл команд и результаты команд вместе с задачей.
 
 Deckuse даёт агенту стабильные ссылки, селекторы, транзакции, валидацию и детерминированный путь экспорта. Агент интерпретирует задачу и решает, какие операции уместны.
 
@@ -285,7 +288,7 @@ Deckuse даёт агенту стабильные ссылки, селекто�
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
