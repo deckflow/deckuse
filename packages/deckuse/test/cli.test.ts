@@ -65,11 +65,27 @@ describe('deckuse CLI', () => {
     expect(help.stdout).toContain('deckuse <command> --help');
     expect(help.stdout).toContain('undo <workspace>');
     expect(help.stdout).toContain('history <workspace>');
+    expect(help.stdout).toContain('monitor <workspace>');
 
     const undoHelp = await run(['undo', '--help']);
     expect(undoHelp).toMatchObject({ code: 0, stderr: '' });
     expect(undoHelp.stdout).toContain('usage: deckuse undo <workspace>');
     expect(undoHelp.stdout).toContain('--steps');
+
+    const monitorHelp = await run(['monitor', '--help']);
+    expect(monitorHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(monitorHelp.stdout).toContain('usage: deckuse monitor <workspace>');
+    expect(monitorHelp.stdout).toContain('--host');
+    expect(monitorHelp.stdout).toContain('--port');
+
+    const invalidMonitor = await run(['monitor', '.', '--port', 'invalid']);
+    expect(invalidMonitor.code).toBe(2);
+    expect(invalidMonitor.stderr).toContain('--port must be an integer');
+
+    const invalidWorkspace = await mkdtemp(join(tmpdir(), 'deckuse-cli-invalid-monitor-'));
+    const missingWorkspace = await run(['monitor', invalidWorkspace, '--port', '0']);
+    expect(missingWorkspace.code).toBe(2);
+    expect(missingWorkspace.stderr).toContain('Invalid deckuse workspace');
 
     const helpAlias = await run(['help', 'apply']);
     expect(helpAlias).toMatchObject({ code: 0, stderr: '' });
@@ -81,7 +97,9 @@ describe('deckuse CLI', () => {
       workspace = join(root, 'workspace');
     await fixture(source);
     expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
-    await expect(access(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'))).resolves.toBeUndefined();
+    await expect(
+      access(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml')),
+    ).resolves.toBeUndefined();
     await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain('package.*');
     const inspect = await run(['inspect', workspace, '--json']);
     expect(inspect.code).toBe(0);
@@ -113,9 +131,9 @@ describe('deckuse CLI', () => {
     const undo = await run(['undo', workspace, '--json']);
     expect(undo.code).toBe(0);
     const afterUndo = await OpcArchive.openFile(join(workspace, 'package.pptx'));
-    expect(new TextDecoder().decode(afterUndo.getPart('/ppt/slides/slide1.xml')!.data)).not.toContain(
-      'CLI',
-    );
+    expect(
+      new TextDecoder().decode(afterUndo.getPart('/ppt/slides/slide1.xml')!.data),
+    ).not.toContain('CLI');
     const historyAfterUndo = JSON.parse((await run(['history', workspace, '--json'])).stdout) as {
       value: { total: number };
     };

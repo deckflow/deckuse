@@ -24,6 +24,9 @@ describe('deckuse workspace', () => {
     await writeFile(join(workspace, 'example.txt'), 'hello\n');
     expect(await hasWorkspaceGitRepo(workspace)).toBe(false);
     await ensureGitignore(workspace);
+    await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain(
+      '.deckuse/monitor/',
+    );
     await initGitRepo(workspace, 'deckuse: init');
     expect(await hasWorkspaceGitRepo(workspace)).toBe(true);
     await expect(access(join(workspace, '.git'))).resolves.toBeUndefined();

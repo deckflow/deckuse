@@ -2,13 +2,15 @@
 import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 import { runCommand } from './index.js';
+import { startMonitor } from './monitor.js';
 import { version } from './version.js';
 
 const args = process.argv.slice(2);
 const json = args.includes('--json');
 const clean = args.filter((arg) => arg !== '--json');
 
-type HelpCommand = 'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'undo' | 'history';
+type HelpCommand =
+  'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'undo' | 'history' | 'monitor';
 
 const HELP: Record<'main' | HelpCommand, string> = {
   main: `usage: deckuse <command> [<args>] [--json]
@@ -23,6 +25,7 @@ Common commands:
   validate <workspace>           Validate workspace changes
   undo <workspace>               Undo recent write operations
   history <workspace>            View write operation history
+  monitor <workspace>            Live-preview workspace changes
 
 Run 'deckuse <command> --help' for details about a command.
 Run 'deckuse help <command>' for the same command reference.
@@ -112,6 +115,17 @@ Options:
 
 Example:
   deckuse undo ./presentation --steps 2
+`,
+  monitor: `usage: deckuse monitor <workspace> [--host <host>] [--port <port>]
+
+Live-preview workspace changes in a browser.
+
+Arguments:
+  <workspace>      Existing deckuse workspace
+
+Options:
+  --host <host>    HTTP listen host (default: 127.0.0.1)
+  --port <port>    HTTP listen port (default: 4173)
 `,
   history: `usage: deckuse history <workspace> [--limit <n>] [--offset <n>] [--json]
 
@@ -237,9 +251,29 @@ try {
         workspaceId: workspace,
         steps: Number(option('--steps') ?? 1),
       });
+    } else if (action === 'monitor') {
+      const workspace = clean[1];
+      if (!workspace)
+        throw new Error('Usage: deckuse monitor workspace/ [--host <host>] [--port <port>]');
+      const port = Number(option('--port') ?? 4173);
+      if (!Number.isInteger(port) || port < 0 || port > 65535)
+        throw new Error('--port must be an integer between 0 and 65535');
+      const monitor = await startMonitor(workspace, {
+        host: option('--host') ?? '127.0.0.1',
+        port,
+      });
+      process.stdout.write(`Deckuse monitor: ${monitor.url}\n`);
+      const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+        process.stderr.write(`deckuse monitor: received ${signal}, shutting down\n`);
+        await monitor.close();
+        process.exit(0);
+      };
+      process.once('SIGINT', () => void shutdown('SIGINT'));
+      process.once('SIGTERM', () => void shutdown('SIGTERM'));
     } else if (action === 'history') {
       const workspace = clean[1];
-      if (!workspace) throw new Error('Usage: deckuse history workspace/ [--limit <n>] [--offset <n>]');
+      if (!workspace)
+        throw new Error('Usage: deckuse history workspace/ [--limit <n>] [--offset <n>]');
       ok = await execute({
         version: '1.0',
         type: 'history',

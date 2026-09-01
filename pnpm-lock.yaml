@@ -47,7 +47,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@deckflow/deckuse-docx':
         specifier: workspace:*
         version: link:../docx
@@ -60,9 +60,15 @@ importers:
       '@deckflow/deckuse-pptx':
         specifier: workspace:*
         version: file:packages/pptx
+      '@deckflow/deckuse-workspace':
+        specifier: workspace:*
+        version: link:../workspace
       '@deckflow/deckuse-xlsx':
         specifier: workspace:*
         version: link:../xlsx
+      '@deckflow/office2html':
+        specifier: ^0.2.1
+        version: 0.2.1
     devDependencies:
       '@deckflow/deckuse-opc':
         specifier: workspace:*
@@ -72,19 +78,19 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
   packages/key:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
   packages/numbers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
   packages/opc:
     dependencies:
@@ -99,7 +105,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@deckflow/deckuse-opc':
         specifier: workspace:*
         version: file:packages/opc
@@ -114,7 +120,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       isomorphic-git:
         specifier: latest
         version: 1.41.9
@@ -123,7 +129,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
 packages:
 
@@ -201,6 +207,30 @@ packages:
   '@deckflow/deckuse-workspace@file:packages/workspace':
     resolution: {directory: packages/workspace, type: directory}
     engines: {node: '>=18.0.0'}
+
+  '@deckflow/office2html-darwin-arm64@0.2.1':
+    resolution: {integrity: sha512-tg1ipuCRpbnuiaAScsmJUg6bggzHxaG/tBOlad/9ShtqvhGgLnahQ88HfokB7p6YfJu9gpRX0e3S0zQpaENplg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@deckflow/office2html-darwin-x64@0.2.1':
+    resolution: {integrity: sha512-vIdUdq+/qXGIel5FROa5M/JTSjaGuo+9xTuMRzBJNIuuEOd2P6j8BsKVXcd9JgKO+z+a5Hzo4gxOGX0jplcD/g==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@deckflow/office2html-linux-x64@0.2.1':
+    resolution: {integrity: sha512-KYuQxaqYakQVtfUYLixPKUhGDiVYIxaonjmYw6fKpUycq4Sp44KxSAvp5Kt4eXH1nVy9oqoJ+dB4lP+lmw3UaQ==}
+    cpu: [x64]
+    os: [linux]
+
+  '@deckflow/office2html-win32-x64@0.2.1':
+    resolution: {integrity: sha512-zjEUqN4ueRKP494K0iEDzV38ZdciYJZimCn7fpf0DBvsJP0i2jeIa1q2TPSCsKIeX6pjEdbcvlhAkrM13I97GA==}
+    cpu: [x64]
+    os: [win32]
+
+  '@deckflow/office2html@0.2.1':
+    resolution: {integrity: sha512-jMYzTIpmuzs7rf46ACx1Ew4AoqP3bYuEF5oLuUjRHz6HGrAH+YGzb7ZfMERUbDJpVEOYrCSuU/rR6IUGqTg9pA==}
+    hasBin: true
 
   '@eslint-community/eslint-utils@4.10.1':
     resolution: {integrity: sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg==}
@@ -1452,6 +1482,9 @@ packages:
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
+
 snapshots:
 
   '@babel/runtime@7.29.7': {}
@@ -1601,7 +1634,7 @@ snapshots:
 
   '@deckflow/deckuse-core@file:packages/core':
     dependencies:
-      zod: 4.4.3
+      zod: 4.5.4
 
   '@deckflow/deckuse-opc@file:packages/opc':
     dependencies:
@@ -1619,6 +1652,25 @@ snapshots:
     dependencies:
       '@deckflow/deckuse-core': file:packages/core
       isomorphic-git: 1.41.9
+
+  '@deckflow/office2html-darwin-arm64@0.2.1':
+    optional: true
+
+  '@deckflow/office2html-darwin-x64@0.2.1':
+    optional: true
+
+  '@deckflow/office2html-linux-x64@0.2.1':
+    optional: true
+
+  '@deckflow/office2html-win32-x64@0.2.1':
+    optional: true
+
+  '@deckflow/office2html@0.2.1':
+    optionalDependencies:
+      '@deckflow/office2html-darwin-arm64': 0.2.1
+      '@deckflow/office2html-darwin-x64': 0.2.1
+      '@deckflow/office2html-linux-x64': 0.2.1
+      '@deckflow/office2html-win32-x64': 0.2.1
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.8.0)':
     dependencies:
@@ -2743,3 +2795,5 @@ snapshots:
   yocto-queue@0.1.0: {}
 
   zod@4.4.3: {}
+
+  zod@4.5.4: {}

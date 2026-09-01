@@ -53,6 +53,9 @@ deckuse apply ./workspace --input operations.jsonl --json
 deckuse validate ./workspace --json
 deckuse history ./workspace --json
 deckuse undo ./workspace --steps 1 --json
+
+# 实时预览编辑；浏览器订阅后才开始渲染。
+deckuse monitor ./workspace --host 127.0.0.1 --port 4173
 ```
 
 工作区布局：
@@ -61,7 +64,7 @@ deckuse undo ./workspace --steps 1 --json
 workspace/
   source/           # 解压后的 OPC 包，写操作直接修改此处
   package.pptx      # 由 source 即时打包的 Office 快照（不在 Git 中）
-  .deckuse/         # manifest、index、operations.jsonl
+  .deckuse/         # manifest、index、operations.jsonl、被忽略的监控输出
   .git/             # 工作区版本历史
   .gitignore        # 忽略 package.* 等生成文件
 ```

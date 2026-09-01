@@ -4,6 +4,7 @@ export {
   manifestPath,
   indexPath,
   operationsPath,
+  monitorDir,
   lockPath,
   gitignorePath,
 } from './paths.js';

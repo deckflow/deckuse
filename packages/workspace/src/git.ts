@@ -6,6 +6,7 @@ import { gitignorePath } from './paths.js';
 
 const WORKSPACE_GITIGNORE = `package.*
 .deckuse/write.lock
+.deckuse/monitor/
 .deckuse/*.tmp
 `;
 

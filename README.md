@@ -56,6 +56,9 @@ deckuse apply ./workspace --input operations.jsonl --json
 deckuse validate ./workspace --json
 deckuse history ./workspace --json
 deckuse undo ./workspace --steps 1 --json
+
+# Live-preview edits; rendering starts when a browser subscribes.
+deckuse monitor ./workspace --host 127.0.0.1 --port 4173
 ```
 
 Workspace layout:
@@ -64,7 +67,7 @@ Workspace layout:
 workspace/
   source/           # unpacked OPC package; writes modify this directory
   package.pptx      # live Office snapshot rebuilt from source (not in Git)
-  .deckuse/         # manifest, index, operations.jsonl
+  .deckuse/         # manifest, index, operations.jsonl, ignored monitor output
   .git/             # workspace version history
   .gitignore        # ignores package.* and other generated files
 ```
