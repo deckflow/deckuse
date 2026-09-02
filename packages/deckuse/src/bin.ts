@@ -124,7 +124,7 @@ Arguments:
   <workspace>      Existing deckuse workspace
 
 Options:
-  --host <host>    HTTP listen host (default: 127.0.0.1)
+  --host <host>    HTTP listen host (default: 0.0.0.0)
   --port <port>    HTTP listen port (default: 4173)
 `,
   history: `usage: deckuse history <workspace> [--limit <n>] [--offset <n>] [--json]
@@ -259,7 +259,7 @@ try {
       if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new Error('--port must be an integer between 0 and 65535');
       const monitor = await startMonitor(workspace, {
-        host: option('--host') ?? '127.0.0.1',
+        host: option('--host') ?? '0.0.0.0',
         port,
       });
       process.stdout.write(`Deckuse monitor: ${monitor.url}\n`);

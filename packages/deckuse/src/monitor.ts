@@ -350,7 +350,7 @@ export const startMonitor = async (
     response.writeHead(404).end();
   });
 
-  const host = options.host ?? '127.0.0.1';
+  const host = options.host ?? '0.0.0.0';
   const port = options.port ?? 4173;
   await new Promise<void>((done, reject) => {
     server.once('error', reject);
@@ -361,9 +361,10 @@ export const startMonitor = async (
   });
   const address = server.address();
   const actualPort = typeof address === 'object' && address ? address.port : port;
+  const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
   return {
     server,
-    url: `http://${host}:${String(actualPort)}/`,
+    url: `http://${displayHost}:${String(actualPort)}/`,
     close: async () => {
       for (const client of clients) client.end();
       clients.clear();

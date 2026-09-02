@@ -58,7 +58,7 @@ deckuse history ./workspace --json
 deckuse undo ./workspace --steps 1 --json
 
 # Live-preview edits; rendering starts when a browser subscribes.
-deckuse monitor ./workspace --host 127.0.0.1 --port 4173
+deckuse monitor ./workspace --port 4173
 ```
 
 Workspace layout:

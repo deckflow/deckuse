@@ -55,7 +55,7 @@ deckuse history ./workspace --json
 deckuse undo ./workspace --steps 1 --json
 
 # 实时预览编辑；浏览器订阅后才开始渲染。
-deckuse monitor ./workspace --host 127.0.0.1 --port 4173
+deckuse monitor ./workspace --port 4173
 ```
 
 工作区布局：
