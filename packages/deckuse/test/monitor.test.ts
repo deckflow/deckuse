@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -194,6 +194,159 @@ describe('monitor', () => {
     onChange?.();
     await eventually(() => expect(client.events.join('')).toContain('broken'));
     expect((await fetch(new URL(render!, monitor.url))).status).toBe(200);
+    client.close();
+    await monitor.close();
+  });
+
+  it('defers refresh while write.lock is held, then converts after unlock', async () => {
+    const workspace = await workspaceFixture();
+    const convertedInputs: string[] = [];
+    const converter = vi.fn(async (input: string, options: { output: string }) => {
+      convertedInputs.push(await readFile(input, 'utf8'));
+      await writeFile(join(options.output, 'index.html'), 'preview');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    let onChange: (() => void) | undefined;
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        debounceMs: 1,
+        watch: (_path: string, listener: () => void) => {
+          onChange = listener;
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+    const client = await subscribe(monitor.url);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
+    expect(convertedInputs[0]).toBe('pptx');
+
+    await writeFile(join(workspace, '.deckuse', 'write.lock'), '');
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: 'undone', slides: [1], operation: { type: 'undo' } })}\n`,
+    );
+    // Stale package while undo holds the lock (pack has not finished yet).
+    await writeFile(join(workspace, 'package.pptx'), 'stale-before-pack');
+    onChange?.();
+    await new Promise((done) => setTimeout(done, 30));
+    expect(converter).toHaveBeenCalledTimes(1);
+
+    await writeFile(join(workspace, 'package.pptx'), 'fresh-after-pack');
+    await unlink(join(workspace, '.deckuse', 'write.lock'));
+    onChange?.();
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
+    expect(convertedInputs[1]).toBe('fresh-after-pack');
+    await eventually(() => expect(client.events.join('')).toContain('"revision":"undone"'));
+    client.close();
+    await monitor.close();
+  });
+
+  it('re-converts when package.pptx changes even if operations stay the same', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: 'r1', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    const convertedInputs: string[] = [];
+    const converter = vi.fn(async (input: string, options: { output: string }) => {
+      convertedInputs.push(await readFile(input, 'utf8'));
+      await writeFile(join(options.output, 'index.html'), 'preview');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    let onChange: (() => void) | undefined;
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        debounceMs: 1,
+        watch: (_path: string, listener: () => void) => {
+          onChange = listener;
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+    const client = await subscribe(monitor.url);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
+    expect(convertedInputs[0]).toBe('pptx');
+
+    await writeFile(join(workspace, 'package.pptx'), 'repacked');
+    onChange?.();
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
+    expect(convertedInputs[1]).toBe('repacked');
+    client.close();
+    await monitor.close();
+  });
+
+  it('publishes slide strip metadata and a change summary with the record', async () => {
+    const workspace = await workspaceFixture();
+    const converter = vi.fn(async (_input: string, options: { output: string }) => {
+      await writeFile(join(options.output, 'index.html'), 'preview');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    let onChange: (() => void) | undefined;
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        debounceMs: 1,
+        watch: (_path: string, listener: () => void) => {
+          onChange = listener;
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+    const client = await subscribe(monitor.url);
+    await eventually(() => expect(client.events.join('')).toContain('event: state'));
+    const home = await fetch(monitor.url);
+    expect(home.status).toBe(200);
+    const html = await home.text();
+    expect(html).toContain('id="slides"');
+    expect(html).toContain('id="summary"');
+    expect(html).toContain('id="details"');
+
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({
+        at: '2026-09-03T07:38:27.661Z',
+        revision: '2',
+        operation: {
+          type: 'replaceText',
+          reason: '价值替换成 value',
+          find: '价值',
+          replace: 'value',
+        },
+        slides: [2],
+        gitCommit: 'a9aca5e29f60058ccb6bae177ea84de8236f38f5',
+      })}\n`,
+    );
+    onChange?.();
+    await eventually(() => expect(client.events.join('')).toContain('价值替换成 value'));
+    await eventually(() => expect(client.events.join('')).toContain('"slideCount":2'));
+    await eventually(() => expect(client.events.join('')).toContain('"page":2'));
+    await eventually(() => expect(converter.mock.calls.at(-1)?.[1]).toMatchObject({ pages: '2' }));
     client.close();
     await monitor.close();
   });

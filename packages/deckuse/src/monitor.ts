@@ -7,6 +7,7 @@ import office2html from '@deckflow/office2html';
 import {
   ensureGitignore,
   indexPath,
+  lockPath,
   monitorDir,
   operationsPath,
 } from '@deckflow/deckuse-workspace';
@@ -16,13 +17,21 @@ const DEBOUNCE_MS = 80;
 const READ_RETRIES = 3;
 
 interface OperationRecord {
+  readonly at?: string;
   readonly revision?: string;
   readonly slides?: number[];
   readonly operation?: unknown;
+  readonly gitCommit?: string;
 }
 
-interface MonitorState {
+interface MonitorMeta {
   readonly page: number;
+  readonly slideCount: number;
+  readonly summary: string;
+  readonly record: OperationRecord | null;
+}
+
+interface MonitorState extends MonitorMeta {
   readonly signature: string;
 }
 
@@ -60,6 +69,57 @@ const slideCount = async (workspace: string): Promise<number> => {
   return Math.max(1, index.elements?.filter((element) => element.kind === 'slide').length ?? 0);
 };
 
+const summarizeRecord = (record: OperationRecord | undefined, page: number): string => {
+  if (!record) return 'No changes yet — showing initial preview';
+  const operation =
+    record.operation && typeof record.operation === 'object'
+      ? (record.operation as Record<string, unknown>)
+      : undefined;
+  if (typeof operation?.['reason'] === 'string' && operation['reason'].trim())
+    return operation['reason'].trim();
+  const type = typeof operation?.['type'] === 'string' ? operation['type'] : 'write';
+  const slides = record.slides?.length
+    ? ` on slide${record.slides.length === 1 ? '' : 's'} ${record.slides.join(', ')}`
+    : ` (previewing slide ${String(page)})`;
+  if (type === 'replaceText' && typeof operation?.['find'] === 'string') {
+    return `Replaced “${operation['find']}” with “${String(operation['replace'] ?? '')}”${slides}`;
+  }
+  if (type === 'setText') return `Updated text${slides}`;
+  if (record.revision) return `${type} · revision ${record.revision}${slides}`;
+  return `${type}${slides}`;
+};
+
+const readLatestRecord = async (workspace: string): Promise<OperationRecord | undefined> => {
+  const raw = await readFile(operationsPath(workspace), 'utf8').catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  });
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  const lastLine = lines.at(-1);
+  return lastLine ? (JSON.parse(lastLine) as OperationRecord) : undefined;
+};
+
+const isWriteLocked = async (workspace: string): Promise<boolean> => {
+  try {
+    await stat(lockPath(workspace));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+};
+
+/** mtime+size of package.pptx so undo/repack with the same ops still re-converts. */
+const packageFingerprint = async (workspace: string): Promise<string> => {
+  try {
+    const info = await stat(resolve(workspace, 'package.pptx'));
+    return `${String(info.mtimeMs)}:${String(info.size)}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    throw error;
+  }
+};
+
 const readState = async (workspace: string): Promise<MonitorState> => {
   let lastError: unknown;
   for (let attempt = 0; attempt < READ_RETRIES; attempt += 1) {
@@ -71,16 +131,26 @@ const readState = async (workspace: string): Promise<MonitorState> => {
       const lines = raw.split(/\r?\n/).filter(Boolean);
       const lastLine = lines.at(-1);
       const record = lastLine ? (JSON.parse(lastLine) as OperationRecord) : undefined;
-      const page = record?.slides?.[0] ?? (record ? await slideCount(workspace) : 1);
+      const totalSlides = await slideCount(workspace);
+      const page = Math.min(
+        totalSlides,
+        Math.max(1, record?.slides?.[0] ?? (record ? totalSlides : 1)),
+      );
+      const packageId = await packageFingerprint(workspace);
       // The log is rewritten before and after its Git commit is known. Deliberately omit
-      // gitCommit and operation payload so those two writes collapse into one state.
+      // gitCommit so those two writes collapse into one state. Include package.pptx
+      // fingerprint so undo (ops roll back before pack finishes) still re-converts.
       return {
-        page: Math.max(1, page),
+        page,
+        slideCount: totalSlides,
+        summary: summarizeRecord(record, page),
+        record: record ?? null,
         signature: JSON.stringify({
           revision: record?.revision ?? 'empty',
           slides: record?.slides ?? [],
           operation: record?.operation ?? null,
           length: lines.length,
+          package: packageId,
         }),
       };
     } catch (error) {
@@ -109,13 +179,79 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 const rootPage = `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Deckuse monitor</title><style>
-html,body,iframe{width:100%;height:100%;margin:0;border:0}body{background:#171717;color:#fff;font:14px system-ui}
-#status{position:fixed;z-index:1;left:12px;bottom:12px;padding:7px 10px;border-radius:6px;background:#000b}
-</style></head><body><iframe title="Presentation preview"></iframe><div id="status">Waiting for preview…</div>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#171717;color:#e8e8e8;font:14px system-ui,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+#preview{flex:1;min-height:0;position:relative;background:#0d0d0d}
+#preview iframe{width:100%;height:100%;border:0;background:#0d0d0d}
+#status{position:absolute;z-index:1;left:12px;bottom:12px;padding:7px 10px;border-radius:6px;background:#000b}
+#dock{flex:0 0 auto;border-top:1px solid #2a2a2a;background:#1c1c1c}
+#change{display:flex;align-items:flex-start;gap:8px;padding:10px 14px;cursor:pointer;border-bottom:1px solid #2a2a2a;user-select:none}
+#change:hover{background:#222}
+#change .chevron{flex:0 0 auto;color:#888;transition:transform .15s ease;line-height:1.4}
+#change.open .chevron{transform:rotate(90deg)}
+#summary{flex:1;line-height:1.4;color:#ddd}
+#summary .muted{color:#888}
+#details{display:none;padding:0 14px 12px}
+#details.open{display:block}
+#details pre{margin:0;padding:10px;max-height:36vh;overflow:auto;border-radius:6px;background:#111;color:#c8c8c8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+#slides{display:flex;gap:10px;padding:12px 14px;overflow-x:auto}
+.slide{flex:0 0 auto;width:96px}
+.slide .thumb{position:relative;aspect-ratio:16/9;border-radius:5px;border:2px solid #333;background:linear-gradient(160deg,#2c2c2c,#1a1a1a);overflow:hidden}
+.slide .thumb .bars{position:absolute;inset:16% 12% auto;display:flex;flex-direction:column;gap:5px}
+.slide .thumb .bars span{display:block;height:5px;border-radius:1px;background:#3a3a3a}
+.slide .thumb .bars span:nth-child(1){width:78%}
+.slide .thumb .bars span:nth-child(2){width:92%}
+.slide .thumb .bars span:nth-child(3){width:54%}
+.slide .label{margin-top:5px;text-align:center;font-size:11px;color:#888}
+.slide.active .thumb{border-color:#5b9fff;box-shadow:0 0 0 1px #5b9fff55}
+.slide.active .label{color:#5b9fff;font-weight:600}
+.slide.affected:not(.active) .thumb{border-color:#5a6a3a}
+</style></head><body>
+<div id="app">
+  <div id="preview"><iframe title="Presentation preview"></iframe><div id="status">Waiting for preview…</div></div>
+  <div id="dock">
+    <div id="change"><span class="chevron">▸</span><div id="summary"><span class="muted">Waiting for workspace…</span></div></div>
+    <div id="details"><pre></pre></div>
+    <div id="slides"></div>
+  </div>
+</div>
 <script>
-const frame=document.querySelector('iframe'), status=document.querySelector('#status');
+const frame=document.querySelector('iframe');
+const status=document.querySelector('#status');
+const change=document.querySelector('#change');
+const summary=document.querySelector('#summary');
+const details=document.querySelector('#details');
+const detailsPre=document.querySelector('#details pre');
+const slides=document.querySelector('#slides');
+let open=false;
+const applyMeta=(data)=>{
+  const page=Math.max(1,Number(data.page)||1);
+  const count=Math.max(page,Number(data.slideCount)||1);
+  const affected=new Set(Array.isArray(data.record?.slides)?data.record.slides:[]);
+  summary.textContent=data.summary||'No changes yet — showing initial preview';
+  detailsPre.textContent=data.record?JSON.stringify(data.record,null,2):'No operation record yet.';
+  slides.replaceChildren();
+  for(let i=1;i<=count;i++){
+    const item=document.createElement('div');
+    item.className='slide'+(i===page?' active':'')+(affected.has(i)?' affected':'');
+    item.innerHTML='<div class="thumb"><div class="bars"><span></span><span></span><span></span></div></div><div class="label">Slide '+i+'</div>';
+    slides.appendChild(item);
+  }
+};
+change.addEventListener('click',()=>{
+  open=!open;
+  change.classList.toggle('open',open);
+  details.classList.toggle('open',open);
+});
 const events=new EventSource('/events');
-events.addEventListener('render',event=>{frame.src=JSON.parse(event.data).url;status.hidden=true});
+events.addEventListener('state',event=>applyMeta(JSON.parse(event.data)));
+events.addEventListener('render',event=>{
+  const data=JSON.parse(event.data);
+  frame.src=data.url;
+  applyMeta(data);
+  status.hidden=true;
+});
 events.addEventListener('error-message',event=>{status.hidden=false;status.textContent=JSON.parse(event.data).message});
 events.onerror=()=>{status.hidden=false;status.textContent='Preview connection lost; reconnecting…'};
 </script></body></html>`;
@@ -166,12 +302,28 @@ export const startMonitor = async (
   let converting = false;
   let queued: { state: MonitorState; generation: number } | undefined;
   let lastStateSignature: string | undefined;
+  let latestMeta: MonitorMeta | undefined;
   let latestRenderUrl: string | undefined;
   let version = 0;
   let generation = 0;
 
   const broadcast = (event: string, value: unknown): void => {
     for (const client of clients) sendEvent(client, event, value);
+  };
+
+  const publishMeta = async (state: MonitorState): Promise<MonitorMeta> => {
+    // Re-read so the UI can show gitCommit after the second operations write.
+    const fresh = await readLatestRecord(absoluteWorkspace).catch(() => state.record ?? undefined);
+    const record = fresh ?? state.record;
+    const meta: MonitorMeta = {
+      page: state.page,
+      slideCount: state.slideCount,
+      summary: summarizeRecord(record ?? undefined, state.page),
+      record: record ?? null,
+    };
+    latestMeta = meta;
+    broadcast('state', meta);
+    return meta;
   };
 
   const takeQueued = (): { state: MonitorState; generation: number } | undefined => {
@@ -185,6 +337,12 @@ export const startMonitor = async (
     const versionName = `${String(Date.now())}-${String(++version)}`;
     const output = resolve(outputRoot, versionName);
     try {
+      // Writers hold write.lock across source/ops/pack. Never convert mid-mutation.
+      if (await isWriteLocked(absoluteWorkspace)) {
+        if (lastStateSignature === state.signature) lastStateSignature = undefined;
+        scheduleRefresh();
+        return;
+      }
       await mkdir(output, { recursive: true });
       const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
         output,
@@ -200,8 +358,9 @@ export const startMonitor = async (
       )
         throw new Error('office2html returned an output outside its version directory');
       if (!queued && active && generation === runGeneration) {
+        const meta = await publishMeta(state);
         latestRenderUrl = `/render/${encodeURIComponent(versionName)}${entryRelative ? `/${entryRelative.split(sep).map(encodeURIComponent).join('/')}` : ''}`;
-        broadcast('render', { url: latestRenderUrl, page: state.page });
+        broadcast('render', { url: latestRenderUrl, ...meta });
       }
     } catch (error) {
       if (!queued && active && generation === runGeneration)
@@ -220,9 +379,15 @@ export const startMonitor = async (
     if (!active) return;
     const refreshGeneration = generation;
     try {
+      // Skip while a write/undo holds the lock. Do not update lastStateSignature —
+      // otherwise the post-unlock consistent state can be treated as a no-op.
+      if (await isWriteLocked(absoluteWorkspace)) return;
       const state = await readState(absoluteWorkspace);
-      if (generation !== refreshGeneration || state.signature === lastStateSignature) return;
+      if (generation !== refreshGeneration) return;
+      if (await isWriteLocked(absoluteWorkspace)) return;
+      if (state.signature === lastStateSignature) return;
       lastStateSignature = state.signature;
+      await publishMeta(state);
       if (converting) queued = { state, generation };
       else void runConversion(state, generation);
     } catch (error) {
@@ -293,7 +458,10 @@ export const startMonitor = async (
       response.write(': connected\n\n');
       clients.add(response);
       startWatching();
-      if (latestRenderUrl) sendEvent(response, 'render', { url: latestRenderUrl });
+      if (latestMeta) sendEvent(response, 'state', latestMeta);
+      if (latestRenderUrl && latestMeta)
+        sendEvent(response, 'render', { url: latestRenderUrl, ...latestMeta });
+      else if (latestRenderUrl) sendEvent(response, 'render', { url: latestRenderUrl });
       request.on('close', () => {
         clients.delete(response);
         if (clients.size === 0) stopWatching();
