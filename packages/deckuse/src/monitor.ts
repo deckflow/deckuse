@@ -196,8 +196,10 @@ html,body{height:100%;margin:0;background:#171717;color:#e8e8e8;font:14px system
 #change:hover{background:#222}
 #change .chevron{flex:0 0 auto;color:#888;transition:transform .15s ease;line-height:1.4}
 #change.open .chevron{transform:rotate(90deg)}
-#summary{flex:1;line-height:1.4;color:#ddd}
+#summary{flex:1;min-width:0;line-height:1.4;color:#ddd}
 #summary .muted{color:#888}
+#full-preview{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;margin-top:-2px;padding:6px 12px;border-radius:6px;border:1px solid #3a3a3a;background:#262626;color:#e8e8e8;text-decoration:none;font-size:13px;cursor:pointer}
+#full-preview:hover{background:#303030;border-color:#5b9fff;color:#fff}
 #details{display:none;padding:0 14px 12px}
 #details.open{display:block}
 #details pre{margin:0;padding:10px;max-height:36vh;overflow:auto;border-radius:6px;background:#111;color:#c8c8c8;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
@@ -213,15 +215,11 @@ html,body{height:100%;margin:0;background:#171717;color:#e8e8e8;font:14px system
 .slide.active .thumb{border-color:#5b9fff;box-shadow:0 0 0 1px #5b9fff55}
 .slide.active .label{color:#5b9fff;font-weight:600}
 .slide.affected:not(.active) .thumb{border-color:#5a6a3a}
-#dock-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 14px;border-bottom:1px solid #2a2a2a}
-#full-preview{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid #3a3a3a;background:#262626;color:#e8e8e8;text-decoration:none;font-size:13px}
-#full-preview:hover{background:#303030;border-color:#5b9fff;color:#fff}
 </style></head><body>
 <div id="app">
   <div id="preview"><iframe title="Presentation preview"></iframe><div id="status">Waiting for preview…</div></div>
   <div id="dock">
-    <div id="dock-actions"><a id="full-preview" href="/preview" target="_blank" rel="noopener">完整预览</a></div>
-    <div id="change"><span class="chevron">▸</span><div id="summary"><span class="muted">Waiting for workspace…</span></div></div>
+    <div id="change"><span class="chevron">▸</span><div id="summary"><span class="muted">Waiting for workspace…</span></div><a id="full-preview" href="/preview" target="_blank" rel="noopener">完整预览</a></div>
     <div id="details"><pre></pre></div>
     <div id="slides"></div>
   </div>
@@ -249,7 +247,8 @@ const applyMeta=(data)=>{
     slides.appendChild(item);
   }
 };
-change.addEventListener('click',()=>{
+change.addEventListener('click',(event)=>{
+  if(event.target.closest('#full-preview')) return;
   open=!open;
   change.classList.toggle('open',open);
   details.classList.toggle('open',open);
@@ -272,7 +271,8 @@ const previewPage = `<!doctype html>
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;background:#111;color:#e8e8e8;font:14px system-ui,sans-serif}
 #app{display:flex;flex-direction:column;height:100%}
-#bar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#1c1c1c}
+#bar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#1c1c1c;transition:opacity .25s ease,transform .25s ease,max-height .25s ease,padding .25s ease,border-width .25s ease;overflow:hidden;max-height:48px}
+#bar.hidden{opacity:0;transform:translateY(-8px);max-height:0;padding-top:0;padding-bottom:0;border-bottom-width:0;pointer-events:none}
 #bar .title{font-weight:600}
 #bar .meta{color:#888;font-size:12px;flex:1}
 #bar .badge{color:#aaa;font-size:12px}
@@ -290,9 +290,17 @@ html,body{height:100%;margin:0;background:#111;color:#e8e8e8;font:14px system-ui
 <script>
 const frame=document.querySelector('iframe');
 const status=document.querySelector('#status');
+const bar=document.querySelector('#bar');
 const meta=document.querySelector('#meta');
 const badge=document.querySelector('#badge');
 let currentFingerprint='';
+let hideBarTimer=0;
+const BAR_VISIBLE_MS=3000;
+const showBar=()=>{
+  bar.classList.remove('hidden');
+  clearTimeout(hideBarTimer);
+  hideBarTimer=setTimeout(()=>bar.classList.add('hidden'),BAR_VISIBLE_MS);
+};
 const showStatus=(message,overlay)=>{
   status.hidden=false;
   status.classList.toggle('overlay',!!overlay&&!frame.hidden);
@@ -305,11 +313,13 @@ const showError=(message)=>{
   status.classList.add('error');
   status.textContent=message;
   badge.textContent='';
+  showBar();
 };
 const applyReady=(data)=>{
   const fingerprint=data.fingerprint||'';
   meta.textContent=data.revision?('revision '+data.revision):'';
   badge.textContent=data.cached?'已缓存':'已更新';
+  showBar();
   if(fingerprint&&fingerprint===currentFingerprint&&frame.src){
     status.hidden=true;
     return;
@@ -326,11 +336,13 @@ events.addEventListener('converting',event=>{
   const data=JSON.parse(event.data);
   showStatus(data.message||'正在转换全量预览…',true);
   badge.textContent='更新中';
+  showBar();
 });
 events.addEventListener('error-message',event=>{
   showError(JSON.parse(event.data).message||'预览失败');
 });
 events.onerror=()=>showStatus('预览连接断开，正在重连…',true);
+showBar();
 </script></body></html>`;
 
 const sendEvent = (response: ServerResponse, event: string, value: unknown): void => {
