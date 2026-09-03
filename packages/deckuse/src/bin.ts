@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { access, readFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
