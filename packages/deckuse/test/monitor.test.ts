@@ -50,9 +50,9 @@ describe('monitor', () => {
   it('refreshes ignore rules for existing workspaces before creating output', async () => {
     const workspace = await workspaceFixture();
     const monitor = await startMonitor(workspace, { port: 0 });
-    await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain(
-      '.deckuse/monitor/',
-    );
+    const ignore = await readFile(join(workspace, '.gitignore'), 'utf8');
+    expect(ignore).toContain('.deckuse/monitor/');
+    expect(ignore).toContain('.deckuse/preview/');
     await monitor.close();
   });
 
@@ -384,6 +384,108 @@ describe('monitor', () => {
     await eventually(() => expect(client.events.join('')).toContain('watch failed'));
     expect(watcher.close).toHaveBeenCalledTimes(1);
     client.close();
+    await monitor.close();
+  });
+
+  it('converts a full preview once per package version and serves it from .deckuse/preview', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '7', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    const converter = vi.fn(async (_input: string, options: { output: string; pages?: string }) => {
+      expect(options.pages).toBeUndefined();
+      await writeFile(join(options.output, 'index.html'), '<html>full</html>');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        watch: () => {
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+
+    const home = await fetch(monitor.url);
+    expect(await home.text()).toContain('href="/preview"');
+
+    const page = await fetch(new URL('/preview', monitor.url));
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('完整预览');
+
+    const [first, second] = await Promise.all([
+      fetch(new URL('/preview/ensure', monitor.url)),
+      fetch(new URL('/preview/ensure', monitor.url)),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = (await first.json()) as {
+      status: string;
+      url: string;
+      revision: string;
+      cached: boolean;
+    };
+    const secondBody = (await second.json()) as {
+      status: string;
+      url: string;
+      revision: string;
+      cached: boolean;
+    };
+    expect(firstBody).toMatchObject({
+      status: 'ready',
+      url: '/preview/files/index.html',
+      revision: '7',
+      cached: false,
+    });
+    expect(secondBody).toMatchObject({
+      status: 'ready',
+      url: '/preview/files/index.html',
+      revision: '7',
+    });
+    expect(converter).toHaveBeenCalledTimes(1);
+    expect((await fetch(new URL(firstBody.url, monitor.url))).status).toBe(200);
+
+    const meta = JSON.parse(
+      await readFile(join(workspace, '.deckuse', 'preview', 'meta.json'), 'utf8'),
+    ) as { revision: string; fingerprint: string; indexHtml: string };
+    expect(meta).toMatchObject({ revision: '7', indexHtml: 'index.html' });
+    expect(meta.fingerprint).toMatch(/:/);
+
+    const cached = await fetch(new URL('/preview/ensure', monitor.url));
+    expect(cached.status).toBe(200);
+    expect(await cached.json()).toMatchObject({
+      status: 'ready',
+      revision: '7',
+      cached: true,
+    });
+    expect(converter).toHaveBeenCalledTimes(1);
+
+    await writeFile(join(workspace, 'package.pptx'), 'pptx-v2');
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '8', slides: [2], operation: { type: 'setText' } })}\n`,
+    );
+    const refreshed = await fetch(new URL('/preview/ensure', monitor.url));
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({
+      status: 'ready',
+      revision: '8',
+      cached: false,
+    });
+    expect(converter).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse(await readFile(join(workspace, '.deckuse', 'preview', 'meta.json'), 'utf8')),
+    ).toMatchObject({ revision: '8', indexHtml: 'index.html' });
+
     await monitor.close();
   });
 });

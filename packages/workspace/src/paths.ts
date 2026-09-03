@@ -7,5 +7,6 @@ export const indexPath = (workspace: string) => join(deckuseDir(workspace), 'ind
 export const operationsPath = (workspace: string) =>
   join(deckuseDir(workspace), 'operations.jsonl');
 export const monitorDir = (workspace: string) => join(deckuseDir(workspace), 'monitor');
+export const previewDir = (workspace: string) => join(deckuseDir(workspace), 'preview');
 export const lockPath = (workspace: string) => join(deckuseDir(workspace), 'write.lock');
 export const gitignorePath = (workspace: string) => join(resolve(workspace), '.gitignore');

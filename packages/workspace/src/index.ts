@@ -5,6 +5,7 @@ export {
   indexPath,
   operationsPath,
   monitorDir,
+  previewDir,
   lockPath,
   gitignorePath,
 } from './paths.js';

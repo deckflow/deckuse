@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, realpath, stat } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { dirname, extname, relative, resolve, sep } from 'node:path';
@@ -10,11 +10,13 @@ import {
   lockPath,
   monitorDir,
   operationsPath,
+  previewDir,
 } from '@deckflow/deckuse-workspace';
 
 const KEEPALIVE_MS = 15_000;
 const DEBOUNCE_MS = 80;
 const READ_RETRIES = 3;
+const PREVIEW_META = 'meta.json';
 
 interface OperationRecord {
   readonly at?: string;
@@ -32,6 +34,21 @@ interface MonitorMeta {
 
 interface MonitorState extends MonitorMeta {
   readonly signature: string;
+}
+
+interface PreviewMeta {
+  readonly revision: string;
+  readonly fingerprint: string;
+  readonly convertedAt: string;
+  readonly indexHtml: string;
+}
+
+interface PreviewEnsureResult {
+  readonly status: 'ready' | 'converting' | 'error';
+  readonly url?: string;
+  readonly revision?: string;
+  readonly cached?: boolean;
+  readonly message?: string;
 }
 
 export interface MonitorWatcher {
@@ -195,10 +212,14 @@ html,body{height:100%;margin:0;background:#171717;color:#e8e8e8;font:14px system
 .slide.active .thumb{border-color:#5b9fff;box-shadow:0 0 0 1px #5b9fff55}
 .slide.active .label{color:#5b9fff;font-weight:600}
 .slide.affected:not(.active) .thumb{border-color:#5a6a3a}
+#dock-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:8px 14px;border-bottom:1px solid #2a2a2a}
+#full-preview{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:6px;border:1px solid #3a3a3a;background:#262626;color:#e8e8e8;text-decoration:none;font-size:13px}
+#full-preview:hover{background:#303030;border-color:#5b9fff;color:#fff}
 </style></head><body>
 <div id="app">
   <div id="preview"><iframe title="Presentation preview"></iframe><div id="status">Waiting for preview…</div></div>
   <div id="dock">
+    <div id="dock-actions"><a id="full-preview" href="/preview" target="_blank" rel="noopener">完整预览</a></div>
     <div id="change"><span class="chevron">▸</span><div id="summary"><span class="muted">Waiting for workspace…</span></div></div>
     <div id="details"><pre></pre></div>
     <div id="slides"></div>
@@ -244,6 +265,57 @@ events.addEventListener('error-message',event=>{status.hidden=false;status.textC
 events.onerror=()=>{status.hidden=false;status.textContent='Preview connection lost; reconnecting…'};
 </script></body></html>`;
 
+const previewPage = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Deckuse full preview</title><style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#111;color:#e8e8e8;font:14px system-ui,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+#bar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#1c1c1c}
+#bar .title{font-weight:600}
+#bar .meta{color:#888;font-size:12px}
+#frame-wrap{flex:1;min-height:0;position:relative;background:#0d0d0d}
+#frame-wrap iframe{width:100%;height:100%;border:0;background:#0d0d0d}
+#status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;background:#0d0d0d}
+#status.error{color:#f88}
+</style></head><body>
+<div id="app">
+  <div id="bar"><span class="title">完整预览</span><span class="meta" id="meta"></span></div>
+  <div id="frame-wrap"><iframe title="Full presentation preview" hidden></iframe><div id="status">正在准备全量预览…</div></div>
+</div>
+<script>
+const frame=document.querySelector('iframe');
+const status=document.querySelector('#status');
+const meta=document.querySelector('#meta');
+const showError=(message)=>{status.hidden=false;status.classList.add('error');status.textContent=message;frame.hidden=true};
+const applyReady=(data)=>{
+  meta.textContent=data.revision?('revision '+data.revision+(data.cached?' · 已缓存':'')):'';
+  frame.src=data.url;
+  frame.hidden=false;
+  status.hidden=true;
+  status.classList.remove('error');
+};
+const ensure=async()=>{
+  try{
+    const response=await fetch('/preview/ensure');
+    const data=await response.json();
+    if(!response.ok||data.status==='error'){
+      showError(data.message||('预览失败 ('+String(response.status)+')'));
+      return;
+    }
+    if(data.status==='ready'&&data.url){
+      applyReady(data);
+      return;
+    }
+    status.textContent='正在转换全量预览…';
+    setTimeout(ensure,400);
+  }catch(error){
+    showError(error instanceof Error?error.message:'预览请求失败');
+  }
+};
+ensure();
+</script></body></html>`;
+
 const sendEvent = (response: ServerResponse, event: string, value: unknown): void => {
   response.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
 };
@@ -268,6 +340,74 @@ const validateWorkspace = async (workspace: string): Promise<void> => {
   }
 };
 
+const previewMetaPath = (output: string): string => resolve(output, PREVIEW_META);
+
+const readPreviewMeta = async (output: string): Promise<PreviewMeta | undefined> => {
+  try {
+    return JSON.parse(await readFile(previewMetaPath(output), 'utf8')) as PreviewMeta;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+};
+
+const previewEntryUrl = (indexHtmlRelative: string): string => {
+  const segments = indexHtmlRelative.split(sep).filter(Boolean).map(encodeURIComponent);
+  return `/preview/files${segments.length ? `/${segments.join('/')}` : ''}`;
+};
+
+const serveWorkspaceFile = (
+  response: ServerResponse,
+  root: string,
+  realRoot: string,
+  pathname: string,
+  prefix: string,
+): void => {
+  let segments: string[];
+  try {
+    segments = pathname.slice(prefix.length).split('/').map(decodeURIComponent);
+  } catch {
+    response.writeHead(400).end();
+    return;
+  }
+  if (
+    segments.some(
+      (segment) => !segment || segment === '.' || segment === '..' || segment.includes(sep),
+    )
+  ) {
+    response.writeHead(403).end();
+    return;
+  }
+  const file = resolve(root, ...segments);
+  const relativeFile = relative(root, file);
+  if (relativeFile.startsWith(`..${sep}`) || relativeFile === '..') {
+    response.writeHead(403).end();
+    return;
+  }
+  void Promise.all([stat(file), realpath(file)])
+    .then(([info, realFile]) => {
+      const realRelative = relative(realRoot, realFile);
+      if (
+        !info.isFile() ||
+        realRelative === '..' ||
+        realRelative.startsWith(`..${sep}`) ||
+        resolve(realRoot, realRelative) !== realFile
+      )
+        throw Object.assign(new Error('Not a safe file'), { code: 'EACCES' });
+      response.writeHead(200, {
+        'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+        'x-content-type-options': 'nosniff',
+      });
+      createReadStream(file)
+        .on('error', () => response.destroy())
+        .pipe(response);
+    })
+    .catch((error: unknown) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      response.writeHead(code === 'ENOENT' ? 404 : code === 'EACCES' ? 403 : 500).end();
+    });
+};
+
 export const startMonitor = async (
   workspace: string,
   options: MonitorOptions = {},
@@ -278,6 +418,9 @@ export const startMonitor = async (
   const outputRoot = monitorDir(absoluteWorkspace);
   await mkdir(outputRoot, { recursive: true });
   const realOutputRoot = await realpath(outputRoot);
+  const fullPreviewRoot = previewDir(absoluteWorkspace);
+  await mkdir(fullPreviewRoot, { recursive: true });
+  let realFullPreviewRoot = await realpath(fullPreviewRoot);
   const converter = options.dependencies?.convert ?? office2html.convert;
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
@@ -294,6 +437,7 @@ export const startMonitor = async (
   let latestRenderUrl: string | undefined;
   let version = 0;
   let generation = 0;
+  let fullPreviewJob: Promise<PreviewEnsureResult> | undefined;
 
   const broadcast = (event: string, value: unknown): void => {
     for (const client of clients) sendEvent(client, event, value);
@@ -427,11 +571,107 @@ export const startMonitor = async (
     lastStateSignature = undefined;
   };
 
+  const currentPreviewIdentity = async (): Promise<{
+    revision: string;
+    fingerprint: string;
+  }> => {
+    const state = await readState(absoluteWorkspace);
+    const fingerprint = await packageFingerprint(absoluteWorkspace);
+    return {
+      revision: state.record?.revision ?? 'empty',
+      fingerprint,
+    };
+  };
+
+  const readyPreviewResult = (meta: PreviewMeta, cached: boolean): PreviewEnsureResult => ({
+    status: 'ready',
+    url: previewEntryUrl(meta.indexHtml),
+    revision: meta.revision,
+    cached,
+  });
+
+  const ensureFullPreview = async (): Promise<PreviewEnsureResult> => {
+    if (fullPreviewJob) return fullPreviewJob;
+    fullPreviewJob = (async (): Promise<PreviewEnsureResult> => {
+      if (await isWriteLocked(absoluteWorkspace)) {
+        return { status: 'converting', message: 'Workspace is locked; waiting to convert…' };
+      }
+      const identity = await currentPreviewIdentity();
+      if (identity.fingerprint === 'missing') {
+        return { status: 'error', message: 'package.pptx is missing' };
+      }
+      const existing = await readPreviewMeta(fullPreviewRoot);
+      if (existing && existing.fingerprint === identity.fingerprint) {
+        const entry = resolve(fullPreviewRoot, existing.indexHtml);
+        try {
+          const info = await stat(entry);
+          if (info.isFile()) return readyPreviewResult(existing, true);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      await rm(fullPreviewRoot, { recursive: true, force: true });
+      await mkdir(fullPreviewRoot, { recursive: true });
+      realFullPreviewRoot = await realpath(fullPreviewRoot);
+      const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
+        output: fullPreviewRoot,
+      });
+      if (result.exitCode !== 0) throw new Error(result.stderr || 'office2html conversion failed');
+      const entry = resolve(result.indexHtmlPath);
+      const entryRelative = relative(fullPreviewRoot, entry);
+      if (
+        entryRelative.startsWith(`..${sep}`) ||
+        entryRelative === '..' ||
+        resolve(fullPreviewRoot, entryRelative) !== entry
+      )
+        throw new Error('office2html returned an output outside the preview directory');
+      const meta: PreviewMeta = {
+        revision: identity.revision,
+        fingerprint: identity.fingerprint,
+        convertedAt: new Date().toISOString(),
+        indexHtml: entryRelative || 'index.html',
+      };
+      await writeFile(previewMetaPath(fullPreviewRoot), `${JSON.stringify(meta, null, 2)}\n`);
+      return readyPreviewResult(meta, false);
+    })()
+      .catch((error: unknown): PreviewEnsureResult => ({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Full preview conversion failed',
+      }))
+      .finally(() => {
+        fullPreviewJob = undefined;
+      });
+    return fullPreviewJob;
+  };
+
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://localhost');
     if (requestUrl.pathname === '/') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       response.end(rootPage);
+      return;
+    }
+    if (requestUrl.pathname === '/preview') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(previewPage);
+      return;
+    }
+    if (requestUrl.pathname === '/preview/ensure') {
+      void ensureFullPreview().then((result) => {
+        const status = result.status === 'ready' ? 200 : result.status === 'converting' ? 202 : 500;
+        response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(`${JSON.stringify(result)}\n`);
+      });
+      return;
+    }
+    if (requestUrl.pathname.startsWith('/preview/files/')) {
+      serveWorkspaceFile(
+        response,
+        fullPreviewRoot,
+        realFullPreviewRoot,
+        requestUrl.pathname,
+        '/preview/files/',
+      );
       return;
     }
     if (requestUrl.pathname === '/events') {
@@ -454,50 +694,7 @@ export const startMonitor = async (
       return;
     }
     if (requestUrl.pathname.startsWith('/render/')) {
-      let segments: string[];
-      try {
-        segments = requestUrl.pathname.slice('/render/'.length).split('/').map(decodeURIComponent);
-      } catch {
-        response.writeHead(400).end();
-        return;
-      }
-      if (
-        segments.some(
-          (segment) => !segment || segment === '.' || segment === '..' || segment.includes(sep),
-        )
-      ) {
-        response.writeHead(403).end();
-        return;
-      }
-      const file = resolve(outputRoot, ...segments);
-      const relativeFile = relative(outputRoot, file);
-      if (relativeFile.startsWith(`..${sep}`) || relativeFile === '..') {
-        response.writeHead(403).end();
-        return;
-      }
-      void Promise.all([stat(file), realpath(file)])
-        .then(([info, realFile]) => {
-          const realRelative = relative(realOutputRoot, realFile);
-          if (
-            !info.isFile() ||
-            realRelative === '..' ||
-            realRelative.startsWith(`..${sep}`) ||
-            resolve(realOutputRoot, realRelative) !== realFile
-          )
-            throw Object.assign(new Error('Not a safe file'), { code: 'EACCES' });
-          response.writeHead(200, {
-            'content-type':
-              CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-            'x-content-type-options': 'nosniff',
-          });
-          createReadStream(file)
-            .on('error', () => response.destroy())
-            .pipe(response);
-        })
-        .catch((error: unknown) => {
-          const code = (error as NodeJS.ErrnoException).code;
-          response.writeHead(code === 'ENOENT' ? 404 : code === 'EACCES' ? 403 : 500).end();
-        });
+      serveWorkspaceFile(response, outputRoot, realOutputRoot, requestUrl.pathname, '/render/');
       return;
     }
     response.writeHead(404).end();
