@@ -460,11 +460,13 @@ describe('monitor', () => {
       readyBody = (await ready.json()) as typeof readyBody;
       expect(readyBody).toMatchObject({
         status: 'ready',
-        url: '/preview/files/index.html',
         revision: '7',
         cached: true,
       });
       expect(readyBody?.fingerprint).toMatch(/:/);
+      expect(readyBody?.url).toBe(
+        `/preview/files/${encodeURIComponent(readyBody!.fingerprint)}/index.html`,
+      );
     });
     expect(converter).toHaveBeenCalledTimes(1);
     expect((await fetch(new URL(readyBody!.url, monitor.url))).status).toBe(200);
@@ -677,19 +679,80 @@ describe('monitor', () => {
     await eventually(async () => {
       const ready = await fetch(new URL('/preview/ensure', monitor.url));
       expect(ready.status).toBe(200);
+      const body = (await ready.json()) as { url: string; fingerprint: string };
+      expect(body.url).toBe(
+        `/preview/files/${encodeURIComponent(body.fingerprint)}/index.html`,
+      );
     });
 
     const page = await fetch(new URL('/preview', monitor.url));
     expect(page.headers.get('cache-control')).toBe('no-store');
 
-    const index = await fetch(new URL('/preview/files/index.html', monitor.url));
+    const ensured = (await (await fetch(new URL('/preview/ensure', monitor.url))).json()) as {
+      url: string;
+    };
+    const index = await fetch(new URL(ensured.url, monitor.url));
     expect(index.status).toBe(200);
     expect(index.headers.get('cache-control')).toBe('no-store');
 
-    const slide = await fetch(new URL('/preview/files/slides/0000.html', monitor.url));
+    const slide = await fetch(
+      new URL(ensured.url.replace(/index\.html$/, 'slides/0000.html'), monitor.url),
+    );
     expect(slide.status).toBe(200);
     expect(slide.headers.get('cache-control')).toBe('no-store');
 
+    await monitor.close();
+  });
+
+  it('re-ensures full preview when a second SSE client connects while watcher is already active', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '1', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    const converter = vi.fn(async (_input: string, options: { output: string }) => {
+      await writeFile(join(options.output, 'index.html'), '<html>full</html>');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    const watchFactory = vi.fn(() => {
+      const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+      watcher.close = vi.fn();
+      return watcher;
+    });
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        watch: watchFactory,
+        debounceMs: 1,
+        keepaliveMs: 10_000,
+      },
+    });
+
+    const first = await subscribe(`${monitor.url}preview/`);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
+    await eventually(() => expect(first.events.join('')).toContain('event: ready'));
+
+    // Simulate a package change that the (mock) watcher missed — hard-refresh / second
+    // tab must still pick it up via connect-time ensure.
+    await writeFile(join(workspace, 'package.pptx'), 'pptx-v2');
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '2', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+
+    const second = await subscribe(`${monitor.url}preview/`);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
+    await eventually(() => expect(second.events.join('')).toContain('"revision":"2"'));
+    await eventually(() => expect(first.events.join('')).toContain('"revision":"2"'));
+
+    first.close();
+    second.close();
     await monitor.close();
   });
 

@@ -391,9 +391,29 @@ const readPreviewMeta = async (output: string): Promise<PreviewMeta | undefined>
   }
 };
 
-const previewEntryUrl = (indexHtmlRelative: string): string => {
+const previewEntryUrl = (fingerprint: string, indexHtmlRelative: string): string => {
   const segments = indexHtmlRelative.split(sep).filter(Boolean).map(encodeURIComponent);
-  return `/preview/files${segments.length ? `/${segments.join('/')}` : ''}`;
+  return `/preview/files/${encodeURIComponent(fingerprint)}${segments.length ? `/${segments.join('/')}` : ''}`;
+};
+
+/** Strip /preview/files/<fingerprint>/… so slide relative URLs bust CDN/browser caches. */
+const previewFilesServePath = (pathname: string): string | undefined => {
+  const prefix = '/preview/files/';
+  if (!pathname.startsWith(prefix)) return undefined;
+  const rest = pathname.slice(prefix.length);
+  if (!rest) return pathname;
+  let first: string;
+  let remainder: string;
+  try {
+    const slash = rest.indexOf('/');
+    first = decodeURIComponent(slash === -1 ? rest : rest.slice(0, slash));
+    remainder = slash === -1 ? '' : rest.slice(slash + 1);
+  } catch {
+    return undefined;
+  }
+  // Fingerprints are `mtimeMs:size` (and the sentinel `missing`).
+  if (!first.includes(':') && first !== 'missing') return pathname;
+  return `${prefix}${remainder}`;
 };
 
 const serveWorkspaceFile = (
@@ -646,7 +666,7 @@ export const startMonitor = async (
 
   const readyPreviewResult = (meta: PreviewMeta, cached: boolean): PreviewEnsureResult => ({
     status: 'ready',
-    url: previewEntryUrl(meta.indexHtml),
+    url: previewEntryUrl(meta.fingerprint, meta.indexHtml),
     revision: meta.revision,
     fingerprint: meta.fingerprint,
     cached,
@@ -826,6 +846,7 @@ export const startMonitor = async (
     if (requestUrl.pathname === '/preview') {
       response.writeHead(200, {
         'cache-control': 'no-store',
+        'cdn-cache-control': 'no-store',
         'content-type': 'text/html; charset=utf-8',
       });
       response.end(previewPage);
@@ -840,9 +861,11 @@ export const startMonitor = async (
       response.write(': connected\n\n');
       previewClients.add(response);
       startPreviewWatching();
-      // Never push a possibly-stale in-memory ready on connect. requestFullPreviewUpdate
-      // (from startPreviewWatching) re-publishes ready once the current fingerprint matches.
+      // Always re-ensure on connect. startPreviewWatching() is a no-op when another
+      // client (or a refresh race) already holds previewActive, which previously left
+      // reconnecting clients stuck on a stale in-memory ready / dead file watcher.
       sendEvent(response, 'converting', { message: '正在准备全量预览…' });
+      void requestFullPreviewUpdate();
       request.on('close', () => {
         previewClients.delete(response);
         if (previewClients.size === 0) stopPreviewWatching();
@@ -860,13 +883,21 @@ export const startMonitor = async (
       return;
     }
     if (requestUrl.pathname.startsWith('/preview/files/')) {
+      const servePath = previewFilesServePath(requestUrl.pathname);
+      if (servePath === undefined) {
+        response.writeHead(400).end();
+        return;
+      }
       serveWorkspaceFile(
         response,
         fullPreviewRoot,
         realFullPreviewRoot,
-        requestUrl.pathname,
+        servePath,
         '/preview/files/',
-        { 'cache-control': 'no-store' },
+        {
+          'cache-control': 'no-store',
+          'cdn-cache-control': 'no-store',
+        },
       );
       return;
     }
