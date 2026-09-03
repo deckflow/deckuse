@@ -5,7 +5,6 @@ import { deckuseDir, operationsPath } from './paths.js';
 export interface OperationRecord {
   readonly at: string;
   readonly revision: string;
-  readonly gitCommit: string;
   readonly operation: unknown;
   readonly slides: number[];
 }
@@ -33,16 +32,12 @@ export const writeOperations = async (workspace: string, records: OperationRecor
 
 export const appendOperationCommit = async (
   workspace: string,
-  record: Omit<OperationRecord, 'gitCommit'>,
+  record: OperationRecord,
 ): Promise<string> => {
   const records = await readOperations(workspace);
-  records.push({ ...record, gitCommit: '' });
+  records.push(record);
   await writeOperations(workspace, records);
-  const gitCommit = await commitWorkspace(workspace, operationCommitMessage(record.operation));
-  const last = records.at(-1);
-  if (last) records[records.length - 1] = { ...last, gitCommit };
-  await writeOperations(workspace, records);
-  return gitCommit;
+  return commitWorkspace(workspace, operationCommitMessage(record.operation));
 };
 
 export const readHistory = async (

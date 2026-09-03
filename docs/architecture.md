@@ -19,7 +19,7 @@ An initialized workspace contains:
 
 Mutations require a transaction ID. Write operations acquire an exclusive workspace lock, apply changes against a temporary copy of `source/`, validate, atomically replace `source/`, update derived metadata, append one record to `operations.jsonl`, create a Git commit, and rebuild the package snapshot. `batch` is atomic by default. Failed validation or writes leave the workspace unchanged. Concurrent writes are serialized by the lock.
 
-`operations.jsonl` records one entry per successful write command (a `batch` counts as one entry). Each record stores the original command, revision, affected slide page numbers (1-based, empty when unknown), and the Git commit hash when available.
+`operations.jsonl` records one entry per successful write command (a `batch` counts as one entry). Each record stores the original command, revision, and affected slide page numbers (1-based, empty when unknown).
 
 `undo --steps N` resets the workspace Git history by `N` successful writes and rebuilds the package snapshot. `history` reads the operation log.
 

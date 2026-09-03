@@ -339,7 +339,6 @@ describe('monitor', () => {
           replace: 'value',
         },
         slides: [2],
-        gitCommit: 'a9aca5e29f60058ccb6bae177ea84de8236f38f5',
       })}\n`,
     );
     onChange?.();

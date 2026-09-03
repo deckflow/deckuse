@@ -21,7 +21,6 @@ interface OperationRecord {
   readonly revision?: string;
   readonly slides?: number[];
   readonly operation?: unknown;
-  readonly gitCommit?: string;
 }
 
 interface MonitorMeta {
@@ -89,16 +88,6 @@ const summarizeRecord = (record: OperationRecord | undefined, page: number): str
   return `${type}${slides}`;
 };
 
-const readLatestRecord = async (workspace: string): Promise<OperationRecord | undefined> => {
-  const raw = await readFile(operationsPath(workspace), 'utf8').catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
-    throw error;
-  });
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const lastLine = lines.at(-1);
-  return lastLine ? (JSON.parse(lastLine) as OperationRecord) : undefined;
-};
-
 const isWriteLocked = async (workspace: string): Promise<boolean> => {
   try {
     await stat(lockPath(workspace));
@@ -137,9 +126,8 @@ const readState = async (workspace: string): Promise<MonitorState> => {
         Math.max(1, record?.slides?.[0] ?? (record ? totalSlides : 1)),
       );
       const packageId = await packageFingerprint(workspace);
-      // The log is rewritten before and after its Git commit is known. Deliberately omit
-      // gitCommit so those two writes collapse into one state. Include package.pptx
-      // fingerprint so undo (ops roll back before pack finishes) still re-converts.
+      // Include package.pptx fingerprint so undo (ops roll back before pack finishes)
+      // still re-converts.
       return {
         page,
         slideCount: totalSlides,
@@ -312,14 +300,11 @@ export const startMonitor = async (
   };
 
   const publishMeta = async (state: MonitorState): Promise<MonitorMeta> => {
-    // Re-read so the UI can show gitCommit after the second operations write.
-    const fresh = await readLatestRecord(absoluteWorkspace).catch(() => state.record ?? undefined);
-    const record = fresh ?? state.record;
     const meta: MonitorMeta = {
       page: state.page,
       slideCount: state.slideCount,
-      summary: summarizeRecord(record ?? undefined, state.page),
-      record: record ?? null,
+      summary: summarizeRecord(state.record ?? undefined, state.page),
+      record: state.record,
     };
     latestMeta = meta;
     broadcast('state', meta);
