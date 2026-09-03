@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -554,7 +555,7 @@ describe('monitor', () => {
     const full = await subscribe(`${monitor.url}preview/`);
     await eventually(() => expect(conversions.some((item) => item.page === undefined)).toBe(true));
     expect(watchFactory).toHaveBeenCalledTimes(1);
-    expect(watchFactory.mock.calls[0]?.[0]).toBe(join(workspace, 'package.pptx'));
+    expect(watchFactory.mock.calls[0]?.[0]).toBe(workspace);
     await conversions.find((item) => item.page === undefined)!.finish();
     await eventually(() => expect(full.events.join('')).toContain('event: ready'));
 
@@ -599,14 +600,16 @@ describe('monitor', () => {
         };
       });
     });
-    let onPackageChange: (() => void) | undefined;
-    const watchFactory = vi.fn((path: string, listener: () => void) => {
-      expect(path).toBe(join(workspace, 'package.pptx'));
-      onPackageChange = listener;
-      const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
-      watcher.close = vi.fn();
-      return watcher;
-    });
+    let onPackageChange: ((event?: string, filename?: string | Buffer | null) => void) | undefined;
+    const watchFactory = vi.fn(
+      (path: string, listener: (event?: string, filename?: string | Buffer | null) => void) => {
+        expect(path).toBe(workspace);
+        onPackageChange = listener;
+        const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+        watcher.close = vi.fn();
+        return watcher;
+      },
+    );
     const monitor = await startMonitor(workspace, {
       port: 0,
       dependencies: {
@@ -629,7 +632,13 @@ describe('monitor', () => {
       join(workspace, '.deckuse', 'operations.jsonl'),
       `${JSON.stringify({ revision: '2', slides: [1], operation: { type: 'setText' } })}\n`,
     );
-    onPackageChange?.();
+    // Unrelated workspace events must not retrigger full preview.
+    onPackageChange?.('rename', 'operations.jsonl');
+    onPackageChange?.('change', join('.deckuse', 'operations.jsonl'));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(converter).toHaveBeenCalledTimes(1);
+
+    onPackageChange?.('rename', 'package.pptx');
     await eventually(() => expect(client.events.join('')).toContain('event: converting'));
     await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
     await finishConversion();
@@ -637,6 +646,164 @@ describe('monitor', () => {
 
     client.close();
     await eventually(() => expect(watchFactory.mock.results[0]?.value.close).toHaveBeenCalled());
+    await monitor.close();
+  });
+
+  it('serves full preview assets with Cache-Control: no-store', async () => {
+    const workspace = await workspaceFixture();
+    const converter = vi.fn(async (_input: string, options: { output: string }) => {
+      await mkdir(join(options.output, 'slides'), { recursive: true });
+      await writeFile(join(options.output, 'index.html'), '<html>full</html>');
+      await writeFile(join(options.output, 'slides', '0000.html'), '<html>slide</html>');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        watch: () => {
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+
+    await eventually(async () => {
+      const ready = await fetch(new URL('/preview/ensure', monitor.url));
+      expect(ready.status).toBe(200);
+    });
+
+    const page = await fetch(new URL('/preview', monitor.url));
+    expect(page.headers.get('cache-control')).toBe('no-store');
+
+    const index = await fetch(new URL('/preview/files/index.html', monitor.url));
+    expect(index.status).toBe(200);
+    expect(index.headers.get('cache-control')).toBe('no-store');
+
+    const slide = await fetch(new URL('/preview/files/slides/0000.html', monitor.url));
+    expect(slide.status).toBe(200);
+    expect(slide.headers.get('cache-control')).toBe('no-store');
+
+    await monitor.close();
+  });
+
+  it('defers full preview conversion while write.lock is held, then converts after unlock', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '1', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    const convertedInputs: string[] = [];
+    const converter = vi.fn(async (input: string, options: { output: string }) => {
+      convertedInputs.push(await readFile(input, 'utf8'));
+      await writeFile(join(options.output, 'index.html'), '<html>full</html>');
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    let onPackageChange: ((event?: string, filename?: string | Buffer | null) => void) | undefined;
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        debounceMs: 5,
+        keepaliveMs: 10_000,
+        watch: (_path: string, listener: (event?: string, filename?: string | Buffer | null) => void) => {
+          onPackageChange = listener;
+          const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+          watcher.close = vi.fn();
+          return watcher;
+        },
+      },
+    });
+
+    const client = await subscribe(`${monitor.url}preview/`);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
+    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(client.events.join('')).toContain('event: ready'));
+
+    await writeFile(join(workspace, '.deckuse', 'write.lock'), '');
+    await writeFile(join(workspace, 'package.pptx'), 'stale-before-pack');
+    onPackageChange?.('rename', 'package.pptx');
+    await new Promise((done) => setTimeout(done, 40));
+    expect(converter).toHaveBeenCalledTimes(1);
+
+    await writeFile(join(workspace, 'package.pptx'), 'fresh-after-pack');
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '2', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    await unlink(join(workspace, '.deckuse', 'write.lock'));
+    // No extra watch event after unlock — retry scheduled during the lock must pick this up.
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
+    expect(convertedInputs[1]).toBe('fresh-after-pack');
+    await eventually(() => expect(client.events.join('')).toContain('"revision":"2"'));
+
+    client.close();
+    await monitor.close();
+  });
+
+  it('re-converts full preview after repeated atomic package.pptx renames', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'operations.jsonl'),
+      `${JSON.stringify({ revision: '1', slides: [1], operation: { type: 'setText' } })}\n`,
+    );
+    const convertedInputs: string[] = [];
+    const converter = vi.fn(async (input: string, options: { output: string }) => {
+      convertedInputs.push(await readFile(input, 'utf8'));
+      await writeFile(join(options.output, 'index.html'), `<html>${convertedInputs.length}</html>`);
+      return {
+        indexHtmlPath: join(options.output, 'index.html'),
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      };
+    });
+    // Real fs.watch — file watchers on Darwin stop after the first atomic rename.
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        debounceMs: 30,
+        keepaliveMs: 10_000,
+      },
+    });
+
+    const client = await subscribe(`${monitor.url}preview/`);
+    await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
+    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(client.events.join('')).toContain('event: ready'));
+
+    const replacePackage = async (contents: string, revision: string): Promise<void> => {
+      const temporary = join(workspace, `package.pptx.${randomUUID()}.tmp`);
+      await writeFile(temporary, contents);
+      await rename(temporary, join(workspace, 'package.pptx'));
+      await writeFile(
+        join(workspace, '.deckuse', 'operations.jsonl'),
+        `${JSON.stringify({ revision, slides: [1], operation: { type: 'setText' } })}\n`,
+      );
+    };
+
+    await replacePackage('pptx-after-rename-1', '2');
+    await eventually(() => expect(convertedInputs.at(-1)).toBe('pptx-after-rename-1'));
+    await eventually(() => expect(client.events.join('')).toContain('"revision":"2"'));
+
+    await replacePackage('pptx-after-rename-2', '3');
+    await eventually(() => expect(convertedInputs.at(-1)).toBe('pptx-after-rename-2'));
+    await eventually(() => expect(client.events.join('')).toContain('"revision":"3"'));
+    expect(converter.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+    client.close();
     await monitor.close();
   });
 });

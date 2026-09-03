@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
-import { dirname, extname, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, relative, resolve, sep } from 'node:path';
 import office2html from '@deckflow/office2html';
 import {
   ensureGitignore,
@@ -17,6 +17,14 @@ const KEEPALIVE_MS = 15_000;
 const DEBOUNCE_MS = 80;
 const READ_RETRIES = 3;
 const PREVIEW_META = 'meta.json';
+const PACKAGE_PPTX = 'package.pptx';
+
+/** True for package.pptx and its atomic-replace temp names (package.pptx.<uuid>.tmp). */
+const isPackagePptxWatchFilename = (filename?: string | Buffer | null): boolean => {
+  if (filename == null || filename === '') return true;
+  const name = basename(typeof filename === 'string' ? filename : filename.toString());
+  return name === PACKAGE_PPTX || name.startsWith(`${PACKAGE_PPTX}.`);
+};
 
 interface OperationRecord {
   readonly at?: string;
@@ -59,7 +67,10 @@ export interface MonitorWatcher {
 
 export interface MonitorDependencies {
   readonly convert?: typeof office2html.convert;
-  readonly watch?: (path: string, listener: () => void) => MonitorWatcher;
+  readonly watch?: (
+    path: string,
+    listener: (event?: string, filename?: string | Buffer | null) => void,
+  ) => MonitorWatcher;
   readonly debounceMs?: number;
   readonly keepaliveMs?: number;
 }
@@ -391,6 +402,7 @@ const serveWorkspaceFile = (
   realRoot: string,
   pathname: string,
   prefix: string,
+  headers: Record<string, string> = {},
 ): void => {
   let segments: string[];
   try {
@@ -426,6 +438,7 @@ const serveWorkspaceFile = (
       response.writeHead(200, {
         'content-type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
         'x-content-type-options': 'nosniff',
+        ...headers,
       });
       createReadStream(file)
         .on('error', () => response.destroy())
@@ -454,7 +467,7 @@ export const startMonitor = async (
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
-  const packagePath = resolve(absoluteWorkspace, 'package.pptx');
+  const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const operationsWatchPath = dirname(operationsPath(absoluteWorkspace));
   const clients = new Set<ServerResponse>();
   const previewClients = new Set<ServerResponse>();
@@ -721,6 +734,9 @@ export const startMonitor = async (
 
   const ensureFullPreview = async (): Promise<PreviewEnsureResult> => {
     if (await isWriteLocked(absoluteWorkspace)) {
+      // Writers hold write.lock across source/ops/pack. Retry after debounce so the
+      // (possibly sole) watch event that landed during the lock is not dropped.
+      schedulePreviewRefresh();
       return { status: 'converting', message: 'Workspace is locked; waiting to convert…' };
     }
     const identity = await currentPreviewIdentity();
@@ -757,11 +773,19 @@ export const startMonitor = async (
     previewDebounce = setTimeout(() => void requestFullPreviewUpdate(), debounceMs);
   };
 
+  const onPackageWatchEvent = (_event?: string, filename?: string | Buffer | null): void => {
+    if (!isPackagePptxWatchFilename(filename)) return;
+    schedulePreviewRefresh();
+  };
+
   const startPreviewWatching = (): void => {
     if (previewActive) return;
     previewActive = true;
     try {
-      previewWatcher = createWatcher(packagePath, schedulePreviewRefresh);
+      // Watch the workspace directory (not package.pptx itself). Atomic temp+rename
+      // replace of package.pptx invalidates file watchers on Darwin after the first
+      // rename; directory watchers keep receiving subsequent events.
+      previewWatcher = createWatcher(absoluteWorkspace, onPackageWatchEvent);
       previewWatcher.on('error', (error) => {
         if (!previewActive) return;
         broadcastPreview('error-message', {
@@ -800,7 +824,10 @@ export const startMonitor = async (
       return;
     }
     if (requestUrl.pathname === '/preview') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.writeHead(200, {
+        'cache-control': 'no-store',
+        'content-type': 'text/html; charset=utf-8',
+      });
       response.end(previewPage);
       return;
     }
@@ -813,8 +840,9 @@ export const startMonitor = async (
       response.write(': connected\n\n');
       previewClients.add(response);
       startPreviewWatching();
-      if (latestFullPreview?.status === 'ready') sendEvent(response, 'ready', latestFullPreview);
-      else sendEvent(response, 'converting', { message: '正在准备全量预览…' });
+      // Never push a possibly-stale in-memory ready on connect. requestFullPreviewUpdate
+      // (from startPreviewWatching) re-publishes ready once the current fingerprint matches.
+      sendEvent(response, 'converting', { message: '正在准备全量预览…' });
       request.on('close', () => {
         previewClients.delete(response);
         if (previewClients.size === 0) stopPreviewWatching();
@@ -838,6 +866,7 @@ export const startMonitor = async (
         realFullPreviewRoot,
         requestUrl.pathname,
         '/preview/files/',
+        { 'cache-control': 'no-store' },
       );
       return;
     }
