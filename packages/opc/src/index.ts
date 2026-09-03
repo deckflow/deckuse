@@ -60,34 +60,147 @@ export const parseXml = (input: string | Uint8Array): XmlDocument => {
 const isXmlPart = (part: OpcPart): boolean =>
   part.mediaType.includes('xml') || part.name.endsWith('.xml') || part.name.endsWith('.rels');
 
+/**
+ * Pretty-print XML for readable git diffs without changing the infoset.
+ *
+ * Rules:
+ * - Never inject or strip character data inside text nodes (e.g. `a:t`).
+ * - Elements with direct text / mixed content stay on one line (exact join).
+ * - Empty or whitespace-only text elements stay inline (`<a:t> </a:t>` preserved).
+ * - Only element-only children get newline + indent; inter-element whitespace is dropped.
+ */
 export const prettyPrintXml = (source: string): string => {
-  const compact = source.replace(/>\s+</g, '><').trim();
-  if (!compact) return '\n';
+  const trimmed = source.trim();
+  if (!trimmed) return '\n';
+
+  const tokens = trimmed.match(/<[^>]+>|[^<]+/g);
+  if (!tokens) return `${trimmed}\n`;
+
+  const isClose = (t: string) => t.startsWith('</');
+  const isPiOrDecl = (t: string) => t.startsWith('<?') || t.startsWith('<!');
+  const isSelfClosing = (t: string) => /^<[^!?/][^>]*\/>$/.test(t);
+  const isOpen = (t: string) =>
+    t.startsWith('<') && !isClose(t) && !isPiOrDecl(t) && !isSelfClosing(t);
+  const isText = (t: string) => !t.startsWith('<');
+  const isWsText = (t: string) => isText(t) && /^\s*$/.test(t);
+
+  const findClose = (openIdx: number): number => {
+    let depth = 0;
+    for (let j = openIdx; j < tokens.length; j++) {
+      const t = tokens[j]!;
+      if (isOpen(t)) depth += 1;
+      else if (isClose(t)) {
+        depth -= 1;
+        if (depth === 0) return j;
+      }
+    }
+    return -1;
+  };
+
+  /** Classify direct content of tokens[openIdx..closeIdx]. */
+  const classify = (openIdx: number, closeIdx: number): 'elements' | 'preserve' => {
+    let depth = 0;
+    let hasElement = false;
+    let hasSignificantText = false;
+    let hasWsOnlyText = false;
+    for (let j = openIdx + 1; j < closeIdx; j++) {
+      const t = tokens[j]!;
+      if (isOpen(t)) {
+        if (depth === 0) hasElement = true;
+        depth += 1;
+      } else if (isSelfClosing(t)) {
+        if (depth === 0) hasElement = true;
+      } else if (isClose(t)) {
+        depth -= 1;
+      } else if (isText(t) && depth === 0) {
+        if (isWsText(t)) hasWsOnlyText = true;
+        else hasSignificantText = true;
+      }
+    }
+    // Mixed content, leaf text, or ws-only text leaf: keep exact character data.
+    if (hasSignificantText || hasWsOnlyText) return 'preserve';
+    if (hasElement) return 'elements';
+    // Truly empty `<tag></tag>` — keep inline so we don't invent a text node.
+    return 'preserve';
+  };
+
   const lines: string[] = [];
-  let indent = 0;
-  const tokens = compact.split(/(?=<)/).filter(Boolean);
-  for (const token of tokens) {
-    if (/^<\?/.test(token) || /^<!/.test(token)) {
+
+  const emitElement = (openIdx: number, closeIdx: number, indent: number): void => {
+    const pad = '  '.repeat(indent);
+    const open = tokens[openIdx]!;
+    const close = tokens[closeIdx]!;
+    if (classify(openIdx, closeIdx) === 'preserve') {
+      lines.push(`${pad}${tokens.slice(openIdx, closeIdx + 1).join('')}`);
+      return;
+    }
+    lines.push(`${pad}${open}`);
+    let j = openIdx + 1;
+    while (j < closeIdx) {
+      const t = tokens[j]!;
+      if (isWsText(t)) {
+        j += 1;
+        continue;
+      }
+      if (isPiOrDecl(t) || isSelfClosing(t)) {
+        lines.push(`${'  '.repeat(indent + 1)}${t}`);
+        j += 1;
+        continue;
+      }
+      if (isOpen(t)) {
+        const childClose = findClose(j);
+        if (childClose === -1 || childClose > closeIdx) {
+          lines.push(`${'  '.repeat(indent + 1)}${t}`);
+          j += 1;
+          continue;
+        }
+        emitElement(j, childClose, indent + 1);
+        j = childClose + 1;
+        continue;
+      }
+      // Unexpected token inside element-only content — preserve without indent injection.
+      if (isText(t)) {
+        lines.push(t);
+        j += 1;
+        continue;
+      }
+      j += 1;
+    }
+    lines.push(`${pad}${close}`);
+  };
+
+  let i = 0;
+  while (i < tokens.length) {
+    const token = tokens[i]!;
+    if (isPiOrDecl(token) || isSelfClosing(token)) {
       lines.push(token);
+      i += 1;
       continue;
     }
-    if (/^<\//.test(token)) {
-      indent = Math.max(0, indent - 1);
-      lines.push(`${'  '.repeat(indent)}${token}`);
+    if (isOpen(token)) {
+      const closeIdx = findClose(i);
+      if (closeIdx === -1) {
+        lines.push(token);
+        i += 1;
+        continue;
+      }
+      emitElement(i, closeIdx, 0);
+      i = closeIdx + 1;
       continue;
     }
-    if (/^<[^!?/][^>]*\/>/.test(token)) {
-      lines.push(`${'  '.repeat(indent)}${token}`);
+    if (isText(token)) {
+      if (!isWsText(token)) lines.push(token);
+      i += 1;
       continue;
     }
-    if (/^<[^!?/]/.test(token)) {
-      lines.push(`${'  '.repeat(indent)}${token}`);
-      indent += 1;
+    if (isClose(token)) {
+      lines.push(token);
+      i += 1;
       continue;
     }
-    const text = token.trim();
-    if (text) lines.push(`${'  '.repeat(indent)}${text}`);
+    i += 1;
   }
+
   return `${lines.join('\n')}\n`;
 };
 
