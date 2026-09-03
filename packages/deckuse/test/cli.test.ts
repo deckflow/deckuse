@@ -223,6 +223,42 @@ describe('deckuse CLI', () => {
     expect((await run(['export', exportPath, '--workspace', workspace, '--json'])).code).toBe(0);
     await expect(stat(exportPath)).resolves.toMatchObject({ size: expect.any(Number) });
   });
+  it('supports replace-text with --source and --target', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-replace-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+
+    const replaced = await run([
+      'replace-text',
+      '--workspace',
+      workspace,
+      '--source',
+      'Hello',
+      '--target',
+      'Bonjour',
+      '--json',
+    ]);
+    expect(replaced.code).toBe(0);
+    const envelope = JSON.parse(replaced.stdout) as { ok: boolean; revision?: number };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.revision).toBe(2);
+
+    const got = await run([
+      'get',
+      'slide:1/shape:2',
+      '--workspace',
+      workspace,
+      '--props',
+      'text.value',
+      '--json',
+    ]);
+    const details = JSON.parse(got.stdout) as {
+      data: { properties: Record<string, { effective?: unknown }> };
+    };
+    expect(details.data.properties['text.value']?.effective).toBe('Bonjour');
+  });
   it('supports legacy apply JSON mutations', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-apply-')),
       source = join(root, 'source.pptx'),

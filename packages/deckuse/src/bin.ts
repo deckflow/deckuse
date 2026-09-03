@@ -52,7 +52,7 @@ Global options:
 
 Commands:
   init, status, list, get, inspect, search
-  add, remove, set, xfrm, z, apply, validate
+  add, remove, set, replace-text, xfrm, z, apply, validate
   history, undo, export, monitor
 
 Run 'deckuse <command> --help' for details.
@@ -398,6 +398,29 @@ try {
           scope,
         });
       }
+    } else if (action === 'replace-text') {
+      const source = optionFrom(clean, '--source');
+      const target = optionFrom(clean, '--target');
+      if (source === undefined || target === undefined)
+        throw new Error(
+          'Usage: deckuse replace-text --source <text> --target <text> [--regex] [--limit <n>] [--selector <sel>]',
+        );
+      if (!source)
+        throw new Error('replace-text --source must be a non-empty string');
+      const workspace = await findWorkspace(workspaceOpt);
+      ok = await execute('deckuse replace-text', {
+        ...(await mutationExtras(workspace)),
+        type: 'replaceText',
+        find: source,
+        replace: target,
+        ...(clean.includes('--regex') ? { regex: true } : {}),
+        ...(optionFrom(clean, '--limit')
+          ? { limit: Number(optionFrom(clean, '--limit')) }
+          : {}),
+        ...(optionFrom(clean, '--selector')
+          ? { selector: optionFrom(clean, '--selector') }
+          : {}),
+      });
     } else if (action === 'xfrm') {
       if (clean[1] !== 'set') throw new Error('Usage: deckuse xfrm set --slide <n> --shape <id> ...');
       const workspace = await findWorkspace(workspaceOpt);
