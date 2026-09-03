@@ -26,6 +26,7 @@ const PPTX_MEDIA_TYPE =
 
 export {
   revision,
+  nextRevision,
   sourceDir,
   readManifest,
   readHistory,

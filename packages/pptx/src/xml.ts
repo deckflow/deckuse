@@ -11,6 +11,8 @@ export const REL = {
   chart: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart',
   image: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image',
   layout: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+  slideMaster: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster',
+  theme: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme',
   package: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/package',
 } as const;
 export const root = (doc: Document): Element => {

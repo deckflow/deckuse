@@ -11,21 +11,21 @@
 
 </div>
 
-Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office 文档自动化引擎。它将文档打开为带版本的工作区，让智能体检查并精确定位其结构，执行显式 JSON 命令、验证结果，再导出新文档。
+Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office 文档自动化引擎。它将文档打开为带版本的工作区，让智能体用语义地址（如 `slide:1/shape:2`）检查并精确定位结构，执行显式变更、验证结果，再导出新文档。
 
-目前已实现 PPTX。DOCX、XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。
+目前已实现 PPTX（**协议 2.0 / Phase 1a**）。DOCX、XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。
 
 ## 为何选择 Deckuse
 
 Deckuse 可在不从零重建演示文稿的情况下修改现有 PPT。其工作流刻意以结构为中心，而非视觉为中心：
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
+existing.pptx → init → list / get → set / add → validate → export
 ```
 
-每次成功的写操作会自动提交 Git 版本、更新 `operations.jsonl`，并立即重新打包 `package.pptx`。可使用 `undo` 撤销、`history` 查看操作历史。
+每次成功的写操作会自动提交 Git 版本、更新 `operations.jsonl`、重建 `package.pptx`，并刷新 `.deckuse/index.json`。可使用 `undo` 撤销、`history` 查看操作历史。
 
-Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是渲染引擎，无法可靠判断幻灯片是否美观或版式是否正确。
+Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是渲染引擎，无法可靠判断幻灯片是否美观或版式是否正确。`render` / 语义 `diff` / `branch` 在 Phase 1a 之后交付。
 
 ## 安装
 
@@ -38,25 +38,31 @@ npm install -g @deckflow/deckuse
 该命令会全局安装 `deckuse` CLI。
 
 ```sh
-# 从演示文稿创建持久工作空间。
+# 从演示文稿创建持久工作空间（revision 从 1 开始）。
 deckuse init input.pptx ./workspace --json
 
-# 检查已索引的文档并查询目标元素。
-deckuse inspect ./workspace --json
-deckuse query ./workspace 'kind=textbox text=Quarter' --json
-deckuse query ./workspace '*' --limit 500 --json
+# 清单与带 provenance 的实时属性读取。
+deckuse status --workspace ./workspace --json
+deckuse list slides --workspace ./workspace --json
+deckuse list shapes --workspace ./workspace --slide 1 --json
+deckuse get slide:1/shape:2 --workspace ./workspace --resolve both --json
 
-# 应用一个 JSON 命令、JSON 数组或 JSONL。
-deckuse apply ./workspace --input operations.jsonl --json
+# 语义目标写入（一次写 = 一次 revision）。
+deckuse set text slide:1/shape:2 --workspace ./workspace --value 'Hello' --json
+deckuse set slide:1/shape:2 --workspace ./workspace --font.size 42 --fill.color '#0A2930' --json
+deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 100 --height 100 --json
 
-# 验证工作区、查看历史、撤销写操作。
-deckuse validate ./workspace --json
-deckuse history ./workspace --json
-deckuse undo ./workspace --steps 1 --json
+# 验证、历史、撤销、导出。
+deckuse validate --workspace ./workspace --json
+deckuse history --workspace ./workspace --json
+deckuse undo --workspace ./workspace --steps 1 --json
+deckuse export ./out.pptx --workspace ./workspace --json
 
 # 实时预览编辑；浏览器订阅后才开始渲染。
-deckuse monitor ./workspace --port 4173
+deckuse monitor --workspace ./workspace --port 4173
 ```
+
+全局选项包括 `--workspace`、`--json`、`--dry-run`、`--expect-revision`、`--reason`。完整契约见 [DECKUSE-CLI-PHASE-1.md](DECKUSE-CLI-PHASE-1.md)。
 
 工作区布局：
 
@@ -71,9 +77,9 @@ workspace/
 
 ## CLI 工作流
 
-`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Multiple commands in one `apply` invocation are executed as one atomic batch. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before the batch.
+`apply` 可接受 transaction 文件（`{ "operations": [...] }`）、单个 JSON mutation、JSON 数组或 JSONL。使用 `--input -`（默认）从标准输入读取。仍支持旧版 ElementRef mutation。无子命令时，CLI 从标准输入读取一条完整的协议 `2.0` JSON 命令。
 
-命令结果以 JSON 写入标准输出；无效参数或输入导致的错误写入标准错误。退出状态 `0` 表示成功，`1` 表示命令失败，`2` 表示 CLI 用法或解析失败。
+命令结果使用 JSON envelope（`ok`、`command`、`revision`、`data` / `error`）。退出状态 `0` 表示成功，`1` 表示命令失败，`2` 表示 CLI 用法或解析失败。
 
 ### 选择器
 

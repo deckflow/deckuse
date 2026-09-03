@@ -75,7 +75,7 @@ describe('pptx adapter', () => {
       workspace = join(root, 'workspace');
     await fixture(source);
     const init = await pptxAdapter.init(
-      { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},
     );
     expect(init, JSON.stringify(init)).toMatchObject({ ok: true });
@@ -93,7 +93,7 @@ describe('pptx adapter', () => {
     await expect(stat(join(workspace, 'source', 'ppt', 'presentation.xml'))).resolves.toBeDefined();
     await expect(readFile(join(workspace, '.gitignore'), 'utf8')).resolves.toContain('package.*');
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);
@@ -107,14 +107,14 @@ describe('pptx adapter', () => {
     const rev = (inspected as any).value.document.revision;
     const batch = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'batch',
         workspaceId: workspace,
         transactionId: rev,
         atomic: true,
         commands: [
           {
-            version: '1.0',
+            version: '2.0',
             type: 'setText',
             workspaceId: workspace,
             transactionId: rev,
@@ -122,7 +122,7 @@ describe('pptx adapter', () => {
             text: 'Changed',
           },
           {
-            version: '1.0',
+            version: '2.0',
             type: 'setTransform',
             workspaceId: workspace,
             transactionId: rev,
@@ -130,7 +130,7 @@ describe('pptx adapter', () => {
             transform: { x: 50 },
           },
           {
-            version: '1.0',
+            version: '2.0',
             type: 'duplicate',
             workspaceId: workspace,
             transactionId: rev,
@@ -147,7 +147,7 @@ describe('pptx adapter', () => {
     );
     expect(new TextDecoder().decode(reopened.getPart('/custom/unknown.bin')!.data)).toBe('keep me');
     const history = await pptxAdapter.execute(
-      { version: '1.0', type: 'history', workspaceId: workspace, limit: 10, offset: 0 },
+      { version: '2.0', type: 'history', workspaceId: workspace, limit: 10, offset: 0 },
       {},
     );
     expect(history.ok).toBe(true);
@@ -159,7 +159,7 @@ describe('pptx adapter', () => {
       ).toMatchObject({ operation: { type: 'batch' }, slides: [1] });
     }
     const undone = await pptxAdapter.execute(
-      { version: '1.0', type: 'undo', workspaceId: workspace, steps: 1 },
+      { version: '2.0', type: 'undo', workspaceId: workspace, steps: 1 },
       {},
     );
     expect(undone.ok).toBe(true);
@@ -175,12 +175,12 @@ describe('pptx adapter', () => {
       workspace = join(root, 'workspace');
     await fixture(source);
     const init = await pptxAdapter.init(
-      { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},
     );
     expect(init.ok).toBe(true);
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);
@@ -197,7 +197,7 @@ describe('pptx adapter', () => {
     if (!slide) return;
     const duplicated = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'duplicate',
         workspaceId: workspace,
         transactionId: (inspected.value as { document: { revision: string } }).document.revision,
@@ -208,7 +208,7 @@ describe('pptx adapter', () => {
     expect(duplicated.ok).toBe(true);
     if (!duplicated.ok) return;
     const after = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(after.ok).toBe(true);
@@ -224,7 +224,7 @@ describe('pptx adapter', () => {
     expect(slides).toHaveLength(2);
     const removed = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'remove',
         workspaceId: workspace,
         transactionId: (after.value as { document: { revision: string } }).document.revision,
@@ -246,12 +246,12 @@ describe('pptx adapter', () => {
       workspace = join(root, 'workspace');
     await fixture(source);
     const init = await pptxAdapter.init(
-      { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},
     );
     expect(init.ok).toBe(true);
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);
@@ -269,14 +269,14 @@ describe('pptx adapter', () => {
     if (!slide || !chart) return;
     const batch = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'batch',
         workspaceId: workspace,
         transactionId: value.document.revision,
         atomic: true,
         commands: [
           {
-            version: '1.0',
+            version: '2.0',
             type: 'add',
             workspaceId: workspace,
             transactionId: value.document.revision,
@@ -290,7 +290,7 @@ describe('pptx adapter', () => {
             },
           },
           {
-            version: '1.0',
+            version: '2.0',
             type: 'add',
             workspaceId: workspace,
             transactionId: value.document.revision,
@@ -305,7 +305,7 @@ describe('pptx adapter', () => {
             },
           },
           {
-            version: '1.0',
+            version: '2.0',
             type: 'setProperties',
             workspaceId: workspace,
             transactionId: value.document.revision,
@@ -319,7 +319,7 @@ describe('pptx adapter', () => {
     expect(batch.ok).toBe(true);
     const pictures = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'kind=picture',
@@ -344,7 +344,7 @@ describe('pptx adapter', () => {
     }
     const queried = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: { kind: 'table', name: 'Second' },
@@ -370,13 +370,13 @@ describe('pptx adapter', () => {
     expect(
       (
         await pptxAdapter.init(
-          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
           {},
         )
       ).ok,
     ).toBe(true);
     const all = await pptxAdapter.execute(
-      { version: '1.0', type: 'query', workspaceId: workspace, selector: '*', limit: 1000 },
+      { version: '2.0', type: 'query', workspaceId: workspace, selector: '*', limit: 1000 },
       {},
     );
     expect(all.ok).toBe(true);
@@ -384,7 +384,7 @@ describe('pptx adapter', () => {
     expect((all.value as unknown[]).length).toBeGreaterThan(3);
     const withText = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'hasText=true',
@@ -399,7 +399,7 @@ describe('pptx adapter', () => {
     expect(textItems.every((item) => Boolean(item.text?.length))).toBe(true);
     const hello = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'text~=^Hello$',
@@ -413,14 +413,14 @@ describe('pptx adapter', () => {
     const rev = (
       (
         await pptxAdapter.execute(
-          { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+          { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 1 },
           {},
         )
       ).value as { document: { revision: string } }
     ).document.revision;
     const replaced = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'replaceText',
         workspaceId: workspace,
         transactionId: rev,
@@ -477,7 +477,7 @@ describe('pptx adapter', () => {
     expect(
       (
         await pptxAdapter.init(
-          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
           {},
         )
       ).ok,
@@ -485,14 +485,14 @@ describe('pptx adapter', () => {
     const rev = (
       (
         await pptxAdapter.execute(
-          { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+          { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
           {},
         )
       ).value as { document: { revision: string } }
     ).document.revision;
     const replaced = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'replaceText',
         workspaceId: workspace,
         transactionId: rev,
@@ -521,13 +521,13 @@ describe('pptx adapter', () => {
     expect(
       (
         await pptxAdapter.init(
-          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
           {},
         )
       ).ok,
     ).toBe(true);
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);
@@ -544,7 +544,7 @@ describe('pptx adapter', () => {
     if (!title) return;
     const updated = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'setProperties',
         workspaceId: workspace,
         transactionId: value.document.revision,
@@ -563,7 +563,7 @@ describe('pptx adapter', () => {
     expect(updated, JSON.stringify(updated)).toMatchObject({ ok: true });
     const rejected = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'setProperties',
         workspaceId: workspace,
         transactionId: (updated.value as { revision: string }).revision,
@@ -598,13 +598,13 @@ describe('pptx adapter', () => {
     expect(
       (
         await pptxAdapter.init(
-          { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+          { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
           {},
         )
       ).ok,
     ).toBe(true);
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);
@@ -623,7 +623,7 @@ describe('pptx adapter', () => {
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     const added = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'add',
         workspaceId: workspace,
         transactionId: value.document.revision,
@@ -636,7 +636,7 @@ describe('pptx adapter', () => {
     if (!added.ok) return;
     const pictures = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'kind=picture',
@@ -659,7 +659,7 @@ describe('pptx adapter', () => {
     const originalBytes = before.getPart(mediaPart)!.data.slice();
     const replaced = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'replacePicture',
         workspaceId: workspace,
         transactionId: (added.value as { revision: string }).revision,
@@ -673,7 +673,7 @@ describe('pptx adapter', () => {
     if (!replaced.ok) return;
     const afterReplace = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'kind=picture',
@@ -703,7 +703,7 @@ describe('pptx adapter', () => {
     };
     const duplicated = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'duplicate',
         workspaceId: workspace,
         transactionId: (replaced.value as { revision: string }).revision,
@@ -715,7 +715,7 @@ describe('pptx adapter', () => {
     if (!duplicated.ok) return;
     const both = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'query',
         workspaceId: workspace,
         selector: 'kind=picture',
@@ -741,7 +741,7 @@ describe('pptx adapter', () => {
     };
     const removeOne = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'remove',
         workspaceId: workspace,
         transactionId: (duplicated.value as { revision: string }).revision,
@@ -756,7 +756,7 @@ describe('pptx adapter', () => {
     ).toBeTruthy();
     const removeTwo = await pptxAdapter.execute(
       {
-        version: '1.0',
+        version: '2.0',
         type: 'remove',
         workspaceId: workspace,
         transactionId: (removeOne.value as { revision: string }).revision,
@@ -775,7 +775,7 @@ describe('pptx adapter', () => {
     const workspace = join(root, 'workspace');
     await fixture(source);
     const init = await pptxAdapter.init(
-      { version: '1.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},
     );
     expect(init.ok).toBe(true);
@@ -790,7 +790,7 @@ describe('pptx adapter', () => {
     stale.elements = [];
     await writeFile(indexPath, `${JSON.stringify(stale, null, 2)}\n`);
     const inspected = await pptxAdapter.execute(
-      { version: '1.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
       {},
     );
     expect(inspected.ok).toBe(true);

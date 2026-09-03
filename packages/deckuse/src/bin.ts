@@ -1,175 +1,77 @@
-#!/usr/bin/env node
-import { readFile } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
+import { access, readFile } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
+import {
+  PROTOCOL_VERSION,
+  revisionAsNumber,
+  type CommandEnvelope,
+  type Result,
+} from '@deckflow/deckuse-core';
 import { runCommand } from './index.js';
 import { startMonitor } from './monitor.js';
 import { version } from './version.js';
 
 const args = process.argv.slice(2);
-const json = args.includes('--json');
-const clean = args.filter((arg) => arg !== '--json');
 
-type HelpCommand =
-  'init' | 'inspect' | 'query' | 'apply' | 'validate' | 'undo' | 'history' | 'monitor';
-
-const HELP: Record<'main' | HelpCommand, string> = {
-  main: `usage: deckuse <command> [<args>] [--json]
-
-Inspect, modify, validate, and export Office document workspaces.
-
-Common commands:
-  init <input> <workspace>       Create a workspace from an Office document
-  inspect <workspace>            Inspect the document structure
-  query <workspace> [selector]   Query document elements
-  apply <workspace>              Apply JSON command objects
-  validate <workspace>           Validate workspace changes
-  undo <workspace>               Undo recent write operations
-  history <workspace>            View write operation history
-  monitor <workspace>            Live-preview workspace changes
-
-Run 'deckuse <command> --help' for details about a command.
-Run 'deckuse help <command>' for the same command reference.
-
-Options:
-  -h, --help       Show this help message
-  -v, -V, --version
-                   Show the deckuse version
-  --json           Format command results as compact JSON
-`,
-  init: `usage: deckuse init <input> <workspace> [--json]
-
-Create a deckuse workspace from an Office document.
-
-Arguments:
-  <input>          Source document (.pptx, .docx, .xlsx, .key, or .numbers)
-  <workspace>      Directory in which to create the workspace
-
-Example:
-  deckuse init presentation.pptx ./presentation
-`,
-  inspect: `usage: deckuse inspect <workspace> [--depth <n>] [--json]
-
-Inspect the indexed structure of a workspace.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --depth <n>      Traversal depth (default: 2)
-
-Example:
-  deckuse inspect ./presentation --depth 3
-`,
-  query: `usage: deckuse query <workspace> [selector] [--limit <n>] [--json]
-
-Query indexed elements in a workspace.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-  [selector]       Element selector (default: *)
-
-Options:
-  --limit <n>      Maximum results to return (default: 100)
-
-Example:
-  deckuse query ./presentation 'slide[*] text' --limit 20
-`,
-  apply: `usage: deckuse apply <workspace> [--input <file|->] [--json]
-
-Apply one or more JSON command objects to a workspace. Input may be a JSON
-object, a JSON array, or newline-delimited JSON. Multiple commands are applied
-as one atomic batch. Commands read from standard input by default.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --input <file|-> Command input file, or - for standard input (default: -)
-
-Examples:
-  deckuse apply ./presentation --input changes.json
-  printf '%s\n' '{"type":"add", ...}' | deckuse apply ./presentation
-`,
-  validate: `usage: deckuse validate <workspace> [--level <level>] [--json]
-
-Validate workspace changes before export.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --level <level>  Validation level (default: full)
-
-Example:
-  deckuse validate ./presentation --level full
-`,
-  undo: `usage: deckuse undo <workspace> [--steps <n>] [--json]
-
-Undo recent successful write operations.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --steps <n>      Number of write operations to undo (default: 1)
-
-Example:
-  deckuse undo ./presentation --steps 2
-`,
-  monitor: `usage: deckuse monitor <workspace> [--host <host>] [--port <port>]
-
-Live-preview workspace changes in a browser.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --host <host>    HTTP listen host (default: 0.0.0.0)
-  --port <port>    HTTP listen port (default: 4173)
-`,
-  history: `usage: deckuse history <workspace> [--limit <n>] [--offset <n>] [--json]
-
-View successful write operation history.
-
-Arguments:
-  <workspace>      Existing deckuse workspace
-
-Options:
-  --limit <n>      Maximum records to return (default: 100)
-  --offset <n>     Number of records to skip (default: 0)
-
-Example:
-  deckuse history ./presentation --limit 20
-`,
+const takeFlag = (list: string[], name: string): boolean => {
+  const i = list.indexOf(name);
+  if (i < 0) return false;
+  list.splice(i, 1);
+  return true;
 };
 
-const writeHelp = (command: keyof typeof HELP = 'main'): void => {
-  process.stdout.write(HELP[command]);
-};
-
-const isHelpFlag = (value: string | undefined): boolean => value === '--help' || value === '-h';
-const isVersionFlag = (value: string | undefined): boolean =>
-  value === '--version' || value === '-v' || value === '-V';
-const isHelpCommand = (value: string): value is HelpCommand => value in HELP && value !== 'main';
-
-const readStdin = async (): Promise<string> => {
-  let value = '';
-  process.stdin.setEncoding('utf8');
-  for await (const chunk of process.stdin) value += String(chunk);
+const takeOption = (list: string[], name: string): string | undefined => {
+  const i = list.indexOf(name);
+  if (i < 0) return undefined;
+  const value = list[i + 1];
+  list.splice(i, 2);
   return value;
 };
-const option = (name: string): string | undefined => {
-  const i = clean.indexOf(name);
-  return i >= 0 ? clean[i + 1] : undefined;
+
+const json = takeFlag(args, '--json');
+const quiet = takeFlag(args, '--quiet');
+const dryRun = takeFlag(args, '--dry-run');
+const workspaceOpt = takeOption(args, '--workspace');
+const revisionOpt = takeOption(args, '--revision');
+const expectRevisionOpt = takeOption(args, '--expect-revision');
+const reasonOpt = takeOption(args, '--reason');
+const clean = args;
+
+const HELP_MAIN = `usage: deckuse [global-options] <command> [subcommand] [target] [options]
+
+DeckUse Phase 1a CLI (protocol ${PROTOCOL_VERSION}).
+
+Global options:
+  --workspace <path>        Explicit workspace (default: nearest .deckuse)
+  --revision <rev>          Read a historical revision (writes reject it)
+  --json                    Machine-readable envelope
+  --quiet                   Suppress human-oriented summaries
+  --dry-run                 Plan a write without committing
+  --expect-revision <rev>   Optimistic-concurrency guard for writes
+  --reason <text>           Stored with write history
+
+Commands:
+  init, status, list, get, inspect, search
+  add, remove, set, xfrm, z, apply, validate
+  history, undo, export, monitor
+
+Run 'deckuse <command> --help' for details.
+`;
+
+const findWorkspace = async (start?: string): Promise<string> => {
+  if (start) return resolve(start);
+  let dir = resolve(process.cwd());
+  for (;;) {
+    try {
+      await access(join(dir, '.deckuse', 'manifest.json'));
+      return dir;
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) throw new Error('No deckuse workspace found; pass --workspace <path>');
+      dir = parent;
+    }
+  }
 };
-const output = (result: unknown): void => {
-  process.stdout.write(`${JSON.stringify(result, null, json ? 0 : 2)}\n`);
-};
-const execute = async (command: unknown): Promise<boolean> => {
-  const result = await runCommand(command);
-  output(result);
-  return result.ok;
-};
+
 const revisionFor = async (workspace: string): Promise<string> => {
   const manifest = JSON.parse(
     await readFile(resolve(workspace, '.deckuse', 'manifest.json'), 'utf8'),
@@ -177,89 +79,498 @@ const revisionFor = async (workspace: string): Promise<string> => {
   return manifest.revision;
 };
 
-const WRITE_TYPES = new Set([
-  'setText',
-  'replaceText',
-  'setTransform',
-  'setProperties',
-  'add',
-  'remove',
-  'replacePicture',
-  'duplicate',
-  'batch',
-]);
+const readStdin = async (): Promise<string> => {
+  let value = '';
+  process.stdin.setEncoding('utf8');
+  for await (const chunk of process.stdin) value += String(chunk);
+  return value;
+};
 
+const mutationExtras = async (workspace: string) => {
+  const transactionId = expectRevisionOpt ?? (await revisionFor(workspace));
+  return {
+    version: PROTOCOL_VERSION,
+    workspaceId: workspace,
+    transactionId,
+    ...(dryRun ? { dryRun: true } : {}),
+    ...(expectRevisionOpt ? { expectRevision: expectRevisionOpt } : {}),
+    ...(reasonOpt ? { reason: reasonOpt } : {}),
+  };
+};
+
+const toEnvelope = (
+  commandLabel: string,
+  result: Result<unknown>,
+  extras: Partial<CommandEnvelope> = {},
+): CommandEnvelope => {
+  if (!result.ok) {
+    return {
+      ok: false,
+      command: commandLabel,
+      warnings: result.diagnostics
+        .filter((d) => d.severity === 'warning')
+        .map((d) => d.message),
+      error: {
+        code: result.error.code,
+        message: result.error.message,
+        ...(result.error.target ? { target: result.error.target } : {}),
+        ...(result.error.hint ? { hint: result.error.hint } : {}),
+      },
+      ...extras,
+    };
+  }
+  const value = result.value as Record<string, unknown>;
+  const revision =
+    revisionAsNumber(value['revision'] as string | number | undefined) ??
+    (typeof value['revision'] === 'number' ? value['revision'] : undefined);
+  return {
+    ok: true,
+    command: commandLabel,
+    ...(revision !== undefined ? { revision } : {}),
+    branch: typeof value['branch'] === 'string' ? value['branch'] : 'main',
+    ...(Array.isArray(value['affectedSlides'])
+      ? { affectedSlides: value['affectedSlides'] as number[] }
+      : {}),
+    ...(Array.isArray(value['changedTargets'])
+      ? { changedTargets: value['changedTargets'] as string[] }
+      : {}),
+    ...(Array.isArray(value['changedParts'])
+      ? { changedParts: value['changedParts'] as string[] }
+      : {}),
+    warnings: [
+      ...result.diagnostics.filter((d) => d.severity === 'warning').map((d) => d.message),
+      ...(Array.isArray(value['warnings']) ? (value['warnings'] as string[]) : []),
+    ],
+    data: value,
+    ...extras,
+  };
+};
+
+const outputEnvelope = (envelope: CommandEnvelope): void => {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    return;
+  }
+  if (quiet) return;
+  if (!envelope.ok) {
+    process.stderr.write(
+      `deckuse: ${envelope.error?.code ?? 'ERROR'}: ${envelope.error?.message ?? 'failed'}\n`,
+    );
+    if (envelope.error?.hint) process.stderr.write(`hint: ${envelope.error.hint}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
+};
+
+const execute = async (commandLabel: string, command: unknown): Promise<boolean> => {
+  if (revisionOpt && command && typeof command === 'object' && command !== null) {
+    const type = (command as { type?: string }).type;
+    if (
+      type &&
+      ![
+        'status',
+        'list',
+        'get',
+        'inspect',
+        'search',
+        'query',
+        'getText',
+        'validate',
+        'history',
+        'export',
+      ].includes(type)
+    ) {
+      outputEnvelope({
+        ok: false,
+        command: commandLabel,
+        error: {
+          code: 'INVALID_COMMAND',
+          message: 'Write commands reject --revision; omit it or use a read command',
+        },
+      });
+      return false;
+    }
+  }
+  const result = await runCommand(command);
+  outputEnvelope(toEnvelope(commandLabel, result));
+  return result.ok;
+};
+
+const parseProps = (list: string[]): Record<string, unknown> => {
+  const props: Record<string, unknown> = {};
+  for (let i = 0; i < list.length; ) {
+    const token = list[i]!;
+    if (!token.startsWith('--')) {
+      i += 1;
+      continue;
+    }
+    const key = token.slice(2);
+    const next = list[i + 1];
+    if (next === undefined || next.startsWith('--')) {
+      props[key] = true;
+      i += 1;
+      continue;
+    }
+    let value: unknown = next;
+    if (next === 'true') value = true;
+    else if (next === 'false') value = false;
+    else if (/^-?\d+(\.\d+)?$/.test(next)) value = Number(next);
+    props[key] = value;
+    i += 2;
+  }
+  return props;
+};
+
+const optionFrom = (list: string[], name: string): string | undefined => {
+  const i = list.indexOf(name);
+  return i >= 0 ? list[i + 1] : undefined;
+};
+
+const isHelp = (value: string | undefined): boolean => value === '--help' || value === '-h';
+
+const main = async (): Promise<void> => {
 try {
   if (clean.length === 0) {
     const payload = await readStdin();
-    const ok = await execute(JSON.parse(payload));
+    const parsed = JSON.parse(payload) as unknown;
+    const ok = await execute('stdin', parsed);
     if (!ok) process.exitCode = 1;
-  } else if (isHelpFlag(clean[0])) {
-    writeHelp();
-  } else if (isVersionFlag(clean[0])) {
+  } else if (isHelp(clean[0])) {
+    process.stdout.write(HELP_MAIN);
+  } else if (clean[0] === '--version' || clean[0] === '-v' || clean[0] === '-V') {
     process.stdout.write(`deckuse ${version}\n`);
   } else if (clean[0] === 'help') {
-    const command = clean[1];
-    if (!command) writeHelp();
-    else if (isHelpCommand(command)) writeHelp(command);
-    else throw new Error(`Unknown command: ${command}`);
+    process.stdout.write(HELP_MAIN);
   } else {
-    const action = clean[0];
+    const action = clean[0]!;
+    if (isHelp(clean[1])) {
+      process.stdout.write(HELP_MAIN);
+      return;
+    }
+
     let ok = true;
-    if (!action || !isHelpCommand(action))
-      throw new Error(`Unknown command: ${action ?? '(missing)'}`);
-    if (isHelpFlag(clean[1])) {
-      writeHelp(action);
-    } else if (action === 'init') {
-      const source = clean[1],
-        workspace = clean[2];
-      if (!source || !workspace) throw new Error('Usage: deckuse init input.pptx workspace/');
-      ok = await execute({
-        version: '1.0',
+
+    if (action === 'init') {
+      const source = clean[1];
+      const workspace = workspaceOpt ?? clean[2];
+      if (!source || !workspace)
+        throw new Error('Usage: deckuse init <input.pptx> <workspace/>');
+      ok = await execute('deckuse init', {
+        version: PROTOCOL_VERSION,
         type: 'init',
-        workspaceId: workspace,
+        workspaceId: resolve(workspace),
         format: extname(source).slice(1).toLowerCase(),
-        source,
+        source: resolve(source),
       });
-    } else if (action === 'inspect' || action === 'query' || action === 'validate') {
-      const workspace = clean[1];
-      if (!workspace) throw new Error(`Usage: deckuse ${action} workspace/`);
-      ok = await execute(
-        action === 'query'
-          ? {
-              version: '1.0',
-              type: 'query',
-              workspaceId: workspace,
-              selector: clean[2] ?? '*',
-              limit: Number(option('--limit') ?? 100),
-            }
-          : {
-              version: '1.0',
-              type: action,
-              workspaceId: workspace,
-              ...(action === 'inspect'
-                ? { depth: Number(option('--depth') ?? 2) }
-                : { level: option('--level') ?? 'full' }),
-            },
-      );
+    } else if (action === 'status') {
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      ok = await execute('deckuse status', {
+        version: PROTOCOL_VERSION,
+        type: 'status',
+        workspaceId: workspace,
+      });
+    } else if (action === 'list') {
+      const resource = clean[1] as 'slides' | 'shapes' | 'layouts' | 'masters' | 'theme';
+      if (!resource) throw new Error('Usage: deckuse list <slides|shapes|layouts|masters|theme>');
+      const workspace = await findWorkspace(workspaceOpt);
+      const slide = optionFrom(clean, '--slide');
+      ok = await execute(`deckuse list ${resource}`, {
+        version: PROTOCOL_VERSION,
+        type: 'list',
+        workspaceId: workspace,
+        resource,
+        ...(slide ? { slide: Number(slide) } : {}),
+      });
+    } else if (action === 'get') {
+      const target = clean[1];
+      if (!target) throw new Error('Usage: deckuse get <target> [--resolve both] [--json]');
+      const workspace = await findWorkspace(workspaceOpt);
+      const resolveMode = optionFrom(clean, '--resolve') ?? 'both';
+      const propsRaw = optionFrom(clean, '--props');
+      ok = await execute('deckuse get', {
+        version: PROTOCOL_VERSION,
+        type: 'get',
+        workspaceId: workspace,
+        target,
+        resolve: resolveMode,
+        provenance: !clean.includes('--no-provenance'),
+        ...(propsRaw ? { props: propsRaw.split(',').map((p) => p.trim()) } : {}),
+      });
+    } else if (action === 'inspect') {
+      const target = clean[1];
+      const workspace = await findWorkspace(workspaceOpt);
+      ok = await execute('deckuse inspect', {
+        version: PROTOCOL_VERSION,
+        type: 'inspect',
+        workspaceId: workspace,
+        ...(target && !target.startsWith('--') ? { target } : {}),
+        visualTree: clean.includes('--visual-tree'),
+        depth: Number(optionFrom(clean, '--depth') ?? 2),
+      });
+    } else if (action === 'search') {
+      const kind = clean[1] as 'text' | 'shape';
+      if (kind !== 'text' && kind !== 'shape')
+        throw new Error('Usage: deckuse search <text|shape> ...');
+      const workspace = await findWorkspace(workspaceOpt);
+      const query = kind === 'text' ? clean[2] : optionFrom(clean, '--query');
+      ok = await execute('deckuse search', {
+        version: PROTOCOL_VERSION,
+        type: 'search',
+        workspaceId: workspace,
+        kind,
+        ...(query ? { query } : {}),
+        ...(optionFrom(clean, '--name') ? { name: optionFrom(clean, '--name') } : {}),
+        limit: Number(optionFrom(clean, '--limit') ?? 100),
+      });
+    } else if (action === 'add') {
+      const what = clean[1];
+      const workspace = await findWorkspace(workspaceOpt);
+      const base = await mutationExtras(workspace);
+      if (what === 'slide') {
+        ok = await execute('deckuse add slide', {
+          ...base,
+          type: 'addSlide',
+          ...(optionFrom(clean, '--after') ? { after: Number(optionFrom(clean, '--after')) } : {}),
+          ...(optionFrom(clean, '--layout') ? { layout: optionFrom(clean, '--layout') } : {}),
+          ...(optionFrom(clean, '--name') ? { name: optionFrom(clean, '--name') } : {}),
+        });
+      } else if (what === 'shape') {
+        const slide = optionFrom(clean, '--slide');
+        const shapeType = optionFrom(clean, '--type');
+        if (!slide || !shapeType)
+          throw new Error('Usage: deckuse add shape --slide <n> --type <text|rect|...>');
+        ok = await execute('deckuse add shape', {
+          ...base,
+          type: 'addShape',
+          slide: Number(slide),
+          shapeType,
+          ...(optionFrom(clean, '--name') ? { name: optionFrom(clean, '--name') } : {}),
+          ...(optionFrom(clean, '--role') ? { role: optionFrom(clean, '--role') } : {}),
+          ...(optionFrom(clean, '--x') ? { x: Number(optionFrom(clean, '--x')) } : {}),
+          ...(optionFrom(clean, '--y') ? { y: Number(optionFrom(clean, '--y')) } : {}),
+          ...(optionFrom(clean, '--width') ? { width: Number(optionFrom(clean, '--width')) } : {}),
+          ...(optionFrom(clean, '--height')
+            ? { height: Number(optionFrom(clean, '--height')) }
+            : {}),
+          ...(optionFrom(clean, '--file') ? { file: optionFrom(clean, '--file') } : {}),
+        });
+      } else throw new Error('Usage: deckuse add <slide|shape> ...');
+    } else if (action === 'remove') {
+      const target = clean[1];
+      if (!target) throw new Error('Usage: deckuse remove <target>');
+      const workspace = await findWorkspace(workspaceOpt);
+      ok = await execute('deckuse remove', {
+        ...(await mutationExtras(workspace)),
+        type: 'remove',
+        target,
+      });
+    } else if (action === 'set') {
+      const workspace = await findWorkspace(workspaceOpt);
+      const base = await mutationExtras(workspace);
+      if (clean[1] === 'text') {
+        const target = clean[2];
+        const value = optionFrom(clean, '--value');
+        if (!target || value === undefined)
+          throw new Error('Usage: deckuse set text <target> --value <text>');
+        ok = await execute('deckuse set text', {
+          ...base,
+          type: 'setText',
+          target,
+          value,
+        });
+      } else {
+        const target = clean[1];
+        if (!target) throw new Error('Usage: deckuse set <target> --font.size 42 ...');
+        const props = parseProps(clean.slice(2));
+        delete props['scope'];
+        const scope = optionFrom(clean, '--scope') ?? 'local';
+        // remove flag keys that are not properties
+        for (const key of Object.keys(props)) {
+          if (['expect-revision', 'reason', 'dry-run', 'workspace', 'json', 'quiet'].includes(key))
+            delete props[key];
+        }
+        ok = await execute('deckuse set', {
+          ...base,
+          type: 'set',
+          target,
+          properties: props,
+          scope,
+        });
+      }
+    } else if (action === 'xfrm') {
+      if (clean[1] !== 'set') throw new Error('Usage: deckuse xfrm set --slide <n> --shape <id> ...');
+      const workspace = await findWorkspace(workspaceOpt);
+      const slide = optionFrom(clean, '--slide');
+      const shape = optionFrom(clean, '--shape');
+      const target =
+        optionFrom(clean, '--target') ??
+        (slide && shape ? `slide:${slide}/shape:${shape}` : undefined);
+      if (!target) throw new Error('xfrm set requires --target or --slide and --shape');
+      ok = await execute('deckuse xfrm set', {
+        ...(await mutationExtras(workspace)),
+        type: 'xfrmSet',
+        target,
+        ...(optionFrom(clean, '--x') ? { x: Number(optionFrom(clean, '--x')) } : {}),
+        ...(optionFrom(clean, '--y') ? { y: Number(optionFrom(clean, '--y')) } : {}),
+        ...(optionFrom(clean, '--width') || optionFrom(clean, '--cx')
+          ? { width: Number(optionFrom(clean, '--width') ?? optionFrom(clean, '--cx')) }
+          : {}),
+        ...(optionFrom(clean, '--height') || optionFrom(clean, '--cy')
+          ? { height: Number(optionFrom(clean, '--height') ?? optionFrom(clean, '--cy')) }
+          : {}),
+        ...(optionFrom(clean, '--rotation')
+          ? { rotation: Number(optionFrom(clean, '--rotation')) }
+          : {}),
+      });
+    } else if (action === 'z') {
+      if (clean[1] !== 'move') throw new Error('Usage: deckuse z move <target> --above <target>');
+      const target = clean[2];
+      if (!target) throw new Error('Usage: deckuse z move <target> ...');
+      const workspace = await findWorkspace(workspaceOpt);
+      ok = await execute('deckuse z move', {
+        ...(await mutationExtras(workspace)),
+        type: 'zMove',
+        target,
+        ...(optionFrom(clean, '--above') ? { above: optionFrom(clean, '--above') } : {}),
+        ...(optionFrom(clean, '--below') ? { below: optionFrom(clean, '--below') } : {}),
+        ...(clean.includes('--to-front') ? { toFront: true } : {}),
+        ...(clean.includes('--to-back') ? { toBack: true } : {}),
+      });
+    } else if (action === 'apply') {
+      const input = optionFrom(clean, '--input') ?? '-';
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      const raw = input === '-' ? await readStdin() : await readFile(resolve(input), 'utf8');
+      let values: unknown[] | undefined;
+      let transactionOps: Record<string, unknown>[] | undefined;
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (
+          typeof parsed === 'object' &&
+          parsed !== null &&
+          Array.isArray((parsed as { operations?: unknown }).operations)
+        ) {
+          transactionOps = (parsed as { operations: Record<string, unknown>[] }).operations;
+        } else {
+          values = Array.isArray(parsed) ? parsed : [parsed];
+        }
+      } catch {
+        values = raw
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as unknown);
+      }
+      if (transactionOps) {
+        ok = await execute('deckuse apply', {
+          ...(await mutationExtras(workspace)),
+          type: 'applyTransaction',
+          operations: transactionOps,
+        });
+      } else {
+        const extras = await mutationExtras(workspace);
+        const WRITE = new Set([
+          'setText',
+          'replaceText',
+          'setTransform',
+          'setProperties',
+          'set',
+          'xfrmSet',
+          'zMove',
+          'add',
+          'addSlide',
+          'addShape',
+          'remove',
+          'replacePicture',
+          'duplicate',
+          'batch',
+        ]);
+        const list = values ?? [];
+        if (
+          list.length > 0 &&
+          list.every(
+            (value) =>
+              typeof value === 'object' &&
+              value !== null &&
+              'op' in value,
+          )
+        ) {
+          ok = await execute('deckuse apply', {
+            ...extras,
+            type: 'applyTransaction',
+            operations: list as Record<string, unknown>[],
+          });
+        } else {
+          const commands = list.map((value) => {
+            if (typeof value !== 'object' || value === null)
+              throw new Error('apply input must contain command objects');
+            const record = value as Record<string, unknown>;
+            if (record['type'] === 'batch') return record;
+            if (!WRITE.has(String(record['type'])))
+              throw new Error(`apply input contains non-write command: ${String(record['type'])}`);
+            return { ...extras, ...record };
+          });
+          const payload =
+            commands.length === 1 && commands[0]?.['type'] !== 'batch'
+              ? commands[0]
+              : {
+                  ...extras,
+                  type: 'batch',
+                  atomic: true,
+                  commands: commands.flatMap((command) =>
+                    command['type'] === 'batch'
+                      ? (command as { commands: unknown[] }).commands
+                      : [command],
+                  ),
+                };
+          ok = await execute('deckuse apply', payload);
+        }
+      }
+    } else if (action === 'validate') {
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      ok = await execute('deckuse validate', {
+        version: PROTOCOL_VERSION,
+        type: 'validate',
+        workspaceId: workspace,
+        level: optionFrom(clean, '--level') ?? 'full',
+        package: clean.includes('--package'),
+        relationships: clean.includes('--relationships'),
+        ...(optionFrom(clean, '--slide') ? { slide: Number(optionFrom(clean, '--slide')) } : {}),
+      });
+    } else if (action === 'history') {
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      ok = await execute('deckuse history', {
+        version: PROTOCOL_VERSION,
+        type: 'history',
+        workspaceId: workspace,
+        limit: Number(optionFrom(clean, '--limit') ?? 100),
+        offset: Number(optionFrom(clean, '--offset') ?? 0),
+        ...(optionFrom(clean, '--slide') ? { slide: Number(optionFrom(clean, '--slide')) } : {}),
+      });
     } else if (action === 'undo') {
-      const workspace = clean[1];
-      if (!workspace) throw new Error('Usage: deckuse undo workspace/ [--steps <n>]');
-      ok = await execute({
-        version: '1.0',
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      ok = await execute('deckuse undo', {
+        version: PROTOCOL_VERSION,
         type: 'undo',
         workspaceId: workspace,
-        steps: Number(option('--steps') ?? 1),
+        steps: Number(optionFrom(clean, '--steps') ?? 1),
+      });
+    } else if (action === 'export') {
+      const output = clean[1];
+      if (!output) throw new Error('Usage: deckuse export <output.pptx>');
+      const workspace = await findWorkspace(workspaceOpt);
+      ok = await execute('deckuse export', {
+        version: PROTOCOL_VERSION,
+        type: 'export',
+        workspaceId: workspace,
+        output: resolve(output),
+        ...(revisionOpt ? { revision: revisionOpt } : {}),
       });
     } else if (action === 'monitor') {
-      const workspace = clean[1];
-      if (!workspace)
-        throw new Error('Usage: deckuse monitor workspace/ [--host <host>] [--port <port>]');
-      const port = Number(option('--port') ?? 4173);
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      const port = Number(optionFrom(clean, '--port') ?? 4173);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new Error('--port must be an integer between 0 and 65535');
       const monitor = await startMonitor(workspace, {
-        host: option('--host') ?? '0.0.0.0',
+        host: optionFrom(clean, '--host') ?? '0.0.0.0',
         port,
       });
       process.stdout.write(`Deckuse monitor: ${monitor.url}\n`);
@@ -270,67 +581,27 @@ try {
       };
       process.once('SIGINT', () => void shutdown('SIGINT'));
       process.once('SIGTERM', () => void shutdown('SIGTERM'));
-    } else if (action === 'history') {
-      const workspace = clean[1];
-      if (!workspace)
-        throw new Error('Usage: deckuse history workspace/ [--limit <n>] [--offset <n>]');
-      ok = await execute({
-        version: '1.0',
-        type: 'history',
+      return;
+    } else if (action === 'query') {
+      // Back-compat shim
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      ok = await execute('deckuse query', {
+        version: PROTOCOL_VERSION,
+        type: 'query',
         workspaceId: workspace,
-        limit: Number(option('--limit') ?? 100),
-        offset: Number(option('--offset') ?? 0),
+        selector: clean[2] ?? '*',
+        limit: Number(optionFrom(clean, '--limit') ?? 100),
       });
     } else {
-      const workspace = clean[1],
-        input = option('--input') ?? '-';
-      if (!workspace) throw new Error('Usage: deckuse apply workspace/ --input file|-');
-      const raw = input === '-' ? await readStdin() : await readFile(resolve(input), 'utf8');
-      let values: unknown[];
-      try {
-        const parsed = JSON.parse(raw) as unknown;
-        values = Array.isArray(parsed) ? parsed : [parsed];
-      } catch {
-        values = raw
-          .split(/\r?\n/)
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as unknown);
-      }
-      const transactionId = await revisionFor(workspace);
-      const commands = values.map((value) => {
-        if (typeof value !== 'object' || value === null)
-          throw new Error('apply input must contain command objects');
-        const record = value as Record<string, unknown>;
-        if (record['type'] === 'batch') return record;
-        if (!WRITE_TYPES.has(String(record['type'])))
-          throw new Error(`apply input contains non-write command: ${String(record['type'])}`);
-        return {
-          version: '1.0',
-          workspaceId: workspace,
-          transactionId,
-          ...record,
-        };
-      });
-      const payload =
-        commands.length === 1 && commands[0]?.['type'] !== 'batch'
-          ? commands[0]
-          : {
-              version: '1.0',
-              type: 'batch',
-              workspaceId: workspace,
-              transactionId,
-              atomic: true,
-              commands: commands.flatMap((command) =>
-                command['type'] === 'batch'
-                  ? (command as { commands: unknown[] }).commands
-                  : [command],
-              ),
-            };
-      ok = await execute(payload);
+      throw new Error(`Unknown command: ${action}`);
     }
+
     if (!ok) process.exitCode = 1;
   }
 } catch (cause) {
   process.stderr.write(`deckuse: ${cause instanceof Error ? cause.message : 'Invalid input'}\n`);
   process.exitCode = 2;
 }
+};
+
+void main();

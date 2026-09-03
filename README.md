@@ -11,21 +11,21 @@
 
 </div>
 
-Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure, applies explicit JSON commands, validates the result, and exports a new document.
+Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
-PPTX is the currently implemented format. DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
+PPTX is the currently implemented format (**protocol 2.0 / Phase 1a**). DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
 ## Why Deckuse
 
 Deckuse lets an agent modify an existing presentation without recreating it from scratch. Its workflow is deliberately structural rather than visual:
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
+existing.pptx → init → list / get → set / add → validate → export
 ```
 
-Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
+Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
 
-It preserves untouched XML and unknown package parts where possible. It is not a rendering engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct.
+It preserves untouched XML and unknown package parts where possible. It is not a rendering engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. `render` / semantic `diff` / `branch` are deferred past Phase 1a.
 
 ## Installation
 
@@ -40,26 +40,31 @@ This installs the `deckuse` CLI globally.
 ## CLI workflow
 
 ```sh
-# Create a persistent workspace from a presentation.
+# Create a persistent workspace from a presentation (revision starts at 1).
 deckuse init input.pptx ./workspace --json
 
-# Inspect the indexed document and query target elements.
-deckuse inspect ./workspace --json
-deckuse query ./workspace 'kind=textbox text=Quarter' --json
-deckuse query ./workspace '*' --limit 500 --json
-deckuse query ./workspace 'hasText=true text~=[\u4e00-\u9fff]' --json
+# Inventory and read live properties with provenance.
+deckuse status --workspace ./workspace --json
+deckuse list slides --workspace ./workspace --json
+deckuse list shapes --workspace ./workspace --slide 1 --json
+deckuse get slide:1/shape:2 --workspace ./workspace --resolve both --json
 
-# Apply one JSON command, a JSON array, or JSONL.
-deckuse apply ./workspace --input operations.jsonl --json
+# Mutate with semantic targets (one write = one revision).
+deckuse set text slide:1/shape:2 --workspace ./workspace --value 'Hello' --json
+deckuse set slide:1/shape:2 --workspace ./workspace --font.size 42 --fill.color '#0A2930' --json
+deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 100 --height 100 --json
 
-# Validate the workspace, inspect history, and undo writes.
-deckuse validate ./workspace --json
-deckuse history ./workspace --json
-deckuse undo ./workspace --steps 1 --json
+# Validate, history, undo, export.
+deckuse validate --workspace ./workspace --json
+deckuse history --workspace ./workspace --json
+deckuse undo --workspace ./workspace --steps 1 --json
+deckuse export ./out.pptx --workspace ./workspace --json
 
 # Live-preview edits; rendering starts when a browser subscribes.
-deckuse monitor ./workspace --port 4173
+deckuse monitor --workspace ./workspace --port 4173
 ```
+
+Global options include `--workspace`, `--json`, `--dry-run`, `--expect-revision`, and `--reason`. See [DECKUSE-CLI-PHASE-1.md](DECKUSE-CLI-PHASE-1.md) for the full contract.
 
 Workspace layout:
 
@@ -72,9 +77,9 @@ workspace/
   .gitignore        # ignores package.* and other generated files
 ```
 
-`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command. When invoked without a subcommand, the CLI instead accepts one complete JSON command on standard input.
+`apply` accepts a transaction file (`{ "operations": [...] }`), a single JSON mutation, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Legacy ElementRef mutations remain supported. When invoked without a subcommand, the CLI accepts one complete protocol `2.0` JSON command on standard input.
 
-Command results are written to standard output as JSON. Errors caused by invalid arguments or input are written to standard error. Exit status `0` means success, `1` means that a command failed, and `2` means CLI usage or parsing failure.
+Command results use a JSON envelope (`ok`, `command`, `revision`, `data` / `error`). Exit status `0` means success, `1` means that a command failed, and `2` means CLI usage or parsing failure.
 
 ### Selectors
 

@@ -8,7 +8,7 @@ export {
   lockPath,
   gitignorePath,
 } from './paths.js';
-export { revision } from './revision.js';
+export { revision, nextRevision, isIntegerRevision, INITIAL_REVISION } from './revision.js';
 export {
   hasWorkspaceGitRepo,
   ensureGitignore,

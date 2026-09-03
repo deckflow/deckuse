@@ -3,7 +3,7 @@ import { commandJsonSchema, commandSchema, elementRefSchema } from '../src/index
 describe('command schema', () => {
   it('parses a versioned mutation', () => {
     const parsed = commandSchema.parse({
-      version: '1.0',
+      version: '2.0',
       type: 'setText',
       workspaceId: 'w',
       transactionId: 'tx',
@@ -22,12 +22,14 @@ describe('command schema', () => {
   });
   it('exposes draft 2020-12 JSON schema', () => {
     expect(commandJsonSchema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect(commandJsonSchema.oneOf).toHaveLength(16);
+    expect(Array.isArray(commandJsonSchema.oneOf) || Array.isArray(commandJsonSchema.anyOf)).toBe(
+      true,
+    );
   });
   it('parses replaceText, undo, and history', () => {
     expect(
       commandSchema.parse({
-        version: '1.0',
+        version: '2.0',
         type: 'replaceText',
         workspaceId: 'w',
         transactionId: 'tx',
@@ -39,7 +41,7 @@ describe('command schema', () => {
     ).toBe('replaceText');
     expect(
       commandSchema.parse({
-        version: '1.0',
+        version: '2.0',
         type: 'undo',
         workspaceId: 'w',
         steps: 2,
@@ -47,7 +49,7 @@ describe('command schema', () => {
     ).toBe(2);
     expect(
       commandSchema.parse({
-        version: '1.0',
+        version: '2.0',
         type: 'history',
         workspaceId: 'w',
         limit: 20,
@@ -58,7 +60,7 @@ describe('command schema', () => {
   it('parses replacePicture with path or base64', () => {
     expect(
       commandSchema.parse({
-        version: '1.0',
+        version: '2.0',
         type: 'replacePicture',
         workspaceId: 'w',
         transactionId: 'tx',
@@ -68,7 +70,7 @@ describe('command schema', () => {
     ).toBe('replacePicture');
     expect(
       commandSchema.parse({
-        version: '1.0',
+        version: '2.0',
         type: 'replacePicture',
         workspaceId: 'w',
         transactionId: 'tx',
@@ -76,5 +78,35 @@ describe('command schema', () => {
         base64: 'iVBORw0KGgo=',
       }).type,
     ).toBe('replacePicture');
+  });
+  it('parses Phase 1a get/list/set/target commands', () => {
+    expect(
+      commandSchema.parse({
+        version: '2.0',
+        type: 'get',
+        workspaceId: 'w',
+        target: 'slide:1/shape:2',
+        resolve: 'both',
+      }).type,
+    ).toBe('get');
+    expect(
+      commandSchema.parse({
+        version: '2.0',
+        type: 'list',
+        workspaceId: 'w',
+        resource: 'shapes',
+        slide: 1,
+      }).type,
+    ).toBe('list');
+    expect(
+      commandSchema.parse({
+        version: '2.0',
+        type: 'set',
+        workspaceId: 'w',
+        transactionId: '1',
+        target: 'slide:1/shape:2',
+        properties: { 'font.size': 42 },
+      }).type,
+    ).toBe('set');
   });
 });

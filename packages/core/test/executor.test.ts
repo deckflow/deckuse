@@ -32,7 +32,7 @@ describe('executor', () => {
     expect(
       (
         await executor.execute({
-          version: '1.0',
+          version: '2.0',
           type: 'init',
           workspaceId: 'w',
           format: 'test',
@@ -41,7 +41,7 @@ describe('executor', () => {
       ).ok,
     ).toBe(true);
     expect(
-      (await executor.execute({ version: '1.0', type: 'validate', workspaceId: 'w' })).ok,
+      (await executor.execute({ version: '2.0', type: 'validate', workspaceId: 'w' })).ok,
     ).toBe(true);
     expect(execute).toHaveBeenCalledOnce();
   });
@@ -59,7 +59,7 @@ describe('executor', () => {
     const resolver = vi.fn(async () => adapter);
     const executor = new Executor(new AdapterRegistry(), { resolveAdapter: resolver });
     const result = await executor.execute({
-      version: '1.0',
+      version: '2.0',
       type: 'validate',
       workspaceId: '/tmp/persistent-workspace',
     });
@@ -72,7 +72,7 @@ describe('executor', () => {
       new AdapterRegistry().register(createNotImplementedAdapter('docx')),
     );
     const result = await executor.execute({
-      version: '1.0',
+      version: '2.0',
       type: 'init',
       workspaceId: 'w',
       format: 'docx',
