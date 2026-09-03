@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { dirname, extname, relative, resolve, sep } from 'node:path';
@@ -47,6 +47,7 @@ interface PreviewEnsureResult {
   readonly status: 'ready' | 'converting' | 'error';
   readonly url?: string;
   readonly revision?: string;
+  readonly fingerprint?: string;
   readonly cached?: boolean;
   readonly message?: string;
 }
@@ -273,47 +274,63 @@ html,body{height:100%;margin:0;background:#111;color:#e8e8e8;font:14px system-ui
 #app{display:flex;flex-direction:column;height:100%}
 #bar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#1c1c1c}
 #bar .title{font-weight:600}
-#bar .meta{color:#888;font-size:12px}
+#bar .meta{color:#888;font-size:12px;flex:1}
+#bar .badge{color:#aaa;font-size:12px}
 #frame-wrap{flex:1;min-height:0;position:relative;background:#0d0d0d}
 #frame-wrap iframe{width:100%;height:100%;border:0;background:#0d0d0d}
 #status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;background:#0d0d0d}
+#status.overlay{inset:auto;left:12px;bottom:12px;right:auto;padding:7px 10px;border-radius:6px;background:#000b}
 #status.error{color:#f88}
+#status[hidden]{display:none!important}
 </style></head><body>
 <div id="app">
-  <div id="bar"><span class="title">完整预览</span><span class="meta" id="meta"></span></div>
+  <div id="bar"><span class="title">完整预览</span><span class="meta" id="meta"></span><span class="badge" id="badge"></span></div>
   <div id="frame-wrap"><iframe title="Full presentation preview" hidden></iframe><div id="status">正在准备全量预览…</div></div>
 </div>
 <script>
 const frame=document.querySelector('iframe');
 const status=document.querySelector('#status');
 const meta=document.querySelector('#meta');
-const showError=(message)=>{status.hidden=false;status.classList.add('error');status.textContent=message;frame.hidden=true};
+const badge=document.querySelector('#badge');
+let currentFingerprint='';
+const showStatus=(message,overlay)=>{
+  status.hidden=false;
+  status.classList.toggle('overlay',!!overlay&&!frame.hidden);
+  status.classList.remove('error');
+  status.textContent=message;
+};
+const showError=(message)=>{
+  status.hidden=false;
+  status.classList.remove('overlay');
+  status.classList.add('error');
+  status.textContent=message;
+  badge.textContent='';
+};
 const applyReady=(data)=>{
-  meta.textContent=data.revision?('revision '+data.revision+(data.cached?' · 已缓存':'')):'';
-  frame.src=data.url;
+  const fingerprint=data.fingerprint||'';
+  meta.textContent=data.revision?('revision '+data.revision):'';
+  badge.textContent=data.cached?'已缓存':'已更新';
+  if(fingerprint&&fingerprint===currentFingerprint&&frame.src){
+    status.hidden=true;
+    return;
+  }
+  currentFingerprint=fingerprint;
+  frame.src=data.url+(fingerprint?((data.url.includes('?')?'&':'?')+'v='+encodeURIComponent(fingerprint)):'');
   frame.hidden=false;
   status.hidden=true;
-  status.classList.remove('error');
+  status.classList.remove('error','overlay');
 };
-const ensure=async()=>{
-  try{
-    const response=await fetch('/preview/ensure');
-    const data=await response.json();
-    if(!response.ok||data.status==='error'){
-      showError(data.message||('预览失败 ('+String(response.status)+')'));
-      return;
-    }
-    if(data.status==='ready'&&data.url){
-      applyReady(data);
-      return;
-    }
-    status.textContent='正在转换全量预览…';
-    setTimeout(ensure,400);
-  }catch(error){
-    showError(error instanceof Error?error.message:'预览请求失败');
-  }
-};
-ensure();
+const events=new EventSource('/preview/events');
+events.addEventListener('ready',event=>applyReady(JSON.parse(event.data)));
+events.addEventListener('converting',event=>{
+  const data=JSON.parse(event.data);
+  showStatus(data.message||'正在转换全量预览…',true);
+  badge.textContent='更新中';
+});
+events.addEventListener('error-message',event=>{
+  showError(JSON.parse(event.data).message||'预览失败');
+});
+events.onerror=()=>showStatus('预览连接断开，正在重连…',true);
 </script></body></html>`;
 
 const sendEvent = (response: ServerResponse, event: string, value: unknown): void => {
@@ -426,6 +443,7 @@ export const startMonitor = async (
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
   const clients = new Set<ServerResponse>();
+  const previewClients = new Set<ServerResponse>();
   let watcher: MonitorWatcher | undefined;
   let debounce: NodeJS.Timeout | undefined;
   let keepalive: NodeJS.Timeout | undefined;
@@ -437,10 +455,20 @@ export const startMonitor = async (
   let latestRenderUrl: string | undefined;
   let version = 0;
   let generation = 0;
-  let fullPreviewJob: Promise<PreviewEnsureResult> | undefined;
+  let fullPreviewJob: Promise<void> | undefined;
+  let fullPreviewJobIdentity: { revision: string; fingerprint: string } | undefined;
+  let fullPreviewQueued: { revision: string; fingerprint: string } | undefined;
+  let fullPreviewError: string | undefined;
+  let latestFullPreview: PreviewEnsureResult | undefined;
+
+  const hasClients = (): boolean => clients.size > 0 || previewClients.size > 0;
 
   const broadcast = (event: string, value: unknown): void => {
     for (const client of clients) sendEvent(client, event, value);
+  };
+
+  const broadcastPreview = (event: string, value: unknown): void => {
+    for (const client of previewClients) sendEvent(client, event, value);
   };
 
   const publishMeta = async (state: MonitorState): Promise<MonitorMeta> => {
@@ -517,13 +545,20 @@ export const startMonitor = async (
       if (state.signature === lastStateSignature) return;
       lastStateSignature = state.signature;
       await publishMeta(state);
-      if (converting) queued = { state, generation };
-      else void runConversion(state, generation);
+      if (clients.size > 0) {
+        if (converting) queued = { state, generation };
+        else void runConversion(state, generation);
+      }
+      if (previewClients.size > 0) void requestFullPreviewUpdate();
     } catch (error) {
       if (generation !== refreshGeneration) return;
       broadcast('error-message', {
         message: error instanceof Error ? error.message : 'Could not read workspace state',
       });
+      if (previewClients.size > 0)
+        broadcastPreview('error-message', {
+          message: error instanceof Error ? error.message : 'Could not read workspace state',
+        });
     }
   };
 
@@ -542,17 +577,21 @@ export const startMonitor = async (
       watcher.on('error', (error) => {
         if (!active) return;
         broadcast('error-message', { message: `Workspace watcher failed: ${error.message}` });
+        broadcastPreview('error-message', {
+          message: `Workspace watcher failed: ${error.message}`,
+        });
         stopWatching();
       });
     } catch (error) {
-      broadcast('error-message', {
-        message: `Could not watch workspace: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      });
+      const message = `Could not watch workspace: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      broadcast('error-message', { message });
+      broadcastPreview('error-message', { message });
       stopWatching();
       return;
     }
     keepalive = setInterval(() => {
       for (const client of clients) client.write(': keepalive\n\n');
+      for (const client of previewClients) client.write(': keepalive\n\n');
     }, keepaliveMs);
     void refresh();
   };
@@ -587,61 +626,120 @@ export const startMonitor = async (
     status: 'ready',
     url: previewEntryUrl(meta.indexHtml),
     revision: meta.revision,
+    fingerprint: meta.fingerprint,
     cached,
   });
 
-  const ensureFullPreview = async (): Promise<PreviewEnsureResult> => {
-    if (fullPreviewJob) return fullPreviewJob;
-    fullPreviewJob = (async (): Promise<PreviewEnsureResult> => {
-      if (await isWriteLocked(absoluteWorkspace)) {
-        return { status: 'converting', message: 'Workspace is locked; waiting to convert…' };
+  const cachedPreviewResult = async (
+    fingerprint: string,
+  ): Promise<PreviewEnsureResult | undefined> => {
+    const existing = await readPreviewMeta(fullPreviewRoot);
+    if (!existing || existing.fingerprint !== fingerprint) return undefined;
+    const entry = resolve(fullPreviewRoot, existing.indexHtml);
+    try {
+      const info = await stat(entry);
+      if (info.isFile()) return readyPreviewResult(existing, true);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return undefined;
+  };
+
+  const publishFullPreviewReady = (result: PreviewEnsureResult): void => {
+    latestFullPreview = result;
+    broadcastPreview('ready', result);
+  };
+
+  const startFullPreviewConversion = (identity: {
+    revision: string;
+    fingerprint: string;
+  }): void => {
+    if (fullPreviewJob) {
+      if (fullPreviewJobIdentity?.fingerprint !== identity.fingerprint)
+        fullPreviewQueued = identity;
+      return;
+    }
+    fullPreviewError = undefined;
+    fullPreviewQueued = undefined;
+    fullPreviewJobIdentity = identity;
+    fullPreviewJob = (async () => {
+      const staging = `${fullPreviewRoot}.next`;
+      await rm(staging, { recursive: true, force: true });
+      await mkdir(staging, { recursive: true });
+      try {
+        const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
+          output: staging,
+        });
+        if (result.exitCode !== 0) throw new Error(result.stderr || 'office2html conversion failed');
+        const entry = resolve(result.indexHtmlPath);
+        const entryRelative = relative(staging, entry);
+        if (
+          entryRelative.startsWith(`..${sep}`) ||
+          entryRelative === '..' ||
+          resolve(staging, entryRelative) !== entry
+        )
+          throw new Error('office2html returned an output outside the preview directory');
+        const meta: PreviewMeta = {
+          revision: identity.revision,
+          fingerprint: identity.fingerprint,
+          convertedAt: new Date().toISOString(),
+          indexHtml: entryRelative || 'index.html',
+        };
+        await writeFile(previewMetaPath(staging), `${JSON.stringify(meta, null, 2)}\n`);
+        await rm(fullPreviewRoot, { recursive: true, force: true });
+        await rename(staging, fullPreviewRoot);
+        realFullPreviewRoot = await realpath(fullPreviewRoot);
+        publishFullPreviewReady(readyPreviewResult(meta, false));
+      } catch (error) {
+        await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
       }
-      const identity = await currentPreviewIdentity();
-      if (identity.fingerprint === 'missing') {
-        return { status: 'error', message: 'package.pptx is missing' };
-      }
-      const existing = await readPreviewMeta(fullPreviewRoot);
-      if (existing && existing.fingerprint === identity.fingerprint) {
-        const entry = resolve(fullPreviewRoot, existing.indexHtml);
-        try {
-          const info = await stat(entry);
-          if (info.isFile()) return readyPreviewResult(existing, true);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        }
-      }
-      await rm(fullPreviewRoot, { recursive: true, force: true });
-      await mkdir(fullPreviewRoot, { recursive: true });
-      realFullPreviewRoot = await realpath(fullPreviewRoot);
-      const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
-        output: fullPreviewRoot,
-      });
-      if (result.exitCode !== 0) throw new Error(result.stderr || 'office2html conversion failed');
-      const entry = resolve(result.indexHtmlPath);
-      const entryRelative = relative(fullPreviewRoot, entry);
-      if (
-        entryRelative.startsWith(`..${sep}`) ||
-        entryRelative === '..' ||
-        resolve(fullPreviewRoot, entryRelative) !== entry
-      )
-        throw new Error('office2html returned an output outside the preview directory');
-      const meta: PreviewMeta = {
-        revision: identity.revision,
-        fingerprint: identity.fingerprint,
-        convertedAt: new Date().toISOString(),
-        indexHtml: entryRelative || 'index.html',
-      };
-      await writeFile(previewMetaPath(fullPreviewRoot), `${JSON.stringify(meta, null, 2)}\n`);
-      return readyPreviewResult(meta, false);
     })()
-      .catch((error: unknown): PreviewEnsureResult => ({
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Full preview conversion failed',
-      }))
+      .catch((error: unknown) => {
+        fullPreviewError =
+          error instanceof Error ? error.message : 'Full preview conversion failed';
+        broadcastPreview('error-message', { message: fullPreviewError });
+      })
       .finally(() => {
         fullPreviewJob = undefined;
+        fullPreviewJobIdentity = undefined;
+        const queuedIdentity = fullPreviewQueued;
+        fullPreviewQueued = undefined;
+        if (queuedIdentity) startFullPreviewConversion(queuedIdentity);
+        else if (previewClients.size > 0) void requestFullPreviewUpdate();
       });
-    return fullPreviewJob;
+  };
+
+  const ensureFullPreview = async (): Promise<PreviewEnsureResult> => {
+    if (await isWriteLocked(absoluteWorkspace)) {
+      return { status: 'converting', message: 'Workspace is locked; waiting to convert…' };
+    }
+    const identity = await currentPreviewIdentity();
+    if (identity.fingerprint === 'missing') {
+      return { status: 'error', message: 'package.pptx is missing' };
+    }
+    const cached = await cachedPreviewResult(identity.fingerprint);
+    if (cached) return cached;
+    if (fullPreviewError && !fullPreviewJob) {
+      const message = fullPreviewError;
+      fullPreviewError = undefined;
+      return { status: 'error', message };
+    }
+    startFullPreviewConversion(identity);
+    return { status: 'converting', message: '正在转换全量预览…' };
+  };
+
+  const requestFullPreviewUpdate = async (): Promise<void> => {
+    try {
+      const result = await ensureFullPreview();
+      if (result.status === 'ready') publishFullPreviewReady(result);
+      else if (result.status === 'converting') broadcastPreview('converting', result);
+      else broadcastPreview('error-message', { message: result.message || '预览失败' });
+    } catch (error) {
+      broadcastPreview('error-message', {
+        message: error instanceof Error ? error.message : 'Full preview update failed',
+      });
+    }
   };
 
   const server = createServer((request, response) => {
@@ -656,9 +754,29 @@ export const startMonitor = async (
       response.end(previewPage);
       return;
     }
+    if (requestUrl.pathname === '/preview/events') {
+      response.writeHead(200, {
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'content-type': 'text/event-stream',
+      });
+      response.write(': connected\n\n');
+      previewClients.add(response);
+      startWatching();
+      if (latestFullPreview?.status === 'ready') sendEvent(response, 'ready', latestFullPreview);
+      else sendEvent(response, 'converting', { message: '正在准备全量预览…' });
+      void requestFullPreviewUpdate();
+      request.on('close', () => {
+        previewClients.delete(response);
+        if (!hasClients()) stopWatching();
+      });
+      return;
+    }
     if (requestUrl.pathname === '/preview/ensure') {
       void ensureFullPreview().then((result) => {
-        const status = result.status === 'ready' ? 200 : result.status === 'converting' ? 202 : 500;
+        if (result.status === 'ready') latestFullPreview = result;
+        const status =
+          result.status === 'ready' ? 200 : result.status === 'converting' ? 202 : 500;
         response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
         response.end(`${JSON.stringify(result)}\n`);
       });
@@ -689,7 +807,7 @@ export const startMonitor = async (
       else if (latestRenderUrl) sendEvent(response, 'render', { url: latestRenderUrl });
       request.on('close', () => {
         clients.delete(response);
-        if (clients.size === 0) stopWatching();
+        if (!hasClients()) stopWatching();
       });
       return;
     }

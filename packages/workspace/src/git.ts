@@ -8,6 +8,7 @@ const WORKSPACE_GITIGNORE = `package.*
 .deckuse/write.lock
 .deckuse/monitor/
 .deckuse/preview/
+.deckuse/preview.next/
 .deckuse/*.tmp
 `;
 
