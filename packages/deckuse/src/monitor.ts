@@ -454,12 +454,16 @@ export const startMonitor = async (
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
+  const packagePath = resolve(absoluteWorkspace, 'package.pptx');
+  const operationsWatchPath = dirname(operationsPath(absoluteWorkspace));
   const clients = new Set<ServerResponse>();
   const previewClients = new Set<ServerResponse>();
-  let watcher: MonitorWatcher | undefined;
-  let debounce: NodeJS.Timeout | undefined;
-  let keepalive: NodeJS.Timeout | undefined;
-  let active = false;
+
+  // Single-page preview: driven by operations/index, independent of full preview.
+  let mainWatcher: MonitorWatcher | undefined;
+  let mainDebounce: NodeJS.Timeout | undefined;
+  let mainKeepalive: NodeJS.Timeout | undefined;
+  let mainActive = false;
   let converting = false;
   let queued: { state: MonitorState; generation: number } | undefined;
   let lastStateSignature: string | undefined;
@@ -467,13 +471,17 @@ export const startMonitor = async (
   let latestRenderUrl: string | undefined;
   let version = 0;
   let generation = 0;
+
+  // Full preview: driven only by package.pptx, independent of the ops watcher.
+  let previewWatcher: MonitorWatcher | undefined;
+  let previewDebounce: NodeJS.Timeout | undefined;
+  let previewKeepalive: NodeJS.Timeout | undefined;
+  let previewActive = false;
   let fullPreviewJob: Promise<void> | undefined;
   let fullPreviewJobIdentity: { revision: string; fingerprint: string } | undefined;
   let fullPreviewQueued: { revision: string; fingerprint: string } | undefined;
   let fullPreviewError: string | undefined;
   let latestFullPreview: PreviewEnsureResult | undefined;
-
-  const hasClients = (): boolean => clients.size > 0 || previewClients.size > 0;
 
   const broadcast = (event: string, value: unknown): void => {
     for (const client of clients) sendEvent(client, event, value);
@@ -509,11 +517,11 @@ export const startMonitor = async (
       // Writers hold write.lock across source/ops/pack. Never convert mid-mutation.
       if (await isWriteLocked(absoluteWorkspace)) {
         if (lastStateSignature === state.signature) lastStateSignature = undefined;
-        scheduleRefresh();
+        scheduleMainRefresh();
         return;
       }
       await mkdir(output, { recursive: true });
-      const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
+      const result = await converter(packagePath, {
         output,
         pages: String(state.page),
       });
@@ -526,26 +534,26 @@ export const startMonitor = async (
         resolve(output, entryRelative) !== entry
       )
         throw new Error('office2html returned an output outside its version directory');
-      if (!queued && active && generation === runGeneration) {
+      if (!queued && mainActive && generation === runGeneration) {
         const meta = await publishMeta(state);
         latestRenderUrl = `/render/${encodeURIComponent(versionName)}${entryRelative ? `/${entryRelative.split(sep).map(encodeURIComponent).join('/')}` : ''}`;
         broadcast('render', { url: latestRenderUrl, ...meta });
       }
     } catch (error) {
-      if (!queued && active && generation === runGeneration)
+      if (!queued && mainActive && generation === runGeneration)
         broadcast('error-message', {
           message: error instanceof Error ? error.message : 'Preview conversion failed',
         });
     } finally {
       converting = false;
       const next = takeQueued();
-      if (next && active && generation === next.generation)
+      if (next && mainActive && generation === next.generation)
         void runConversion(next.state, next.generation);
     }
   };
 
-  const refresh = async (): Promise<void> => {
-    if (!active) return;
+  const refreshMain = async (): Promise<void> => {
+    if (!mainActive) return;
     const refreshGeneration = generation;
     try {
       // Skip while a write/undo holds the lock. Do not update lastStateSignature —
@@ -557,67 +565,56 @@ export const startMonitor = async (
       if (state.signature === lastStateSignature) return;
       lastStateSignature = state.signature;
       await publishMeta(state);
-      if (clients.size > 0) {
-        if (converting) queued = { state, generation };
-        else void runConversion(state, generation);
-      }
-      if (previewClients.size > 0) void requestFullPreviewUpdate();
+      if (clients.size === 0) return;
+      if (converting) queued = { state, generation };
+      else void runConversion(state, generation);
     } catch (error) {
       if (generation !== refreshGeneration) return;
       broadcast('error-message', {
         message: error instanceof Error ? error.message : 'Could not read workspace state',
       });
-      if (previewClients.size > 0)
-        broadcastPreview('error-message', {
-          message: error instanceof Error ? error.message : 'Could not read workspace state',
-        });
     }
   };
 
-  const scheduleRefresh = (): void => {
-    if (!active) return;
-    if (debounce) clearTimeout(debounce);
-    debounce = setTimeout(() => void refresh(), debounceMs);
+  const scheduleMainRefresh = (): void => {
+    if (!mainActive) return;
+    if (mainDebounce) clearTimeout(mainDebounce);
+    mainDebounce = setTimeout(() => void refreshMain(), debounceMs);
   };
 
-  const startWatching = (): void => {
-    if (active) return;
-    active = true;
+  const startMainWatching = (): void => {
+    if (mainActive) return;
+    mainActive = true;
     generation += 1;
     try {
-      watcher = createWatcher(dirname(operationsPath(absoluteWorkspace)), scheduleRefresh);
-      watcher.on('error', (error) => {
-        if (!active) return;
+      mainWatcher = createWatcher(operationsWatchPath, scheduleMainRefresh);
+      mainWatcher.on('error', (error) => {
+        if (!mainActive) return;
         broadcast('error-message', { message: `Workspace watcher failed: ${error.message}` });
-        broadcastPreview('error-message', {
-          message: `Workspace watcher failed: ${error.message}`,
-        });
-        stopWatching();
+        stopMainWatching();
       });
     } catch (error) {
       const message = `Could not watch workspace: ${error instanceof Error ? error.message : 'Unknown error'}`;
       broadcast('error-message', { message });
-      broadcastPreview('error-message', { message });
-      stopWatching();
+      stopMainWatching();
       return;
     }
-    keepalive = setInterval(() => {
+    mainKeepalive = setInterval(() => {
       for (const client of clients) client.write(': keepalive\n\n');
-      for (const client of previewClients) client.write(': keepalive\n\n');
     }, keepaliveMs);
-    void refresh();
+    void refreshMain();
   };
 
-  const stopWatching = (): void => {
-    if (!active) return;
-    active = false;
+  const stopMainWatching = (): void => {
+    if (!mainActive) return;
+    mainActive = false;
     generation += 1;
-    watcher?.close();
-    watcher = undefined;
-    if (debounce) clearTimeout(debounce);
-    debounce = undefined;
-    if (keepalive) clearInterval(keepalive);
-    keepalive = undefined;
+    mainWatcher?.close();
+    mainWatcher = undefined;
+    if (mainDebounce) clearTimeout(mainDebounce);
+    mainDebounce = undefined;
+    if (mainKeepalive) clearInterval(mainKeepalive);
+    mainKeepalive = undefined;
     queued = undefined;
     lastStateSignature = undefined;
   };
@@ -679,7 +676,7 @@ export const startMonitor = async (
       await rm(staging, { recursive: true, force: true });
       await mkdir(staging, { recursive: true });
       try {
-        const result = await converter(resolve(absoluteWorkspace, 'package.pptx'), {
+        const result = await converter(packagePath, {
           output: staging,
         });
         if (result.exitCode !== 0) throw new Error(result.stderr || 'office2html conversion failed');
@@ -754,6 +751,47 @@ export const startMonitor = async (
     }
   };
 
+  const schedulePreviewRefresh = (): void => {
+    if (!previewActive) return;
+    if (previewDebounce) clearTimeout(previewDebounce);
+    previewDebounce = setTimeout(() => void requestFullPreviewUpdate(), debounceMs);
+  };
+
+  const startPreviewWatching = (): void => {
+    if (previewActive) return;
+    previewActive = true;
+    try {
+      previewWatcher = createWatcher(packagePath, schedulePreviewRefresh);
+      previewWatcher.on('error', (error) => {
+        if (!previewActive) return;
+        broadcastPreview('error-message', {
+          message: `Package watcher failed: ${error.message}`,
+        });
+        stopPreviewWatching();
+      });
+    } catch (error) {
+      const message = `Could not watch package.pptx: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      broadcastPreview('error-message', { message });
+      stopPreviewWatching();
+      return;
+    }
+    previewKeepalive = setInterval(() => {
+      for (const client of previewClients) client.write(': keepalive\n\n');
+    }, keepaliveMs);
+    void requestFullPreviewUpdate();
+  };
+
+  const stopPreviewWatching = (): void => {
+    if (!previewActive) return;
+    previewActive = false;
+    previewWatcher?.close();
+    previewWatcher = undefined;
+    if (previewDebounce) clearTimeout(previewDebounce);
+    previewDebounce = undefined;
+    if (previewKeepalive) clearInterval(previewKeepalive);
+    previewKeepalive = undefined;
+  };
+
   const server = createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://localhost');
     if (requestUrl.pathname === '/') {
@@ -774,13 +812,12 @@ export const startMonitor = async (
       });
       response.write(': connected\n\n');
       previewClients.add(response);
-      startWatching();
+      startPreviewWatching();
       if (latestFullPreview?.status === 'ready') sendEvent(response, 'ready', latestFullPreview);
       else sendEvent(response, 'converting', { message: '正在准备全量预览…' });
-      void requestFullPreviewUpdate();
       request.on('close', () => {
         previewClients.delete(response);
-        if (!hasClients()) stopWatching();
+        if (previewClients.size === 0) stopPreviewWatching();
       });
       return;
     }
@@ -812,14 +849,14 @@ export const startMonitor = async (
       });
       response.write(': connected\n\n');
       clients.add(response);
-      startWatching();
+      startMainWatching();
       if (latestMeta) sendEvent(response, 'state', latestMeta);
       if (latestRenderUrl && latestMeta)
         sendEvent(response, 'render', { url: latestRenderUrl, ...latestMeta });
       else if (latestRenderUrl) sendEvent(response, 'render', { url: latestRenderUrl });
       request.on('close', () => {
         clients.delete(response);
-        if (!hasClients()) stopWatching();
+        if (clients.size === 0) stopMainWatching();
       });
       return;
     }
@@ -848,7 +885,10 @@ export const startMonitor = async (
     close: async () => {
       for (const client of clients) client.end();
       clients.clear();
-      stopWatching();
+      for (const client of previewClients) client.end();
+      previewClients.clear();
+      stopMainWatching();
+      stopPreviewWatching();
       await new Promise<void>((done, reject) => {
         server.close((error) => {
           if (error) reject(error);

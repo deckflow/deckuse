@@ -509,7 +509,71 @@ describe('monitor', () => {
     await monitor.close();
   });
 
-  it('live-updates full preview over SSE when the package changes', async () => {
+  it('keeps single-page and full preview watchers independent', async () => {
+    const workspace = await workspaceFixture();
+    const conversions: Array<{
+      page: string | undefined;
+      finish: () => Promise<void>;
+    }> = [];
+    const converter = vi.fn((_input: string, options: { output: string; pages?: string }) => {
+      let finish!: () => Promise<void>;
+      const promise = new Promise<{
+        indexHtmlPath: string;
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+      }>((resolve) => {
+        finish = async () => {
+          await writeFile(join(options.output, 'index.html'), '<html>ok</html>');
+          resolve({
+            indexHtmlPath: join(options.output, 'index.html'),
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+          });
+        };
+      });
+      conversions.push({ page: options.pages, finish });
+      return promise;
+    });
+    const watchFactory = vi.fn((_path: string, _listener: () => void) => {
+      const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+      watcher.close = vi.fn();
+      return watcher;
+    });
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: {
+        convert: converter,
+        watch: watchFactory,
+        debounceMs: 1,
+        keepaliveMs: 10_000,
+      },
+    });
+
+    const full = await subscribe(`${monitor.url}preview/`);
+    await eventually(() => expect(conversions.some((item) => item.page === undefined)).toBe(true));
+    expect(watchFactory).toHaveBeenCalledTimes(1);
+    expect(watchFactory.mock.calls[0]?.[0]).toBe(join(workspace, 'package.pptx'));
+    await conversions.find((item) => item.page === undefined)!.finish();
+    await eventually(() => expect(full.events.join('')).toContain('event: ready'));
+
+    const main = await subscribe(monitor.url);
+    await eventually(() => expect(conversions.some((item) => item.page === '1')).toBe(true));
+    expect(watchFactory).toHaveBeenCalledTimes(2);
+    expect(watchFactory.mock.calls[1]?.[0]).toBe(join(workspace, '.deckuse'));
+    await conversions.find((item) => item.page === '1')!.finish();
+    await eventually(() => expect(main.events.join('')).toContain('event: render'));
+
+    full.close();
+    await eventually(() => expect(watchFactory.mock.results[0]?.value.close).toHaveBeenCalled());
+    expect(watchFactory.mock.results[1]?.value.close).not.toHaveBeenCalled();
+    main.close();
+    await eventually(() => expect(watchFactory.mock.results[1]?.value.close).toHaveBeenCalled());
+    await monitor.close();
+  });
+
+  it('live-updates full preview over SSE when package.pptx changes', async () => {
     const workspace = await workspaceFixture();
     await writeFile(
       join(workspace, '.deckuse', 'operations.jsonl'),
@@ -535,9 +599,10 @@ describe('monitor', () => {
         };
       });
     });
-    let onChange: (() => void) | undefined;
-    const watchFactory = vi.fn((_path: string, listener: () => void) => {
-      onChange = listener;
+    let onPackageChange: (() => void) | undefined;
+    const watchFactory = vi.fn((path: string, listener: () => void) => {
+      expect(path).toBe(join(workspace, 'package.pptx'));
+      onPackageChange = listener;
       const watcher = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
       watcher.close = vi.fn();
       return watcher;
@@ -564,7 +629,7 @@ describe('monitor', () => {
       join(workspace, '.deckuse', 'operations.jsonl'),
       `${JSON.stringify({ revision: '2', slides: [1], operation: { type: 'setText' } })}\n`,
     );
-    onChange?.();
+    onPackageChange?.();
     await eventually(() => expect(client.events.join('')).toContain('event: converting'));
     await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
     await finishConversion();
