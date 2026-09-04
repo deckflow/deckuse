@@ -39,3 +39,9 @@ export const runCommand = async (input: unknown): Promise<Result<unknown>> =>
   createDefaultExecutor().execute(input);
 
 export { startMonitor, type MonitorHandle, type MonitorOptions } from './monitor.js';
+export {
+  renderPage,
+  type RenderDependencies,
+  type RenderOptions,
+  type RenderResult,
+} from './render.js';

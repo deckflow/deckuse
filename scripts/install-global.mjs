@@ -39,7 +39,11 @@ run('pnpm', ['--filter', './packages/deckuse', 'deploy', '--prod', target]);
 chmodSync(join(target, 'dist/bin.js'), 0o755);
 // link (not install -g): keeps the deploy node_modules with workspace packages resolved,
 // and --force overwrites an existing global `deckuse` bin if present.
-run('npm', ['link', '--force'], { cwd: target, env: cleanNpmEnv() });
+// --no-audit/--no-fund: skip registry round-trips that hang on slow/blocked networks.
+run('npm', ['link', '--force', '--no-audit', '--no-fund'], {
+  cwd: target,
+  env: cleanNpmEnv(),
+});
 
 const which = spawnSync('which', ['deckuse'], { encoding: 'utf8' });
 const deckusePath = which.stdout?.trim();

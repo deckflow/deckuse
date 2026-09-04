@@ -55,6 +55,7 @@ describe('monitor', () => {
     expect(ignore).toContain('.deckuse/monitor/');
     expect(ignore).toContain('.deckuse/preview/');
     expect(ignore).toContain('.deckuse/preview.next/');
+    expect(ignore).toContain('.deckuse/render/');
     await monitor.close();
   });
 

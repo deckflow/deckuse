@@ -140,6 +140,41 @@ describe('deckuse CLI', () => {
     expect(help.stdout).toContain('deckuse [global-options]');
     expect(help.stdout).toContain('protocol 2.0');
     expect(help.stdout).toContain('--workspace');
+    expect(help.stdout).toContain('add           Add a slide or shape');
+    expect(help.stdout).toContain('render        Screenshot one slide to PNG');
+  });
+
+  it('provides progressive command and subcommand help', async () => {
+    const add = await run(['add', '--help']);
+    expect(add).toMatchObject({ code: 0, stderr: '' });
+    expect(add.stdout).toContain('usage: deckuse add <slide|shape>');
+    expect(add.stdout).toContain('Add a slide or shape');
+    expect(add.stdout).toContain('Example:');
+    expect(add.stdout).toContain('deckuse add shape --slide 1 --type text');
+    expect(add.stdout).toContain('Subcommands:');
+
+    const addShape = await run(['add', 'shape', '--help']);
+    expect(addShape).toMatchObject({ code: 0, stderr: '' });
+    expect(addShape.stdout).toContain('usage: deckuse add shape --slide <n> --type <kind>');
+    expect(addShape.stdout).toContain('--slide <n>');
+    expect(addShape.stdout).toContain('--type <kind>');
+    expect(addShape.stdout).toContain('rounded-rect');
+
+    const setText = await run(['help', 'set', 'text']);
+    expect(setText).toMatchObject({ code: 0, stderr: '' });
+    expect(setText.stdout).toContain('usage: deckuse set text <target> --value <text>');
+    expect(setText.stdout).toContain('--value <text>');
+
+    const nested = await run(['xfrm', 'set', '--slide', '1', '-h']);
+    expect(nested).toMatchObject({ code: 0, stderr: '' });
+    expect(nested.stdout).toContain('usage: deckuse xfrm set');
+    expect(nested.stdout).toContain('--rotation <deg>');
+
+    const renderHelp = await run(['render', '--help']);
+    expect(renderHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(renderHelp.stdout).toContain('usage: deckuse render --page <n>');
+    expect(renderHelp.stdout).toContain('--page <n>');
+    expect(renderHelp.stdout).toContain('office2html');
   });
   it('runs init, list, get, set, validate, history, undo and export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),
@@ -282,5 +317,15 @@ describe('deckuse CLI', () => {
       await readFile(join(workspace, '.deckuse', 'manifest.json'), 'utf8'),
     ) as { revision: string };
     expect(manifest.revision).toBe('2');
+  });
+
+  it('rejects render without a single page', async () => {
+    const missing = await run(['render', '--workspace', '/tmp']);
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toContain('Usage: deckuse render --page');
+
+    const range = await run(['render', '--page', '1-3', '--workspace', '/tmp']);
+    expect(range.code).toBe(2);
+    expect(range.stderr).toContain('exactly one positive integer');
   });
 });

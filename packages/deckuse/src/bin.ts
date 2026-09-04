@@ -7,8 +7,10 @@ import {
   type CommandEnvelope,
   type Result,
 } from '@deckflow/deckuse-core';
+import { helpTopicFromArgs, resolveHelp } from './help.js';
 import { runCommand } from './index.js';
 import { startMonitor } from './monitor.js';
+import { renderPage } from './render.js';
 import { version } from './version.js';
 
 const args = process.argv.slice(2);
@@ -36,27 +38,6 @@ const revisionOpt = takeOption(args, '--revision');
 const expectRevisionOpt = takeOption(args, '--expect-revision');
 const reasonOpt = takeOption(args, '--reason');
 const clean = args;
-
-const HELP_MAIN = `usage: deckuse [global-options] <command> [subcommand] [target] [options]
-
-DeckUse Phase 1a CLI (protocol ${PROTOCOL_VERSION}).
-
-Global options:
-  --workspace <path>        Explicit workspace (default: nearest .deckuse)
-  --revision <rev>          Read a historical revision (writes reject it)
-  --json                    Machine-readable envelope
-  --quiet                   Suppress human-oriented summaries
-  --dry-run                 Plan a write without committing
-  --expect-revision <rev>   Optimistic-concurrency guard for writes
-  --reason <text>           Stored with write history
-
-Commands:
-  init, status, list, get, inspect, search
-  add, remove, set, replace-text, xfrm, z, apply, validate
-  history, undo, export, monitor
-
-Run 'deckuse <command> --help' for details.
-`;
 
 const findWorkspace = async (start?: string): Promise<string> => {
   if (start) return resolve(start);
@@ -227,8 +208,6 @@ const optionFrom = (list: string[], name: string): string | undefined => {
   return i >= 0 ? list[i + 1] : undefined;
 };
 
-const isHelp = (value: string | undefined): boolean => value === '--help' || value === '-h';
-
 const main = async (): Promise<void> => {
 try {
   if (clean.length === 0) {
@@ -236,19 +215,16 @@ try {
     const parsed = JSON.parse(payload) as unknown;
     const ok = await execute('stdin', parsed);
     if (!ok) process.exitCode = 1;
-  } else if (isHelp(clean[0])) {
-    process.stdout.write(HELP_MAIN);
   } else if (clean[0] === '--version' || clean[0] === '-v' || clean[0] === '-V') {
     process.stdout.write(`deckuse ${version}\n`);
-  } else if (clean[0] === 'help') {
-    process.stdout.write(HELP_MAIN);
   } else {
-    const action = clean[0]!;
-    if (isHelp(clean[1])) {
-      process.stdout.write(HELP_MAIN);
+    const helpTopic = helpTopicFromArgs(clean);
+    if (helpTopic !== null) {
+      process.stdout.write(resolveHelp(helpTopic));
       return;
     }
 
+    const action = clean[0]!;
     let ok = true;
 
     if (action === 'init') {
@@ -606,6 +582,37 @@ try {
       process.once('SIGINT', () => void shutdown('SIGINT'));
       process.once('SIGTERM', () => void shutdown('SIGTERM'));
       return;
+    } else if (action === 'render') {
+      const pageRaw = optionFrom(clean, '--page');
+      if (!pageRaw) throw new Error('Usage: deckuse render --page <n> [--output <file.png>]');
+      if (/\s|,|-/.test(pageRaw))
+        throw new Error('--page accepts exactly one positive integer (not a range or list)');
+      const page = Number(pageRaw);
+      if (!Number.isInteger(page) || page < 1)
+        throw new Error('--page must be a positive integer');
+      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      const outputOpt = optionFrom(clean, '--output');
+      try {
+        const rendered = await renderPage(workspace, {
+          page,
+          ...(outputOpt ? { output: resolve(outputOpt) } : {}),
+        });
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse render',
+          data: { page: rendered.page, output: rendered.output },
+        });
+      } catch (error) {
+        outputEnvelope({
+          ok: false,
+          command: 'deckuse render',
+          error: {
+            code: 'RENDER_FAILED',
+            message: error instanceof Error ? error.message : 'Render failed',
+          },
+        });
+        ok = false;
+      }
     } else if (action === 'query') {
       // Back-compat shim
       const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
