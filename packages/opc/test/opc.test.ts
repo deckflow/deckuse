@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   OpcArchive,
@@ -97,5 +100,38 @@ describe('OPC archive', () => {
     const texts = (doc: Document) =>
       Array.from(doc.getElementsByTagName('a:t')).map((node) => node.textContent);
     expect(texts(after)).toEqual(texts(before));
+  });
+
+  it('writeDirectory syncs Content_Types overrides for new parts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'opc-ct-'));
+    const archive = new OpcArchive();
+    archive.setPart('/[Content_Types].xml', enc.encode(contentTypes), 'application/xml');
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      enc.encode('<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>'),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    archive.setPart(
+      '/ppt/charts/chart1.xml',
+      enc.encode('<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>'),
+      'application/vnd.openxmlformats-officedocument.drawingml.chart+xml',
+    );
+    const dir = join(root, 'source');
+    await archive.writeDirectory(dir);
+    const ct = await readFile(join(dir, '[Content_Types].xml'), 'utf8');
+    expect(ct).toContain(
+      'PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"',
+    );
+    expect(ct).toContain(
+      'PartName="/ppt/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"',
+    );
+
+    const reopened = await OpcArchive.openDirectory(dir);
+    expect(reopened.getPart('/ppt/charts/chart1.xml')?.mediaType).toBe(
+      'application/vnd.openxmlformats-officedocument.drawingml.chart+xml',
+    );
+    expect(reopened.getPart('/ppt/slides/slide1.xml')?.mediaType).toBe(
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
   });
 });

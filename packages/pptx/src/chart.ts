@@ -37,24 +37,26 @@ const nextRid = (rels: readonly OpcRelationship[]) => {
 const relativeTarget = (source: string, target: string): string =>
   posix.relative(posix.dirname(source), target).replace(/^\//, '');
 
-const strCache = (values: string[]) =>
-  `<c:strCache><c:ptCount val="${String(values.length)}"/>${values
+/** Literal string points for c:strLit (not nested c:strCache — that belongs under c:strRef). */
+const strLitPoints = (values: string[]) =>
+  `<c:ptCount val="${String(values.length)}"/>${values
     .map((v, i) => `<c:pt idx="${String(i)}"><c:v>${esc(v)}</c:v></c:pt>`)
-    .join('')}</c:strCache>`;
+    .join('')}`;
 
-const numCache = (values: number[]) =>
-  `<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${String(values.length)}"/>${values
+/** Literal number points for c:numLit (not nested c:numCache — that belongs under c:numRef). */
+const numLitPoints = (values: number[]) =>
+  `<c:formatCode>General</c:formatCode><c:ptCount val="${String(values.length)}"/>${values
     .map((v, i) => `<c:pt idx="${String(i)}"><c:v>${String(v)}</c:v></c:pt>`)
-    .join('')}</c:numCache>`;
+    .join('')}`;
 
 const seriesXml = (series: ChartSeriesInput[], categories: string[]) =>
   series
     .map((ser, index) => {
       const cats =
         categories.length > 0
-          ? `<c:cat><c:strLit>${strCache(categories)}</c:strLit></c:cat>`
+          ? `<c:cat><c:strLit>${strLitPoints(categories)}</c:strLit></c:cat>`
           : '';
-      const vals = `<c:val><c:numLit>${numCache(ser.values)}</c:numLit></c:val>`;
+      const vals = `<c:val><c:numLit>${numLitPoints(ser.values)}</c:numLit></c:val>`;
       const tx = `<c:tx><c:v>${esc(ser.name)}</c:v></c:tx>`;
       return `<c:ser><c:idx val="${String(index)}"/><c:order val="${String(index)}"/>${tx}${cats}${vals}</c:ser>`;
     })
@@ -85,7 +87,9 @@ const titleXml = (title?: string) => {
 export function buildChartXml(input: ChartCreateInput): string {
   const categories = input.categories;
   const series = input.series;
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories)}${axesXml(input.chartType)}</c:plotArea><c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
+  const legend =
+    input.chartType === 'pie' ? '' : '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories)}${axesXml(input.chartType)}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
 }
 
 export function createChartPart(

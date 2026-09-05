@@ -353,7 +353,14 @@ export class OpcArchive {
     return parseXml(part.data);
   }
   writeXml(name: string, document: Node, mediaType?: string): void {
-    this.setPart(name, serializeXml(document), mediaType);
+    const normalized = normalizePartName(name);
+    // Prefer an explicit type, then a recorded Override — never promote the
+    // extension Default (e.g. application/xml) into an Override via getPart().
+    const resolved =
+      mediaType ??
+      this.contentTypes.overrides.get(normalized) ??
+      'application/octet-stream';
+    this.setPart(normalized, serializeXml(document), resolved);
   }
   setPart(name: string, data: Uint8Array, mediaType = 'application/octet-stream'): void {
     const normalized = normalizePartName(name);
@@ -445,6 +452,9 @@ export class OpcArchive {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }
+    // Keep source/[Content_Types].xml in sync with in-memory overrides so the
+    // next openDirectory() does not fall back to Default Extension="xml".
+    this.syncContentTypes();
     const temporary = `${destination}.${randomUUID()}.tmp`;
     try {
       for (const part of this.parts.values()) {

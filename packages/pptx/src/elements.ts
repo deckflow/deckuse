@@ -21,6 +21,9 @@ const num = (obj: Record<string, unknown>, key: string, fallback: number): numbe
   typeof obj[key] === 'number' ? obj[key] : fallback;
 const xfrm = (e: Record<string, unknown>) =>
   `<a:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></a:xfrm>`;
+/** graphicFrame uses PresentationML p:xfrm (not DrawingML a:xfrm). */
+const graphicFrameXfrm = (e: Record<string, unknown>) =>
+  `<p:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></p:xfrm>`;
 const textBody = (text: string) =>
   `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${esc(text)}</a:t></a:r></a:p></p:txBody>`;
 const shapeXml = (id: number, e: Record<string, unknown>) =>
@@ -32,7 +35,14 @@ const groupXml = (id: number, e: Record<string, unknown>) =>
 const tableXml = (id: number, e: Record<string, unknown>) => {
   const rows = Array.isArray(e['rows']) ? (e['rows'] as unknown[][]) : [['']];
   const cols = Math.max(1, ...rows.map((r) => r.length));
-  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${xfrm(e)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${String(Math.floor(num(e, 'width', 914400 * cols) / cols))}"/>`).join('')}</a:tblGrid>${rows.map((row) => `<a:tr h="370840">${Array.from({ length: cols }, (_, i) => `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${esc(typeof row[i] === 'string' ? row[i] : '')}</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc>`).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+  const colW = String(Math.floor(num(e, 'width', 914400 * cols) / cols));
+  const cellXml = (text: string, header: boolean) => {
+    const fill = header ? '1B4F72' : 'FFFFFF';
+    const color = header ? 'FFFFFF' : '1A1A1A';
+    const bold = header ? ' b="1"' : '';
+    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:ln w="6350"><a:solidFill><a:srgbClr val="D0D0D0"/></a:solidFill></a:ln></a:tcPr></a:tc>`;
+  };
+  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(e)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${rows.map((row, rowIndex) => `<a:tr h="370840">${Array.from({ length: cols }, (_, i) => cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0)).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };
 async function pictureXml(
   archive: OpcArchive,
@@ -166,7 +176,7 @@ export function updateChart(
         }
       }
     });
-  archive.writeXml(part, chart, archive.getPart(part)?.mediaType);
+  archive.writeXml(part, chart);
   return { workbook: archive.getRelationships(part).some((r) => r.type === REL.package) };
 }
 

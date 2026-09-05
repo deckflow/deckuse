@@ -52,7 +52,12 @@ const presentationState = (archive: OpcArchive) => {
   if (!list) throw new Error('presentation.xml has no sldIdLst');
   return { doc, list, rels: [...archive.getRelationships('/ppt/presentation.xml')] };
 };
-export function addSlide(archive: OpcArchive, templatePart?: string, layoutPart?: string): string {
+export function addSlide(
+  archive: OpcArchive,
+  templatePart?: string,
+  layoutPart?: string,
+  afterIndex?: number,
+): string {
   const { doc, list, rels } = presentationState(archive);
   const number = nextNumber(archive, '/ppt/slides/');
   const part = `/ppt/slides/slide${String(number)}.xml`;
@@ -106,12 +111,14 @@ export function addSlide(archive: OpcArchive, templatePart?: string, layoutPart?
     ),
   );
   sld.setAttributeNS(NS.r, 'r:id', rid);
-  list.appendChild(sld);
-  archive.writeXml(
-    '/ppt/presentation.xml',
-    doc,
-    archive.getPart('/ppt/presentation.xml')?.mediaType,
-  );
+  // Insert after the given 1-based slide index; append when omitted / out of range.
+  const existing = descendants(list, 'sldId');
+  const anchor =
+    afterIndex !== undefined && afterIndex > 0 ? existing[afterIndex - 1] : undefined;
+  if (anchor?.nextSibling) list.insertBefore(sld, anchor.nextSibling);
+  else if (anchor) list.appendChild(sld);
+  else list.appendChild(sld);
+  archive.writeXml('/ppt/presentation.xml', doc);
   return part;
 }
 export function duplicateSlide(archive: OpcArchive, part: string): string {
@@ -140,11 +147,7 @@ export function removeSlide(archive: OpcArchive, part: string): void {
     .flatMap((r) => (r.resolvedTarget ? [r.resolvedTarget] : []));
   archive.deletePart(part);
   for (const target of targets) cleanupUnreferencedPart(archive, target);
-  archive.writeXml(
-    '/ppt/presentation.xml',
-    doc,
-    archive.getPart('/ppt/presentation.xml')?.mediaType,
-  );
+  archive.writeXml('/ppt/presentation.xml', doc);
 }
 export function slideElementPart(refPart: string): string {
   return refPart.split('#')[0] ?? refPart;

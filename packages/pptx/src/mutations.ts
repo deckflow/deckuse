@@ -10,14 +10,14 @@ import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { resolveTarget, resolveToRef, cNvPrIdOf } from './addressing.js';
 import { addElement, duplicateElement, updateChart } from './elements.js';
-import { findIndexed, matchesSelector, mergeSlides, slidesForItem, slidePageMap } from './indexer.js';
+import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
-import { attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
+import { REL, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
@@ -103,7 +103,7 @@ const writeText = (
       `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
     );
   setNodeText(node, text);
-  archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
+  archive.writeXml(item.partUri, doc);
   return ok(undefined, diagnostics);
 };
 
@@ -379,9 +379,7 @@ export async function mutate(
   if (command.type === 'replaceText') return applyReplaceText(command, archive, index);
 
   if (command.type === 'addSlide') {
-    const pages = slidePageMap(index);
     const slides = index.elements.filter((item) => item.kind === 'slide');
-    let template: string | undefined;
     let layout: string | undefined;
     if (command.layout) {
       const layouts = index.elements.filter((item) => item.kind === 'layout');
@@ -398,17 +396,20 @@ export async function mutate(
         return err('TARGET_NOT_FOUND', `Layout not found: ${command.layout}`);
       layout = match?.partUri;
     }
-    if (command.after !== undefined && command.after > 0) {
-      const afterSlide = slides[command.after - 1];
-      template = afterSlide?.partUri;
+    // Prefer an explicit layout; otherwise inherit the layout of the anchor slide
+    // (or the first slide) so blank pages still bind to a slideLayout.
+    if (!layout) {
+      const anchor =
+        command.after !== undefined && command.after > 0
+          ? slides[command.after - 1]
+          : slides[0];
+      if (anchor) {
+        const rels = archive.getRelationships(anchor.partUri);
+        const layoutRel = rels.find((r) => r.type === REL.layout);
+        layout = layoutRel?.resolvedTarget;
+      }
     }
-    // blank layout: add empty slide without cloning content
-    const partUri =
-      command.layout === 'blank' || !template
-        ? addSlide(archive, undefined, layout)
-        : addSlide(archive, undefined, layout);
-    void pages;
-    void template;
+    const partUri = addSlide(archive, undefined, layout, command.after);
     return ok({
       changed: true,
       partUri,
@@ -440,7 +441,7 @@ export async function mutate(
       ...(command.data !== undefined ? { data: command.data } : {}),
     });
     const created = await addElement(archive, slide.partUri, doc, parent, element);
-    archive.writeXml(slide.partUri, doc, archive.getPart(slide.partUri)?.mediaType);
+    archive.writeXml(slide.partUri, doc);
     const id = attr(cNvPr(created), 'id') ?? '?';
     return ok({
       changed: true,
@@ -594,7 +595,7 @@ export async function mutate(
     return err('INVALID_COMMAND', `Unhandled mutation type`);
   }
 
-  archive.writeXml(item.partUri, doc, archive.getPart(item.partUri)?.mediaType);
+  archive.writeXml(item.partUri, doc);
   return ok(
     {
       changed: true,

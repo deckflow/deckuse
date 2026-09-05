@@ -931,5 +931,104 @@ describe('pptx adapter', () => {
     const track = elements.find((item) => item.name === 'Track');
     expect(track?.kind).toBe('audio');
     expect(track?.payload?.mediaPart).toMatch(/\/ppt\/media\/media\d+\.mp3/);
+
+    // Chart literals must be OOXML-valid (no nested strCache/numCache under *Lit).
+    const chartPart = revenue?.payload?.chartPart;
+    expect(chartPart).toBeTruthy();
+    if (!chartPart) return;
+    const chartXml = await readFile(join(workspace, 'source', chartPart.replace(/^\//, '')), 'utf8');
+    expect(chartXml).toContain('<c:strLit>');
+    expect(chartXml).toContain('<c:numLit>');
+    expect(chartXml).not.toMatch(/<c:strLit>\s*<c:strCache>/);
+    expect(chartXml).not.toMatch(/<c:numLit>\s*<c:numCache>/);
+    expect(chartXml).toContain('<c:barDir val="col"/>');
+
+    // Content Types must record chart + slide overrides (not Default application/xml).
+    const ct = await readFile(join(workspace, 'source/[Content_Types].xml'), 'utf8');
+    expect(ct).toContain(
+      `PartName="${chartPart}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"`,
+    );
+  });
+
+  it('addSlide --after inserts at the requested index and keeps content types', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-addslide-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const inspectedBefore = await pptxAdapter.execute(
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+      {},
+    );
+    expect(inspectedBefore.ok).toBe(true);
+    if (!inspectedBefore.ok) return;
+    const revision = (inspectedBefore.value as { document: { revision: string } }).document
+      .revision;
+
+    // Append a second slide first so --after 1 has a clear middle slot later.
+    const append = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addSlide',
+        workspaceId: workspace,
+        transactionId: revision,
+        layout: 'blank',
+      },
+      {},
+    );
+    expect(append.ok).toBe(true);
+    if (!append.ok) return;
+    const rev2 = (append.value as { revision: string }).revision;
+
+    const insert = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addSlide',
+        workspaceId: workspace,
+        transactionId: rev2,
+        after: 1,
+        layout: 'blank',
+      },
+      {},
+    );
+    expect(insert.ok).toBe(true);
+    if (!insert.ok) return;
+
+    const presentation = await readFile(
+      join(workspace, 'source/ppt/presentation.xml'),
+      'utf8',
+    );
+    const ids = [...presentation.matchAll(/r:id="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids.length).toBe(3);
+
+    const rels = await readFile(
+      join(workspace, 'source/ppt/_rels/presentation.xml.rels'),
+      'utf8',
+    );
+    const byId = new Map(
+      [...rels.matchAll(/Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map((m) => [m[1], m[2]]),
+    );
+    // Slide inserted after index 1 should be position 2 (between original and appended).
+    expect(byId.get(ids[0]!)).toContain('slide1.xml');
+    expect(byId.get(ids[1]!)).toMatch(/slide\d+\.xml/);
+    expect(byId.get(ids[1]!)).not.toContain('slide1.xml');
+    expect(byId.get(ids[2]!)).toMatch(/slide\d+\.xml/);
+
+    const ct = await readFile(join(workspace, 'source/[Content_Types].xml'), 'utf8');
+    const slideOverrides = [
+      ...ct.matchAll(
+        /PartName="(\/ppt\/slides\/slide\d+\.xml)" ContentType="([^"]+)"/g,
+      ),
+    ];
+    expect(slideOverrides.length).toBeGreaterThanOrEqual(2);
+    for (const [, , type] of slideOverrides) {
+      expect(type).toBe(
+        'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+      );
+    }
   });
 });
