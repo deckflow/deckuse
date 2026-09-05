@@ -69,7 +69,17 @@ export const pptxCapabilities = {
   pictureInput: ['base64', 'path'],
   picture: { replacePicture: true, cleanupUnreferencedMedia: true },
   media: { video: true, audio: true, autoPoster: true },
-  chart: { create: true, title: true, seriesCache: true, embeddedWorkbook: false },
+  chart: {
+    create: true,
+    title: true,
+    seriesCache: true,
+    seriesColor: true,
+    textColor: true,
+    gapWidth: true,
+    showMajorGridlines: true,
+    fill: true,
+    embeddedWorkbook: false,
+  },
   properties: {
     text: true,
     name: true,

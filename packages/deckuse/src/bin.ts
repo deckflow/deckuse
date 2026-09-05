@@ -197,6 +197,16 @@ const parseProps = (list: string[]): Record<string, unknown> => {
     if (next === 'true') value = true;
     else if (next === 'false') value = false;
     else if (/^-?\d+(\.\d+)?$/.test(next)) value = Number(next);
+    else if (
+      (next.startsWith('{') && next.endsWith('}')) ||
+      (next.startsWith('[') && next.endsWith(']'))
+    ) {
+      try {
+        value = JSON.parse(next) as unknown;
+      } catch {
+        value = next;
+      }
+    }
     props[key] = value;
     i += 2;
   }

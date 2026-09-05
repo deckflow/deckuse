@@ -1,6 +1,11 @@
 import { OpcArchive, parseXml } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
-import { chartGraphicFrameXml, createChartPart, type ChartType } from './chart.js';
+import {
+  applyChartProperties,
+  chartGraphicFrameXml,
+  createChartPart,
+  type ChartType,
+} from './chart.js';
 import { addMediaPart, mediaPicXml } from './media.js';
 import { addPicturePart } from './picture.js';
 import {
@@ -9,9 +14,7 @@ import {
   allocateShapeIds,
   attr,
   descendants,
-  first,
   nextShapeId,
-  setNodeText,
 } from './xml.js';
 const esc = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
@@ -69,7 +72,7 @@ function chartXml(
   const data = (e['data'] ?? {}) as {
     title?: string;
     categories?: string[];
-    series?: { name: string; values: number[] }[];
+    series?: { name: string; values: number[]; color?: string }[];
   };
   const series = Array.isArray(data.series) ? data.series : [];
   if (series.length === 0) throw new Error('Chart requires data.series with at least one series');
@@ -138,44 +141,7 @@ export function updateChart(
   properties: Record<string, unknown>,
 ): { workbook: boolean } {
   const chart = archive.readXml(part);
-  if (typeof properties['title'] === 'string')
-    setNodeText(
-      first(chart, 'title') ??
-        (() => {
-          if (!chart.documentElement) throw new Error('Chart XML has no root');
-          return chart.documentElement;
-        })(),
-      properties['title'],
-    );
-  const series = properties['series'];
-  if (Array.isArray(series))
-    series.forEach((input, index) => {
-      if (typeof input !== 'object' || input === null) return;
-      const spec = input as Record<string, unknown>,
-        node = descendants(chart, 'ser')[index];
-      if (!node) return;
-      if (typeof spec['name'] === 'string') {
-        const tx = first(node, 'tx');
-        if (tx) {
-          const v = first(tx, 'v');
-          if (v) v.textContent = spec['name'];
-          else setNodeText(tx, spec['name']);
-        }
-      }
-      if (Array.isArray(spec['values'])) {
-        const values = spec['values'];
-        const cache = first(first(node, 'val') ?? node, 'numCache');
-        if (cache) {
-          const points = descendants(cache, 'pt');
-          values.forEach((entry, i) => {
-            const v = first(points[i] ?? cache, 'v');
-            if (v) v.textContent = String(entry);
-          });
-          const count = first(cache, 'ptCount');
-          if (count) count.setAttribute('val', String(values.length));
-        }
-      }
-    });
+  applyChartProperties(chart, properties);
   archive.writeXml(part, chart);
   return { workbook: archive.getRelationships(part).some((r) => r.type === REL.package) };
 }

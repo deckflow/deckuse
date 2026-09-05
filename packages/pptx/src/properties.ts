@@ -24,7 +24,18 @@ const SHAPE_KEYS = new Set([
   ...TEXT_COLOR_ALIASES,
 ]);
 
-const CHART_KEYS = new Set(['title', 'series', 'text']);
+const CHART_KEYS = new Set([
+  'title',
+  'series',
+  'text',
+  'textColor',
+  'fontColor',
+  'gapWidth',
+  'showMajorGridlines',
+  'fill',
+  'background',
+  'gridlineColor',
+]);
 
 const EMU_PER_PT = 12700;
 const DEFAULT_STROKE_PT = 1;

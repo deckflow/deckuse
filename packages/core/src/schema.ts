@@ -301,6 +301,7 @@ const chartDataSchema = z
           .object({
             name: z.string().min(1),
             values: z.array(z.number()),
+            color: z.string().min(1).optional(),
           })
           .strict(),
       )

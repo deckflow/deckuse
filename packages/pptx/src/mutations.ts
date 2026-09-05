@@ -511,11 +511,18 @@ export async function mutate(
       `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
     );
 
+  const chartPart =
+    item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string'
+      ? item.payload['chartPart']
+      : undefined;
+  let chartMutated = false;
+
   if (command.type === 'setText') {
     const text = command.text ?? command.value;
     if (text === undefined) return err('INVALID_COMMAND', 'setText requires text or value');
-    if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
-      const result = updateChart(archive, item.payload['chartPart'], { title: text });
+    if (chartPart) {
+      const result = updateChart(archive, chartPart, { title: text });
+      chartMutated = true;
       if (result.workbook)
         diagnostics.push({
           severity: 'warning',
@@ -544,13 +551,14 @@ export async function mutate(
       );
     const properties =
       command.type === 'set' ? mapDottedProperties(command.properties) : command.properties;
-    if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
+    if (chartPart) {
       const checked = assertChartProperties(properties);
       if (!checked.ok) return checked;
       const chartProps = { ...properties };
       if (typeof chartProps['text'] === 'string' && chartProps['title'] === undefined)
         chartProps['title'] = chartProps['text'];
-      const result = updateChart(archive, item.payload['chartPart'], chartProps);
+      const result = updateChart(archive, chartPart, chartProps);
+      chartMutated = true;
       if (result.workbook)
         diagnostics.push({
           severity: 'warning',
@@ -596,13 +604,15 @@ export async function mutate(
   }
 
   archive.writeXml(item.partUri, doc);
+  const changedParts = [item.partUri];
+  if (chartMutated && chartPart) changedParts.push(chartPart);
   return ok(
     {
       changed: true,
       slides: slidesForItem(index, item),
       diagnostics,
       ...(target ? { changedTargets: [target] } : {}),
-      changedParts: [item.partUri],
+      changedParts,
     },
     diagnostics,
   );

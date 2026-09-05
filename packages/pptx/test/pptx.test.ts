@@ -942,12 +942,49 @@ describe('pptx adapter', () => {
     expect(chartXml).not.toMatch(/<c:strLit>\s*<c:strCache>/);
     expect(chartXml).not.toMatch(/<c:numLit>\s*<c:numCache>/);
     expect(chartXml).toContain('<c:barDir val="col"/>');
+    expect(chartXml).toMatch(/<c:spPr>[\s\S]*<a:srgbClr val="5B8DEF"\/>/);
+    expect(chartXml).toContain('<c:gapWidth val="100"/>');
+    expect(chartXml).toContain('<c:majorGridlines/>');
 
     // Content Types must record chart + slide overrides (not Default application/xml).
     const ct = await readFile(join(workspace, 'source/[Content_Types].xml'), 'utf8');
     expect(ct).toContain(
       `PartName="${chartPart}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"`,
     );
+
+    // Style + numLit value updates must rewrite the chart part (not only the slide).
+    const styled = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: (batch.value as { revision: string }).revision,
+        target: 'slide:1/shape:Revenue',
+        properties: {
+          textColor: '#FFFFFF',
+          gapWidth: 80,
+          showMajorGridlines: true,
+          series: [
+            { name: '收入', values: [11, 22], color: '#4DA3FF' },
+          ],
+        },
+      },
+      {},
+    );
+    expect(styled.ok).toBe(true);
+    if (!styled.ok) return;
+    expect((styled.value as { changedParts?: string[] }).changedParts).toEqual(
+      expect.arrayContaining([chartPart]),
+    );
+    const styledXml = await readFile(
+      join(workspace, 'source', chartPart.replace(/^\//, '')),
+      'utf8',
+    );
+    expect(styledXml).toContain('<c:v>11</c:v>');
+    expect(styledXml).toContain('<c:v>22</c:v>');
+    expect(styledXml).toContain('val="4DA3FF"');
+    expect(styledXml).toContain('<c:gapWidth val="80"/>');
+    expect(styledXml).toMatch(/<c:txPr>[\s\S]*<a:srgbClr val="FFFFFF"\/>/);
   });
 
   it('addSlide --after inserts at the requested index and keeps content types', async () => {

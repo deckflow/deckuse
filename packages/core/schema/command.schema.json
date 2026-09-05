@@ -1468,6 +1468,10 @@
           "items": {
             "type": "number"
           }
+        },
+        "color": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [

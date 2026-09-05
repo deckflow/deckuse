@@ -273,7 +273,11 @@ Type-specific:
   --rows <json>             string[][] JSON (required for table)
   --chart-type <kind>       bar | column | line | pie (required for chart)
   --data <json>             Chart data JSON (required for chart):
-                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1]}]}
+                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1],"color?":"#5B8DEF"}]}
+
+Chart styling (via set / apply setProperties on a chart target):
+  title, series[{name,values,color}], textColor / font.color,
+  gapWidth, showMajorGridlines
 
 Examples:
   deckuse add shape --slide 1 --type text --text 'Hello' --json
@@ -311,6 +315,11 @@ Common properties:
   line.kind, line.color, line.width, line.dash
   paragraph.align, text-box.auto-fit, name, visible
   x, y, width, height, rotation
+
+Chart targets also accept:
+  title, series (JSON array with name/values/color),
+  textColor | font.color, gapWidth, showMajorGridlines,
+  fill | background, gridlineColor
 
 Options:
   --scope <scope>           local (default) | placeholder | layout | master | theme

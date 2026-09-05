@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { ElementRef } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
+import { readSeriesColor } from './chart.js';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
 import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';
@@ -155,12 +156,18 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
             indexed.payload = {
               chartPart: cr.resolvedTarget,
               title: textOf(first(chart, 'title') ?? chart),
-              series: descendants(chart, 'ser').map((ser) => ({
-                name:
-                  first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
-                  textOf(first(ser, 'tx') ?? ser),
-                values: descendants(first(ser, 'val') ?? ser, 'v').map((v) => v.textContent ?? ''),
-              })),
+              series: descendants(chart, 'ser').map((ser) => {
+                const color = readSeriesColor(ser);
+                return {
+                  name:
+                    first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
+                    textOf(first(ser, 'tx') ?? ser),
+                  values: descendants(first(ser, 'val') ?? ser, 'v').map(
+                    (v) => v.textContent ?? '',
+                  ),
+                  ...(color ? { color } : {}),
+                };
+              }),
               embeddedWorkbook: archive
                 .getRelationships(cr.resolvedTarget)
                 .some((r) => r.type === REL.package),
