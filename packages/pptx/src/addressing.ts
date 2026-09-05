@@ -41,6 +41,8 @@ const SHAPE_KINDS = new Set([
   'shape',
   'textbox',
   'picture',
+  'video',
+  'audio',
   'connector',
   'group',
   'table',

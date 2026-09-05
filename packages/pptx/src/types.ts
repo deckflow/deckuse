@@ -4,6 +4,8 @@ export type ElementKind =
   | 'shape'
   | 'textbox'
   | 'picture'
+  | 'video'
+  | 'audio'
   | 'connector'
   | 'group'
   | 'table'

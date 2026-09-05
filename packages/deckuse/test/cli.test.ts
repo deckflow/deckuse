@@ -159,6 +159,11 @@ describe('deckuse CLI', () => {
     expect(addShape.stdout).toContain('--slide <n>');
     expect(addShape.stdout).toContain('--type <kind>');
     expect(addShape.stdout).toContain('rounded-rect');
+    expect(addShape.stdout).toContain('table | chart | video | audio');
+    expect(addShape.stdout).toContain('--rows <json>');
+    expect(addShape.stdout).toContain('--chart-type <kind>');
+    expect(addShape.stdout).toContain('--data <json>');
+    expect(addShape.stdout).toContain('--text <text>');
 
     const setText = await run(['help', 'set', 'text']);
     expect(setText).toMatchObject({ code: 0, stderr: '' });

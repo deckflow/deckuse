@@ -1,5 +1,7 @@
 import { OpcArchive, parseXml } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
+import { chartGraphicFrameXml, createChartPart, type ChartType } from './chart.js';
+import { addMediaPart, mediaPicXml } from './media.js';
 import { addPicturePart } from './picture.js';
 import {
   NS,
@@ -46,6 +48,51 @@ async function pictureXml(
   const rid = added.value.rid;
   return `<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Picture ${String(id)}`))}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(e)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
+
+function chartXml(
+  archive: OpcArchive,
+  slidePart: string,
+  id: number,
+  e: Record<string, unknown>,
+): string {
+  const chartType = value(e, 'chartType', 'column') as ChartType;
+  const data = (e['data'] ?? {}) as {
+    title?: string;
+    categories?: string[];
+    series?: { name: string; values: number[] }[];
+  };
+  const series = Array.isArray(data.series) ? data.series : [];
+  if (series.length === 0) throw new Error('Chart requires data.series with at least one series');
+  const created = createChartPart(archive, slidePart, {
+    chartType,
+    ...(typeof data.title === 'string' ? { title: data.title } : {}),
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    series,
+  });
+  return chartGraphicFrameXml(id, created.rid, e);
+}
+
+async function avMediaXml(
+  archive: OpcArchive,
+  slidePart: string,
+  id: number,
+  e: Record<string, unknown>,
+  kind: 'video' | 'audio',
+): Promise<string> {
+  const path = typeof e['path'] === 'string' ? e['path'] : undefined;
+  if (!path) throw new Error(`${kind} requires path`);
+  const added = await addMediaPart(archive, slidePart, { path, kind });
+  if (!added.ok) throw new Error(added.error.message);
+  return mediaPicXml(
+    id,
+    e,
+    kind,
+    added.value.fileRid,
+    added.value.mediaRid,
+    added.value.posterRid,
+  );
+}
+
 export async function addElement(
   archive: OpcArchive,
   slidePart: string,
@@ -60,6 +107,9 @@ export async function addElement(
   else if (kind === 'group') xml = groupXml(id, e);
   else if (kind === 'table') xml = tableXml(id, e);
   else if (kind === 'picture') xml = await pictureXml(archive, slidePart, id, e);
+  else if (kind === 'chart') xml = chartXml(archive, slidePart, id, e);
+  else if (kind === 'video') xml = await avMediaXml(archive, slidePart, id, e, 'video');
+  else if (kind === 'audio') xml = await avMediaXml(archive, slidePart, id, e, 'audio');
   else xml = shapeXml(id, e);
   const node = parseXml(xml).documentElement,
     imported = doc.importNode(node, true);
@@ -119,6 +169,7 @@ export function updateChart(
   archive.writeXml(part, chart, archive.getPart(part)?.mediaType);
   return { workbook: archive.getRelationships(part).some((r) => r.type === REL.package) };
 }
+
 export function setColor(node: Element, from: string, to: string): number {
   let changed = 0;
   for (const color of descendants(node, 'srgbClr'))

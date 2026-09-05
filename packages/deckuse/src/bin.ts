@@ -315,7 +315,47 @@ try {
         const slide = optionFrom(clean, '--slide');
         const shapeType = optionFrom(clean, '--type');
         if (!slide || !shapeType)
-          throw new Error('Usage: deckuse add shape --slide <n> --type <text|rect|...>');
+          throw new Error(
+            'Usage: deckuse add shape --slide <n> --type <text|rect|rounded-rect|ellipse|line|image|group|table|chart|video|audio>',
+          );
+        const rowsRaw = optionFrom(clean, '--rows');
+        let rows: string[][] | undefined;
+        if (rowsRaw !== undefined) {
+          try {
+            const parsed: unknown = JSON.parse(rowsRaw);
+            if (
+              !Array.isArray(parsed) ||
+              !parsed.every(
+                (row) => Array.isArray(row) && row.every((cell) => typeof cell === 'string'),
+              )
+            ) {
+              throw new Error('expected string[][]');
+            }
+            rows = parsed as string[][];
+          } catch {
+            throw new Error(
+              `--rows must be JSON string[][] (example: --rows '[["A","B"],["1","2"]]')`,
+            );
+          }
+        }
+        const dataRaw = optionFrom(clean, '--data');
+        let data:
+          | {
+              title?: string;
+              categories: string[];
+              series: { name: string; values: number[] }[];
+            }
+          | undefined;
+        if (dataRaw !== undefined) {
+          try {
+            data = JSON.parse(dataRaw) as typeof data;
+          } catch {
+            throw new Error(
+              `--data must be JSON (example: --data '{"categories":["Q1"],"series":[{"name":"S1","values":[1]}]}')`,
+            );
+          }
+        }
+        const chartType = optionFrom(clean, '--chart-type');
         ok = await execute('deckuse add shape', {
           ...base,
           type: 'addShape',
@@ -330,6 +370,12 @@ try {
             ? { height: Number(optionFrom(clean, '--height')) }
             : {}),
           ...(optionFrom(clean, '--file') ? { file: optionFrom(clean, '--file') } : {}),
+          ...(optionFrom(clean, '--text') !== undefined
+            ? { text: optionFrom(clean, '--text') }
+            : {}),
+          ...(rows !== undefined ? { rows } : {}),
+          ...(chartType ? { chartType } : {}),
+          ...(data !== undefined ? { data } : {}),
         });
       } else throw new Error('Usage: deckuse add <slide|shape> ...');
     } else if (action === 'remove') {

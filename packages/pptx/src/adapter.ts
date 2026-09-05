@@ -55,10 +55,21 @@ const WRITE_TYPES = new Set([
 export const pptxCapabilities = {
   protocol: '2.0',
   slides: { add: true, duplicate: true, remove: true },
-  elements: ['shape', 'textbox', 'connector', 'group', 'picture', 'table', 'chart'],
+  elements: [
+    'shape',
+    'textbox',
+    'connector',
+    'group',
+    'picture',
+    'video',
+    'audio',
+    'table',
+    'chart',
+  ],
   pictureInput: ['base64', 'path'],
   picture: { replacePicture: true, cleanupUnreferencedMedia: true },
-  chart: { title: true, seriesCache: true, embeddedWorkbook: false },
+  media: { video: true, audio: true, autoPoster: true },
+  chart: { create: true, title: true, seriesCache: true, embeddedWorkbook: false },
   properties: {
     text: true,
     name: true,
@@ -232,6 +243,10 @@ const transactionOpsToAtomic = (
         'line',
         'image',
         'group',
+        'table',
+        'chart',
+        'video',
+        'audio',
       ]);
       if (!allowed.has(shapeType))
         return err('UNSUPPORTED_CAPABILITY', `Unsupported shape type: ${shapeType}`);
@@ -246,7 +261,11 @@ const transactionOpsToAtomic = (
           | 'ellipse'
           | 'line'
           | 'image'
-          | 'group',
+          | 'group'
+          | 'table'
+          | 'chart'
+          | 'video'
+          | 'audio',
         ...(typeof op['name'] === 'string' ? { name: op['name'] } : {}),
         ...(typeof op['role'] === 'string' ? { role: op['role'] } : {}),
         ...(typeof op['x'] === 'number' ? { x: op['x'] } : {}),
@@ -254,6 +273,20 @@ const transactionOpsToAtomic = (
         ...(typeof op['width'] === 'number' ? { width: op['width'] } : {}),
         ...(typeof op['height'] === 'number' ? { height: op['height'] } : {}),
         ...(typeof op['file'] === 'string' ? { file: op['file'] } : {}),
+        ...(typeof op['text'] === 'string' ? { text: op['text'] } : {}),
+        ...(Array.isArray(op['rows']) ? { rows: op['rows'] as string[][] } : {}),
+        ...(typeof op['chartType'] === 'string'
+          ? { chartType: op['chartType'] as 'bar' | 'column' | 'line' | 'pie' }
+          : {}),
+        ...(op['data'] !== undefined && typeof op['data'] === 'object' && op['data'] !== null
+          ? {
+              data: op['data'] as {
+                title?: string;
+                categories: string[];
+                series: { name: string; values: number[] }[];
+              },
+            }
+          : {}),
       });
       continue;
     }
@@ -501,7 +534,13 @@ export const pptxAdapter: FormatAdapter = {
               kind: item.kind,
               geometry: item.transform,
               location: item.location,
-              payload: item.kind === 'chart' || item.kind === 'picture' ? item.payload : undefined,
+              payload:
+                item.kind === 'chart' ||
+                item.kind === 'picture' ||
+                item.kind === 'video' ||
+                item.kind === 'audio'
+                  ? item.payload
+                  : undefined,
             })
           : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
       }

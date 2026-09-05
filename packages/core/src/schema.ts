@@ -291,13 +291,42 @@ const addSlideCommandSchema = z
   })
   .strict();
 
+const chartDataSchema = z
+  .object({
+    title: z.string().optional(),
+    categories: z.array(z.string()).default([]),
+    series: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            values: z.array(z.number()),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
 const addShapeCommandSchema = z
   .object({
     ...commandBase,
     ...mutationBase,
     type: z.literal('addShape'),
     slide: z.number().int().positive(),
-    shapeType: z.enum(['text', 'rect', 'rounded-rect', 'ellipse', 'line', 'image', 'group']),
+    shapeType: z.enum([
+      'text',
+      'rect',
+      'rounded-rect',
+      'ellipse',
+      'line',
+      'image',
+      'group',
+      'table',
+      'chart',
+      'video',
+      'audio',
+    ]),
     name: z.string().min(1).optional(),
     role: z.string().min(1).optional(),
     x: z.number().optional(),
@@ -305,8 +334,52 @@ const addShapeCommandSchema = z
     width: z.number().positive().optional(),
     height: z.number().positive().optional(),
     file: z.string().min(1).optional(),
+    text: z.string().optional(),
+    rows: z.array(z.array(z.string())).optional(),
+    chartType: z.enum(['bar', 'column', 'line', 'pie']).optional(),
+    data: chartDataSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      (value.shapeType === 'image' ||
+        value.shapeType === 'video' ||
+        value.shapeType === 'audio') &&
+      !value.file
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `--type ${value.shapeType} requires --file <path> (example: deckuse add shape --slide 1 --type ${value.shapeType} --file ./media)`,
+        path: ['file'],
+      });
+    }
+    if (value.shapeType === 'table' && !value.rows) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          "--type table requires --rows '<json>' (example: --rows '[[\"A\",\"B\"],[\"1\",\"2\"]]')",
+        path: ['rows'],
+      });
+    }
+    if (value.shapeType === 'chart') {
+      if (!value.chartType) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            '--type chart requires --chart-type <bar|column|line|pie> (example: --chart-type column --data \'{"categories":["Q1"],"series":[{"name":"S1","values":[1]}]}\')',
+          path: ['chartType'],
+        });
+      }
+      if (!value.data) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            '--type chart requires --data \'<json>\' with categories + series (example: --data \'{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}\')',
+          path: ['data'],
+        });
+      }
+    }
+  });
 
 const removeCommandSchema = z
   .object({

@@ -293,10 +293,10 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes, connectors, groups, pictures (from a file path or base64), and tables; duplicate or remove elements.
+- Add shapes/text boxes, connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
 - Table-cell addressing by table ID, row, and column; speaker-note reading and text editing.
-- Chart title, series-name, and cached-value edits. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated.
+- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated.
 - Common text and `srgbClr` color edits in master, layout, and theme parts.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
@@ -325,7 +325,8 @@ The complete command schema is at `packages/core/schema/command.schema.json`. Th
 
 - Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
 - It does not render presentations. Do not rely on it to assess visual quality, detect overlap, or automatically improve slide design.
-- Chart edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
+- Chart creation and edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
+- Embedded video/audio use a generated poster frame; playback timing and advanced media options are not edited.
 - Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
 - `setText` and `replaceText` collapse multi-run text in the targeted node into one run while retaining the first run’s style.
 

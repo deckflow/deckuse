@@ -807,4 +807,129 @@ describe('pptx adapter', () => {
     expect(persisted.revision).toBe(manifest.revision);
     expect(persisted.elements.length).toBeGreaterThan(0);
   });
+
+  it('addShape creates text, table, chart, video, and audio', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-addshape-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    const videoPath = join(root, 'clip.mp4');
+    const audioPath = join(root, 'track.mp3');
+    await writeFile(videoPath, Buffer.from('fake-mp4-bytes'));
+    await writeFile(audioPath, Buffer.from('fake-mp3-bytes'));
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const inspectedBefore = await pptxAdapter.execute(
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+      {},
+    );
+    expect(inspectedBefore.ok).toBe(true);
+    if (!inspectedBefore.ok) return;
+    const revision = (inspectedBefore.value as { document: { revision: string } }).document
+      .revision;
+    const batch = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'batch',
+        workspaceId: workspace,
+        transactionId: revision,
+        atomic: true,
+        commands: [
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'text',
+            name: 'Greeting',
+            text: 'Hello deck',
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'table',
+            name: 'Grid',
+            rows: [
+              ['A', 'B'],
+              ['1', '2'],
+            ],
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'chart',
+            name: 'Revenue',
+            chartType: 'column',
+            data: {
+              title: 'Revenue',
+              categories: ['Q1', 'Q2'],
+              series: [{ name: '2024', values: [10, 20] }],
+            },
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'video',
+            name: 'Clip',
+            file: videoPath,
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'audio',
+            name: 'Track',
+            file: audioPath,
+          },
+        ],
+      },
+      {},
+    );
+    expect(batch.ok).toBe(true);
+    if (!batch.ok) return;
+    const inspected = await pptxAdapter.execute(
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 2 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const elements = (
+      inspected.value as {
+        elements: Array<{
+          kind: string;
+          name?: string;
+          text?: string;
+          payload?: { mediaPart?: string; chartPart?: string; mediaKind?: string };
+        }>;
+      }
+    ).elements;
+    const greeting = elements.find((item) => item.name === 'Greeting');
+    expect(greeting?.kind).toBe('textbox');
+    expect(greeting?.text).toContain('Hello deck');
+    expect(elements.some((item) => item.kind === 'table' && item.name === 'Grid')).toBe(true);
+    const revenue = elements.find((item) => item.name === 'Revenue');
+    expect(revenue?.kind).toBe('chart');
+    expect(revenue?.payload?.chartPart).toMatch(/\/ppt\/charts\/chart\d+\.xml/);
+    const clip = elements.find((item) => item.name === 'Clip');
+    expect(clip?.kind).toBe('video');
+    expect(clip?.payload?.mediaPart).toMatch(/\/ppt\/media\/media\d+\.mp4/);
+    const track = elements.find((item) => item.name === 'Track');
+    expect(track?.kind).toBe('audio');
+    expect(track?.payload?.mediaPart).toMatch(/\/ppt\/media\/media\d+\.mp3/);
+  });
 });

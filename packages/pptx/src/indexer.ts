@@ -11,7 +11,11 @@ const classify = (node: Element): ElementKind | undefined =>
       ? 'textbox'
       : 'shape'
     : node.localName === 'pic'
-      ? 'picture'
+      ? first(node, 'videoFile')
+        ? 'video'
+        : first(node, 'audioFile')
+          ? 'audio'
+          : 'picture'
       : node.localName === 'cxnSp'
         ? 'connector'
         : node.localName === 'grpSp'
@@ -112,18 +116,25 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
               );
           });
         }
-        if (kind === 'picture') {
+        if (kind === 'picture' || kind === 'video' || kind === 'audio') {
           const blip = first(child, 'blip');
           const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
           const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
-          const rid = embed ?? link;
+          const video = first(child, 'videoFile');
+          const audio = first(child, 'audioFile');
+          const mediaLink =
+            (video ?? audio)?.getAttributeNS(NS.r, 'link') ??
+            attr(video ?? audio, 'r:link') ??
+            undefined;
+          const rid = mediaLink ?? embed ?? link;
           const rel = rid ? archive.getRelationships(partUri).find((r) => r.id === rid) : undefined;
           if (rel) {
             const mediaPart = rel.resolvedTarget ?? rel.target;
-            const external = Boolean(rel.external || (!embed && link));
+            const external = Boolean(rel.external || (!embed && link && !mediaLink));
             indexed.payload = {
               mediaPart,
               href: external ? rel.target : mediaHref(documentId, mediaPart),
+              ...(kind !== 'picture' ? { mediaKind: kind } : {}),
               ...(external ? { external: true } : {}),
               ...(!external && rel.resolvedTarget
                 ? {

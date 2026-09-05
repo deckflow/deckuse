@@ -254,19 +254,35 @@ Run 'deckuse add <slide|shape> --help' for details.`,
     summary:
       'Insert a shape on a slide. Geometry uses EMU integers (1 CSS px @ 96 DPI = 9525 EMU).',
     example:
-      'deckuse add shape --slide 1 --type text --name Title --role title --x 0 --y 0 --width 914400 --height 457200 --json',
+      'deckuse add shape --slide 1 --type text --text "Hello" --name Title --x 0 --y 0 --width 914400 --height 457200 --json',
     details: `Required:
   --slide <n>               One-based slide index
-  --type <kind>             text | rect | rounded-rect | ellipse | line | image | group
+  --type <kind>             text | rect | rounded-rect | ellipse | line | image | group | table | chart | video | audio
 
-Options:
+Common options:
   --name <name>             Shape name (should be unique on the slide)
   --role <role>             Semantic role (title, body, card, image, ...)
   --x <emu>                 X position in EMU
   --y <emu>                 Y position in EMU
   --width <emu>             Width in EMU
   --height <emu>            Height in EMU
-  --file <path>             Image source path (required for --type image)
+
+Type-specific:
+  --text <text>             Initial text (--type text)
+  --file <path>             Media path (required for image | video | audio)
+  --rows <json>             string[][] JSON (required for table)
+  --chart-type <kind>       bar | column | line | pie (required for chart)
+  --data <json>             Chart data JSON (required for chart):
+                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1]}]}
+
+Examples:
+  deckuse add shape --slide 1 --type text --text 'Hello' --json
+  deckuse add shape --slide 1 --type image --file ./photo.png --json
+  deckuse add shape --slide 1 --type table --rows '[["A","B"],["1","2"]]' --json
+  deckuse add shape --slide 1 --type chart --chart-type column --data '{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}' --json
+  deckuse add shape --slide 1 --type video --file ./clip.mp4 --json
+  deckuse add shape --slide 1 --type audio --file ./track.mp3 --json
+
   ${WRITE_GLOBALS}`,
   },
 

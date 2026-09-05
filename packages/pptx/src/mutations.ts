@@ -12,6 +12,7 @@ import { resolveTarget, resolveToRef, cNvPrIdOf } from './addressing.js';
 import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem, slidePageMap } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
+import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, removeSlide } from './slides.js';
@@ -260,7 +261,13 @@ const shapeTypeToElement = (
   const base = { ...fields };
   switch (shapeType) {
     case 'text':
-      return { ...base, kind: 'textbox', type: 'textbox', preset: 'rect' };
+      return {
+        ...base,
+        kind: 'textbox',
+        type: 'textbox',
+        preset: 'rect',
+        text: typeof fields['text'] === 'string' ? fields['text'] : '',
+      };
     case 'rect':
       return { ...base, kind: 'shape', type: 'shape', preset: 'rect' };
     case 'rounded-rect':
@@ -278,6 +285,35 @@ const shapeTypeToElement = (
       };
     case 'group':
       return { ...base, kind: 'group', type: 'group' };
+    case 'table':
+      return {
+        ...base,
+        kind: 'table',
+        type: 'table',
+        rows: Array.isArray(fields['rows']) ? fields['rows'] : [['']],
+      };
+    case 'chart':
+      return {
+        ...base,
+        kind: 'chart',
+        type: 'chart',
+        ...(typeof fields['chartType'] === 'string' ? { chartType: fields['chartType'] } : {}),
+        ...(fields['data'] !== undefined ? { data: fields['data'] } : {}),
+      };
+    case 'video':
+      return {
+        ...base,
+        kind: 'video',
+        type: 'video',
+        ...(typeof fields['file'] === 'string' ? { path: fields['file'] } : {}),
+      };
+    case 'audio':
+      return {
+        ...base,
+        kind: 'audio',
+        type: 'audio',
+        ...(typeof fields['file'] === 'string' ? { path: fields['file'] } : {}),
+      };
   }
 };
 
@@ -398,6 +434,10 @@ export async function mutate(
       ...(command.width !== undefined ? { width: command.width } : {}),
       ...(command.height !== undefined ? { height: command.height } : {}),
       ...(command.file !== undefined ? { file: command.file } : {}),
+      ...(command.text !== undefined ? { text: command.text } : {}),
+      ...(command.rows !== undefined ? { rows: command.rows } : {}),
+      ...(command.chartType !== undefined ? { chartType: command.chartType } : {}),
+      ...(command.data !== undefined ? { data: command.data } : {}),
     });
     const created = await addElement(archive, slide.partUri, doc, parent, element);
     archive.writeXml(slide.partUri, doc, archive.getPart(slide.partUri)?.mediaType);
@@ -543,6 +583,8 @@ export async function mutate(
     if (!replaced.ok) return replaced;
   } else if (command.type === 'remove') {
     if (item.kind === 'picture') detachPictureAndCleanup(archive, item.partUri, doc, node);
+    else if (item.kind === 'video' || item.kind === 'audio')
+      detachMediaAndCleanup(archive, item.partUri, doc, node);
     else node.parentNode?.removeChild(node);
   } else if (command.type === 'duplicate') duplicateElement(doc, node);
   else if (command.type === 'add') {
