@@ -219,8 +219,13 @@ const setTextColor = (rPr: Element, color: string): void => {
   const doc = rPr.ownerDocument;
   if (!doc) throw new Error('Element has no document');
   removeDirectChildren(rPr, FILL_LOCAL_NAMES);
-  if (rPr.firstChild) rPr.insertBefore(solidFillXml(doc, color), rPr.firstChild);
-  else rPr.appendChild(solidFillXml(doc, color));
+  const fill = solidFillXml(doc, color);
+  // CT_TextCharacterProperties: ln (optional) precedes EG_FillProperties.
+  const ln = directChild(rPr, 'ln');
+  if (ln?.nextSibling) rPr.insertBefore(fill, ln.nextSibling);
+  else if (ln) rPr.appendChild(fill);
+  else if (rPr.firstChild) rPr.insertBefore(fill, rPr.firstChild);
+  else rPr.appendChild(fill);
 };
 
 const setFontFamily = (rPr: Element, family: string): void => {

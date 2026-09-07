@@ -416,20 +416,56 @@ export function readSeriesColor(ser: Element): string | undefined {
   return val ? `#${val.toUpperCase()}` : undefined;
 }
 
+/** Ensure c:title under c:chart so setNodeText never appends a:p onto chartSpace. */
+const ensureChartTitle = (chartDoc: Document): Element => {
+  const existing = first(chartDoc, 'title');
+  if (existing) return existing;
+  const root = chartDoc.documentElement;
+  if (!root) throw new Error('Chart XML has no root');
+  const chart = directChild(root, 'chart') ?? first(chartDoc, 'chart');
+  if (!chart) throw new Error('Chart XML has no c:chart');
+  const title = chartDoc.createElementNS(NS.c, 'c:title');
+  const tx = chartDoc.createElementNS(NS.c, 'c:tx');
+  const rich = chartDoc.createElementNS(NS.c, 'c:rich');
+  rich.appendChild(chartDoc.createElementNS(NS.a, 'a:bodyPr'));
+  rich.appendChild(chartDoc.createElementNS(NS.a, 'a:lstStyle'));
+  const p = chartDoc.createElementNS(NS.a, 'a:p');
+  const pPr = chartDoc.createElementNS(NS.a, 'a:pPr');
+  pPr.appendChild(chartDoc.createElementNS(NS.a, 'a:defRPr'));
+  p.appendChild(pPr);
+  const r = chartDoc.createElementNS(NS.a, 'a:r');
+  const rPr = chartDoc.createElementNS(NS.a, 'a:rPr');
+  rPr.setAttribute('lang', 'en-US');
+  r.appendChild(rPr);
+  r.appendChild(chartDoc.createElementNS(NS.a, 'a:t'));
+  p.appendChild(r);
+  rich.appendChild(p);
+  tx.appendChild(rich);
+  title.appendChild(tx);
+  const overlay = chartDoc.createElementNS(NS.c, 'c:overlay');
+  overlay.setAttribute('val', '0');
+  title.appendChild(overlay);
+  // CT_Chart: title is first among title / autoTitleDeleted / … / plotArea.
+  if (chart.firstChild) chart.insertBefore(title, chart.firstChild);
+  else chart.appendChild(title);
+  const auto = directChild(chart, 'autoTitleDeleted') ?? first(chart, 'autoTitleDeleted');
+  if (auto) auto.setAttribute('val', '0');
+  else {
+    const created = chartDoc.createElementNS(NS.c, 'c:autoTitleDeleted');
+    created.setAttribute('val', '0');
+    if (title.nextSibling) chart.insertBefore(created, title.nextSibling);
+    else chart.appendChild(created);
+  }
+  return title;
+};
+
 /** Mutate an existing chart part from semantic chart properties. */
 export function applyChartProperties(
   chartDoc: Document,
   properties: Record<string, unknown>,
 ): void {
   if (typeof properties['title'] === 'string')
-    setNodeText(
-      first(chartDoc, 'title') ??
-        (() => {
-          if (!chartDoc.documentElement) throw new Error('Chart XML has no root');
-          return chartDoc.documentElement;
-        })(),
-      properties['title'],
-    );
+    setNodeText(ensureChartTitle(chartDoc), properties['title']);
 
   const series = properties['series'];
   if (Array.isArray(series))
