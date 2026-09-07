@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "test:integration-writes": "node scripts/integration-writes.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "install:global": "node scripts/install-global.mjs",
