@@ -1081,6 +1081,100 @@ describe('pptx adapter', () => {
     expect(appXml).toMatch(/<Notes>1<\/Notes>/);
   });
 
+  it('addSlide layout=blank binds to a Blank layout by cSld name, not the first layout', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-blank-layout-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const a = new OpcArchive();
+    const enc = new TextEncoder();
+    const mainCt =
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
+    const layoutCt =
+      'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml';
+    a.setPart(
+      '/[Content_Types].xml',
+      enc.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${mainCt}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="${layoutCt}"/><Override PartName="/ppt/slideLayouts/slideLayout2.xml" ContentType="${layoutCt}"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      enc.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+      ),
+      mainCt,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      enc.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    a.setRelationships('/ppt/slides/slide1.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+        target: '../slideLayouts/slideLayout1.xml',
+        external: false,
+      },
+    ]);
+    // First layout is Title Slide (must NOT be chosen for layout=blank).
+    a.setPart(
+      '/ppt/slideLayouts/slideLayout1.xml',
+      enc.encode(
+        `<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld name="Title Slide"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sldLayout>`,
+      ),
+      layoutCt,
+    );
+    a.setPart(
+      '/ppt/slideLayouts/slideLayout2.xml',
+      enc.encode(
+        `<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sldLayout>`,
+      ),
+      layoutCt,
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const revision = (init.value as { revision: string }).revision;
+
+    const added = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addSlide',
+        workspaceId: workspace,
+        transactionId: revision,
+        after: 1,
+        layout: 'blank',
+      },
+      {},
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const rels = await readFile(
+      join(workspace, 'source/ppt/slides/_rels/slide2.xml.rels'),
+      'utf8',
+    );
+    expect(rels).toContain('slideLayout2.xml');
+    expect(rels).not.toContain('slideLayout1.xml');
+  });
+
   it('insertRow/insertColumn preserve a16 rowId/colId on modern tables', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-a16-table-'));
     const source = join(root, 'source.pptx'),

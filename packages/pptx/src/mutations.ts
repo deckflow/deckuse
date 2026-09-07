@@ -605,15 +605,27 @@ export async function mutate(
     if (command.layout) {
       const layouts = index.elements.filter((item) => item.kind === 'layout');
       const needle = command.layout.toLowerCase();
+      const layoutDisplayName = (partUri: string): string => {
+        try {
+          const cSld = first(archive.readXml(partUri), 'cSld');
+          return (attr(cSld, 'name') ?? '').toLowerCase();
+        } catch {
+          return '';
+        }
+      };
       const match = layouts.find((item) => {
-        const name = item.partUri.split('/').pop()?.replace(/\.xml$/, '') ?? '';
+        const fileName = item.partUri.split('/').pop()?.replace(/\.xml$/, '') ?? '';
+        const display = layoutDisplayName(item.partUri);
+        // Match by cSld@name (e.g. "Blank") or part basename — never treat
+        // needle==="blank" as matching every layout (that picked Title Slide).
         return (
-          name.toLowerCase() === needle ||
-          name.toLowerCase().includes(needle) ||
-          needle === 'blank'
+          display === needle ||
+          fileName.toLowerCase() === needle ||
+          (needle !== 'blank' &&
+            (display.includes(needle) || fileName.toLowerCase().includes(needle)))
         );
       });
-      if (command.layout !== 'blank' && !match && needle !== 'blank')
+      if (!match && needle !== 'blank')
         return err('TARGET_NOT_FOUND', `Layout not found: ${command.layout}`);
       layout = match?.partUri;
     }
