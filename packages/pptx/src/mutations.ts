@@ -21,6 +21,9 @@ import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import { REL, NS, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
+const directChild = (node: Element, localName: string): Element | undefined =>
+  children(node).find((child) => child.localName === localName);
+
 export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
   descendants(doc).find(
     (node) =>
@@ -46,30 +49,206 @@ export const nodeFor = (doc: Document, item: IndexedElement): Element | undefine
   return id ? shapeByCNvPrId(doc, id) : undefined;
 };
 
-const transform = (node: Element, t: Record<string, unknown>): void => {
-  const x = first(node, 'xfrm');
-  if (!x) throw new Error('Element has no transform');
+const placeholderOf = (node: Element): { type: string; idx?: string } | undefined => {
+  const ph = first(node, 'ph');
+  if (!ph) return undefined;
+  const type = attr(ph, 'type') ?? 'body';
+  const idx = attr(ph, 'idx');
+  return { type, ...(idx !== undefined ? { idx } : {}) };
+};
+
+const findPlaceholderXfrm = (
+  doc: Document,
+  type: string,
+  idx: string | undefined,
+): Element | undefined => {
+  for (const shape of descendants(doc)) {
+    if (!shape.localName || !SHAPE_LOCAL_NAMES.has(shape.localName)) continue;
+    const ph = placeholderOf(shape);
+    if (!ph) continue;
+    if (idx !== undefined && ph.idx === idx) {
+      const xfrm = first(shape, 'xfrm');
+      if (xfrm) return xfrm;
+      continue;
+    }
+    if (ph.type === type && (idx === undefined || ph.idx === undefined)) {
+      const xfrm = first(shape, 'xfrm');
+      if (xfrm) return xfrm;
+    }
+  }
+  return undefined;
+};
+
+/** Layout/master xfrm for placeholders that omit a local transform. */
+const inheritedXfrm = (
+  archive: OpcArchive,
+  slidePart: string,
+  node: Element,
+): Element | undefined => {
+  const ph = placeholderOf(node);
+  if (!ph) return undefined;
+  const layoutPart = archive
+    .getRelationships(slidePart)
+    .find((rel) => rel.type === REL.layout)?.resolvedTarget;
+  if (!layoutPart || !archive.getPart(layoutPart)) return undefined;
+  const fromLayout = findPlaceholderXfrm(archive.readXml(layoutPart), ph.type, ph.idx);
+  if (fromLayout) return fromLayout;
+  const masterPart = archive
+    .getRelationships(layoutPart)
+    .find((rel) => rel.type === REL.slideMaster)?.resolvedTarget;
+  if (!masterPart || !archive.getPart(masterPart)) return undefined;
+  return findPlaceholderXfrm(archive.readXml(masterPart), ph.type, ph.idx);
+};
+
+const copyXfrmInto = (
+  doc: Document,
+  seed: Element,
+  ns: string,
+  qname: string,
+): Element => {
+  const x = doc.createElementNS(ns, qname);
+  for (const name of ['rot', 'flipH', 'flipV'] as const) {
+    const value = seed.getAttribute(name);
+    if (value != null) x.setAttribute(name, value);
+  }
+  for (const [local, q] of [
+    ['off', 'a:off'],
+    ['ext', 'a:ext'],
+    ['chOff', 'a:chOff'],
+    ['chExt', 'a:chExt'],
+  ] as const) {
+    const src = directChild(seed, local) ?? first(seed, local);
+    if (!src) continue;
+    const child = doc.createElementNS(NS.a, q);
+    for (const name of ['x', 'y', 'cx', 'cy'] as const) {
+      const value = src.getAttribute(name);
+      if (value != null) child.setAttribute(name, value);
+    }
+    x.appendChild(child);
+  }
+  return x;
+};
+
+const ensureSpPrForTransform = (node: Element): Element => {
+  const existing = directChild(node, 'spPr');
+  if (existing) return existing;
   const doc = node.ownerDocument;
   if (!doc) throw new Error('Element has no document');
-  let off = first(x, 'off');
-  if (!off) {
-    off = doc.createElementNS(x.namespaceURI, 'a:off');
-    x.appendChild(off);
+  const prefix = node.prefix ? `${node.prefix}:` : 'p:';
+  const spPr = doc.createElementNS(NS.p, `${prefix}spPr`);
+  const after = children(node).find((child) => child.localName?.startsWith('nv'));
+  if (after?.nextSibling) node.insertBefore(spPr, after.nextSibling);
+  else if (after) node.appendChild(spPr);
+  else if (node.firstChild) node.insertBefore(spPr, node.firstChild);
+  else node.appendChild(spPr);
+  return spPr;
+};
+
+const ensureGrpSpPr = (node: Element): Element => {
+  const existing = directChild(node, 'grpSpPr');
+  if (existing) return existing;
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const prefix = node.prefix ? `${node.prefix}:` : 'p:';
+  const grpSpPr = doc.createElementNS(NS.p, `${prefix}grpSpPr`);
+  const after = children(node).find((child) => child.localName?.startsWith('nv'));
+  if (after?.nextSibling) node.insertBefore(grpSpPr, after.nextSibling);
+  else if (after) node.appendChild(grpSpPr);
+  else if (node.firstChild) node.insertBefore(grpSpPr, node.firstChild);
+  else node.appendChild(grpSpPr);
+  return grpSpPr;
+};
+
+const ensureXfrm = (
+  node: Element,
+  archive?: OpcArchive,
+  partUri?: string,
+): Element => {
+  const existing = (() => {
+    if (node.localName === 'graphicFrame') return directChild(node, 'xfrm');
+    if (node.localName === 'grpSp') {
+      const grpSpPr = directChild(node, 'grpSpPr');
+      return grpSpPr ? directChild(grpSpPr, 'xfrm') : undefined;
+    }
+    const spPr = directChild(node, 'spPr');
+    return spPr ? directChild(spPr, 'xfrm') : undefined;
+  })();
+  if (existing) return existing;
+
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const seed =
+    archive && partUri ? inheritedXfrm(archive, partUri, node) : undefined;
+  const usePresentationXfrm = node.localName === 'graphicFrame';
+  const ns = usePresentationXfrm ? NS.p : NS.a;
+  const qname = usePresentationXfrm ? 'p:xfrm' : 'a:xfrm';
+  const x = seed ? copyXfrmInto(doc, seed, ns, qname) : doc.createElementNS(ns, qname);
+
+  if (node.localName === 'graphicFrame') {
+    const after = children(node).find((child) => child.localName?.startsWith('nv'));
+    if (after?.nextSibling) node.insertBefore(x, after.nextSibling);
+    else if (after) node.appendChild(x);
+    else if (node.firstChild) node.insertBefore(x, node.firstChild);
+    else node.appendChild(x);
+    return x;
   }
-  let ext = first(x, 'ext');
-  if (!ext) {
-    ext = doc.createElementNS(x.namespaceURI, 'a:ext');
-    x.appendChild(ext);
+
+  const container =
+    node.localName === 'grpSp' ? ensureGrpSpPr(node) : ensureSpPrForTransform(node);
+  if (container.firstChild) container.insertBefore(x, container.firstChild);
+  else container.appendChild(x);
+  return x;
+};
+
+const ensureChild = (
+  parent: Element,
+  localName: string,
+  qname: string,
+  beforeLocalNames: readonly string[],
+): Element => {
+  const existing = directChild(parent, localName);
+  if (existing) return existing;
+  const doc = parent.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const child = doc.createElementNS(NS.a, qname);
+  const before = children(parent).find(
+    (item) => item.localName != null && beforeLocalNames.includes(item.localName),
+  );
+  if (before) parent.insertBefore(child, before);
+  else parent.appendChild(child);
+  return child;
+};
+
+const transform = (
+  node: Element,
+  t: Record<string, unknown>,
+  opts?: { archive?: OpcArchive; partUri?: string },
+): void => {
+  const x = ensureXfrm(node, opts?.archive, opts?.partUri);
+  const needsOff = typeof t['x'] === 'number' || typeof t['y'] === 'number';
+  const needsExt = typeof t['width'] === 'number' || typeof t['height'] === 'number';
+  const off = needsOff
+    ? ensureChild(x, 'off', 'a:off', ['ext', 'chOff', 'chExt'])
+    : (directChild(x, 'off') ?? first(x, 'off'));
+  const ext = needsExt
+    ? ensureChild(x, 'ext', 'a:ext', ['chOff', 'chExt'])
+    : (directChild(x, 'ext') ?? first(x, 'ext'));
+  if (needsOff && off) {
+    if (typeof t['x'] === 'number') off.setAttribute('x', String(Math.round(t['x'])));
+    else if (!off.hasAttribute('x')) off.setAttribute('x', '0');
+    if (typeof t['y'] === 'number') off.setAttribute('y', String(Math.round(t['y'])));
+    else if (!off.hasAttribute('y')) off.setAttribute('y', '0');
   }
-  for (const [element, key, input, scale] of [
-    [off, 'x', 'x', 1],
-    [off, 'y', 'y', 1],
-    [ext, 'cx', 'width', 1],
-    [ext, 'cy', 'height', 1],
-    [x, 'rot', 'rotation', 60000],
-  ] as const)
-    if (typeof t[input] === 'number')
-      element.setAttribute(key, String(Math.round(t[input] * scale)));
+  if (needsExt && ext) {
+    if (typeof t['width'] === 'number')
+      ext.setAttribute('cx', String(Math.round(t['width'])));
+    else if (!ext.hasAttribute('cx')) ext.setAttribute('cx', '0');
+    if (typeof t['height'] === 'number')
+      ext.setAttribute('cy', String(Math.round(t['height'])));
+    else if (!ext.hasAttribute('cy')) ext.setAttribute('cy', '0');
+  }
+  if (typeof t['rotation'] === 'number')
+    x.setAttribute('rot', String(Math.round(t['rotation'] * 60000)));
   if (typeof t['flipHorizontal'] === 'boolean' || typeof t['flipX'] === 'boolean') {
     const flip = Boolean(t['flipHorizontal'] ?? t['flipX']);
     if (flip) x.setAttribute('flipH', '1');
@@ -576,17 +755,22 @@ export async function mutate(
           message: 'Chart cache changed; embedded workbook was not modified',
         });
     } else setNodeText(node, text);
-  } else if (command.type === 'setTransform') transform(node, command.transform);
+  } else if (command.type === 'setTransform')
+    transform(node, command.transform, { archive, partUri: liveItem.partUri });
   else if (command.type === 'xfrmSet') {
-    transform(node, {
-      ...(command.x !== undefined ? { x: command.x } : {}),
-      ...(command.y !== undefined ? { y: command.y } : {}),
-      ...(command.width !== undefined ? { width: command.width } : {}),
-      ...(command.height !== undefined ? { height: command.height } : {}),
-      ...(command.rotation !== undefined ? { rotation: command.rotation } : {}),
-      ...(command.flipX !== undefined ? { flipX: command.flipX } : {}),
-      ...(command.flipY !== undefined ? { flipY: command.flipY } : {}),
-    });
+    transform(
+      node,
+      {
+        ...(command.x !== undefined ? { x: command.x } : {}),
+        ...(command.y !== undefined ? { y: command.y } : {}),
+        ...(command.width !== undefined ? { width: command.width } : {}),
+        ...(command.height !== undefined ? { height: command.height } : {}),
+        ...(command.rotation !== undefined ? { rotation: command.rotation } : {}),
+        ...(command.flipX !== undefined ? { flipX: command.flipX } : {}),
+        ...(command.flipY !== undefined ? { flipY: command.flipY } : {}),
+      },
+      { archive, partUri: liveItem.partUri },
+    );
   } else if (command.type === 'set' || command.type === 'setProperties') {
     if (command.type === 'set' && command.scope && command.scope !== 'local')
       return err(

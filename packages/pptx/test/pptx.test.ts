@@ -1281,4 +1281,83 @@ describe('pptx adapter', () => {
       '<p:ph type="body"/>',
     );
   });
+
+  it('creates local xfrm on placeholder that inherits layout transform', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-xfrm-ph-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const a = new OpcArchive();
+    a.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      e.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+      ),
+      CT,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    a.setRelationships('/ppt/slides/slide1.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+        target: '../slideLayouts/slideLayout1.xml',
+        external: false,
+      },
+    ]);
+    a.setPart(
+      '/ppt/slideLayouts/slideLayout1.xml',
+      e.encode(
+        `<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="1524000" y="1122363"/><a:ext cx="9144000" cy="2387600"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp></p:spTree></p:cSld></p:sldLayout>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const revision = (init.value as { revision: string }).revision;
+
+    const rotated = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'xfrmSet',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        rotation: 0,
+      },
+      {},
+    );
+    expect(rotated, JSON.stringify(rotated)).toMatchObject({ ok: true });
+    const slideXml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(slideXml).toContain('rot="0"');
+    expect(slideXml).toContain('x="1524000"');
+    expect(slideXml).toContain('y="1122363"');
+    expect(slideXml).toContain('cx="9144000"');
+    expect(slideXml).toContain('cy="2387600"');
+  });
 });

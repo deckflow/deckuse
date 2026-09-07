@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 /**
- * Integration harness: run every Deckuse write path against each .pptx in a directory.
+ * Integration harness: run every Deckuse write path against .pptx file(s).
  *
  * Usage:
- *   node scripts/integration-writes.mjs <dir>
- *   pnpm test:integration-writes -- <dir>
+ *   node scripts/integration-writes.mjs <dir>          # every .pptx under dir
+ *   node scripts/integration-writes.mjs <file.pptx>    # single file (debug loop)
+ *   pnpm test:integration-writes -- <dir|file.pptx>
  *
- * For each `foo.pptx`, workspace is `<dir>/foo/` (same basename, next to the file).
+ * For each `foo.pptx`, workspace is beside it as `foo/` (same basename).
  * Addressing is discovered per file via `list` / `query`, then the same write sequence
  * template is specialized with those targets.
  *
  * Options:
  *   --bin <path>           deckuse entry (default: packages/deckuse/dist/bin.js)
- *   --recursive            scan subdirectories for .pptx
+ *   --recursive            scan subdirectories for .pptx (dir mode only)
  *   --force                remove existing workspace before init
  *   --continue-on-error    keep going after a failed step / file
- *   --limit <n>            process at most n presentations
+ *   --limit <n>            process at most n presentations (dir mode only)
  *   --skip-export          omit final export
  *   --help
  */
@@ -48,17 +49,20 @@ const PIXEL_PNG_2 = Buffer.from(
 const PREFIX = 'IT';
 
 const usage = () => {
-  process.stdout.write(`usage: node scripts/integration-writes.mjs <dir> [options]
+  process.stdout.write(`usage: node scripts/integration-writes.mjs <dir|file.pptx> [options]
 
-Run the full Deckuse write-operation sequence on every .pptx under <dir>.
+Run the full Deckuse write-operation sequence on:
+  <dir>         every .pptx under the directory
+  <file.pptx>   a single presentation (handy for re-debugging one case)
+
 Workspace for each file is created beside it as <basename>/ (e.g. demo.pptx → demo/).
 
 Options:
   --bin <path>            deckuse bin.js (default: packages/deckuse/dist/bin.js)
-  --recursive             include .pptx in subdirectories
+  --recursive             include .pptx in subdirectories (dir mode)
   --force                 delete existing workspace before init
   --continue-on-error     do not stop on first failure
-  --limit <n>             max presentations to process
+  --limit <n>             max presentations to process (dir mode)
   --skip-export           skip final export step
   --help                  show this help
 `);
@@ -89,15 +93,15 @@ const parseArgs = (argv) => {
   const skipExport = takeFlag(args, '--skip-export');
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
-  const dir = args[0];
-  if (!dir || args.length > 1) {
-    return { error: 'Usage: node scripts/integration-writes.mjs <dir> [options]' };
+  const input = args[0];
+  if (!input || args.length > 1) {
+    return { error: 'Usage: node scripts/integration-writes.mjs <dir|file.pptx> [options]' };
   }
   if (limitRaw !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     return { error: '--limit must be a positive integer' };
   }
   return {
-    dir: resolve(dir),
+    input: resolve(input),
     bin: resolve(bin),
     recursive,
     force,
@@ -1079,24 +1083,50 @@ const main = async () => {
     return;
   }
 
-  const st = await stat(options.dir).catch(() => null);
-  if (!st?.isDirectory()) {
-    process.stderr.write(`Not a directory: ${options.dir}\n`);
+  const st = await stat(options.input).catch(() => null);
+  if (!st) {
+    process.stderr.write(`Path not found: ${options.input}\n`);
     process.exitCode = 2;
     return;
   }
 
-  let files = await collectPptx(options.dir, options.recursive);
-  if (options.limit !== undefined) files = files.slice(0, options.limit);
-  if (files.length === 0) {
-    process.stderr.write(`No .pptx files found under ${options.dir}\n`);
-    process.exitCode = 1;
+  /** @type {string[]} */
+  let files;
+  /** Directory used for the batch summary file (parent of a single .pptx, or the scan root). */
+  let summaryDir;
+  if (st.isFile()) {
+    if (!isPptx(basename(options.input))) {
+      process.stderr.write(`Not a .pptx file: ${options.input}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    if (await isInsideWorkspace(options.input)) {
+      process.stderr.write(
+        `Refusing to run on a package inside an existing workspace: ${options.input}\n`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+    files = [options.input];
+    summaryDir = dirname(options.input);
+    process.stdout.write(`integration-writes: single file ${options.input}\n`);
+  } else if (st.isDirectory()) {
+    files = await collectPptx(options.input, options.recursive);
+    if (options.limit !== undefined) files = files.slice(0, options.limit);
+    if (files.length === 0) {
+      process.stderr.write(`No .pptx files found under ${options.input}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    summaryDir = options.input;
+    process.stdout.write(
+      `integration-writes: ${String(files.length)} file(s) under ${options.input}\n`,
+    );
+  } else {
+    process.stderr.write(`Not a file or directory: ${options.input}\n`);
+    process.exitCode = 2;
     return;
   }
-
-  process.stdout.write(
-    `integration-writes: ${String(files.length)} file(s) under ${options.dir}\n`,
-  );
 
   /** @type {Awaited<ReturnType<typeof processOne>>[]} */
   const reports = [];
@@ -1119,10 +1149,10 @@ const main = async () => {
     }
   }
 
-  const summaryPath = join(options.dir, 'integration-writes-summary.json');
+  const summaryPath = join(summaryDir, 'integration-writes-summary.json');
   const summary = {
     ok: reports.every((r) => r.ok),
-    dir: options.dir,
+    input: options.input,
     total: reports.length,
     passed: reports.filter((r) => r.ok).length,
     failed: reports.filter((r) => !r.ok).length,
