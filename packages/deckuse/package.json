@@ -29,7 +29,7 @@
     "@deckflow/deckuse-pptx": "workspace:*",
     "@deckflow/deckuse-workspace": "workspace:*",
     "@deckflow/deckuse-xlsx": "workspace:*",
-    "@deckflow/office2html": "^0.2.1",
+    "@deckflow/office2html": "^0.3.0",
     "playwright-core": "^1.62.1"
   },
   "engines": {

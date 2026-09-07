@@ -67,8 +67,8 @@ importers:
         specifier: workspace:*
         version: link:../xlsx
       '@deckflow/office2html':
-        specifier: ^0.2.1
-        version: 0.2.1
+        specifier: ^0.3.0
+        version: 0.3.0
       playwright-core:
         specifier: ^1.62.1
         version: 1.62.1
@@ -209,28 +209,28 @@ packages:
     resolution: {directory: packages/opc, type: directory}
     engines: {node: '>=18.0.0'}
 
-  '@deckflow/office2html-darwin-arm64@0.2.1':
-    resolution: {integrity: sha512-tg1ipuCRpbnuiaAScsmJUg6bggzHxaG/tBOlad/9ShtqvhGgLnahQ88HfokB7p6YfJu9gpRX0e3S0zQpaENplg==}
+  '@deckflow/office2html-darwin-arm64@0.3.0':
+    resolution: {integrity: sha512-4SegNMGHR+K3UlmozDBPU0KOPzUiLeSmT3kaKXrYR3U9Jq5JRW2o4Hjh5gHNuJeb6bRsUk7byWU2goeTTBEZ1Q==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-darwin-arm64/0.3.0/9f000868a1e64a38f6169e0c1388078e1258be86}
     cpu: [arm64]
     os: [darwin]
 
-  '@deckflow/office2html-darwin-x64@0.2.1':
-    resolution: {integrity: sha512-vIdUdq+/qXGIel5FROa5M/JTSjaGuo+9xTuMRzBJNIuuEOd2P6j8BsKVXcd9JgKO+z+a5Hzo4gxOGX0jplcD/g==}
+  '@deckflow/office2html-darwin-x64@0.3.0':
+    resolution: {integrity: sha512-knxyZweyW/EKar/bPnennL0S/4dATHzpdMx+XADDZgkzJuYStl8YFygVZcgkPtOVPQGiO5/rsdPgHK279bk1Zw==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-darwin-x64/0.3.0/ac23f57be6319dad6eea1f44ae26d629688446ae}
     cpu: [x64]
     os: [darwin]
 
-  '@deckflow/office2html-linux-x64@0.2.1':
-    resolution: {integrity: sha512-KYuQxaqYakQVtfUYLixPKUhGDiVYIxaonjmYw6fKpUycq4Sp44KxSAvp5Kt4eXH1nVy9oqoJ+dB4lP+lmw3UaQ==}
+  '@deckflow/office2html-linux-x64@0.3.0':
+    resolution: {integrity: sha512-uYeBHb5I3vSJ1D3qJtYiFHBSuMZwpJZYFKnWS+Rur6h4p/WPFtF6SPpbmsqJzm+EkaNGmcm78z4GpDFQm439lQ==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-linux-x64/0.3.0/c14a960911e47edf9ec3c4761e262192000fa2c2}
     cpu: [x64]
     os: [linux]
 
-  '@deckflow/office2html-win32-x64@0.2.1':
-    resolution: {integrity: sha512-zjEUqN4ueRKP494K0iEDzV38ZdciYJZimCn7fpf0DBvsJP0i2jeIa1q2TPSCsKIeX6pjEdbcvlhAkrM13I97GA==}
+  '@deckflow/office2html-win32-x64@0.3.0':
+    resolution: {integrity: sha512-InrePU+FoXp0A9G2CS1MFjRIQn9hiTJKgf09+OTfpYkynvJMOCski6rw3B+Fo4HwN7GsBJL8T/6QO/Zv7yi1fg==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-win32-x64/0.3.0/12d77ce6ba5f4e55dbcb8cef695cfa814339e54a}
     cpu: [x64]
     os: [win32]
 
-  '@deckflow/office2html@0.2.1':
-    resolution: {integrity: sha512-jMYzTIpmuzs7rf46ACx1Ew4AoqP3bYuEF5oLuUjRHz6HGrAH+YGzb7ZfMERUbDJpVEOYrCSuU/rR6IUGqTg9pA==}
+  '@deckflow/office2html@0.3.0':
+    resolution: {integrity: sha512-kyRAbG71+OH9oRSFWwP+B4SAfb1ZDuRCx/w31t0YD8qnMe+/kE4XC8yj1sbwGMViNLSPK12l1SlY65C4rxkPKA==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html/0.3.0/3d5a37db079a9b3a67e36474cd7741e52ca3b3a9}
     hasBin: true
 
   '@eslint-community/eslint-utils@4.10.1':
@@ -1396,24 +1396,24 @@ snapshots:
       '@xmldom/xmldom': 0.9.12
       '@zip.js/zip.js': 2.8.34
 
-  '@deckflow/office2html-darwin-arm64@0.2.1':
+  '@deckflow/office2html-darwin-arm64@0.3.0':
     optional: true
 
-  '@deckflow/office2html-darwin-x64@0.2.1':
+  '@deckflow/office2html-darwin-x64@0.3.0':
     optional: true
 
-  '@deckflow/office2html-linux-x64@0.2.1':
+  '@deckflow/office2html-linux-x64@0.3.0':
     optional: true
 
-  '@deckflow/office2html-win32-x64@0.2.1':
+  '@deckflow/office2html-win32-x64@0.3.0':
     optional: true
 
-  '@deckflow/office2html@0.2.1':
+  '@deckflow/office2html@0.3.0':
     optionalDependencies:
-      '@deckflow/office2html-darwin-arm64': 0.2.1
-      '@deckflow/office2html-darwin-x64': 0.2.1
-      '@deckflow/office2html-linux-x64': 0.2.1
-      '@deckflow/office2html-win32-x64': 0.2.1
+      '@deckflow/office2html-darwin-arm64': 0.3.0
+      '@deckflow/office2html-darwin-x64': 0.3.0
+      '@deckflow/office2html-linux-x64': 0.3.0
+      '@deckflow/office2html-win32-x64': 0.3.0
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.9.1)':
     dependencies:
@@ -2260,7 +2260,7 @@ snapshots:
   vite@8.2.0(@types/node@26.4.1)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
-      picomatch: 4.0.5
+      picomatch: 4.0.7
       postcss: 8.5.25
       rolldown: 1.2.3
       tinyglobby: 0.2.17
