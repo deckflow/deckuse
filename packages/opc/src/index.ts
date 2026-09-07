@@ -57,8 +57,31 @@ export const parseXml = (input: string | Uint8Array): XmlDocument => {
   if (!document.documentElement) throw new Error('Invalid XML: missing document element');
   return document as XmlDocument;
 };
-const isXmlPart = (part: OpcPart): boolean =>
-  part.mediaType.includes('xml') || part.name.endsWith('.xml') || part.name.endsWith('.rels');
+/**
+ * True for OPC parts that are XML text and safe to pretty-print.
+ *
+ * IMPORTANT: do not use `mediaType.includes('xml')` — every
+ * `application/vnd.openxmlformats-...` type contains that substring, including
+ * binary containers like `.xlsx` embeddings (`spreadsheetml.sheet`). Pretty-
+ * printing those corrupts the ZIP and makes PowerPoint demand a repair.
+ */
+const isXmlPart = (part: OpcPart): boolean => {
+  const name = part.name.toLowerCase();
+  if (name.endsWith('.xml') || name.endsWith('.rels')) return true;
+  // Nested Office packages and other binaries under embeddings/media.
+  if (
+    name.endsWith('.xlsx') ||
+    name.endsWith('.xlsm') ||
+    name.endsWith('.docx') ||
+    name.endsWith('.pptx') ||
+    name.endsWith('.bin') ||
+    name.includes('/embeddings/') ||
+    name.includes('/media/')
+  )
+    return false;
+  const mt = part.mediaType.toLowerCase();
+  return mt === 'application/xml' || mt === 'text/xml' || mt.endsWith('+xml');
+};
 
 /**
  * Pretty-print XML for readable git diffs without changing the infoset.

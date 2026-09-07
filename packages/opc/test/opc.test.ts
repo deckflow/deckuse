@@ -164,4 +164,40 @@ describe('OPC archive', () => {
     expect(ct).toContain('Extension="rels"');
     expect(ct).not.toContain('PartName="/ppt/_rels/presentation.xml.rels"');
   });
+
+  it('does not pretty-print binary xlsx embeddings as XML', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'opc-embed-'));
+    const archive = new OpcArchive();
+    archive.contentTypes.defaults.set('xml', 'application/xml');
+    archive.contentTypes.defaults.set(
+      'xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    // Minimal ZIP (local file + EOCD) — must survive writeDirectory byte-for-byte.
+    const xlsx = Uint8Array.from([
+      0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x4b,
+      0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    archive.setPart(
+      '/ppt/embeddings/book.xlsx',
+      xlsx,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    // Also ensure +xml chart parts still format.
+    archive.setPart(
+      '/ppt/charts/chart1.xml',
+      enc.encode(
+        '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart/></c:chartSpace>',
+      ),
+      'application/vnd.openxmlformats-officedocument.drawingml.chart+xml',
+    );
+    const dir = join(root, 'source');
+    await archive.writeDirectory(dir);
+    const written = await readFile(join(dir, 'ppt/embeddings/book.xlsx'));
+    expect(Buffer.from(written)).toEqual(Buffer.from(xlsx));
+    const chart = await readFile(join(dir, 'ppt/charts/chart1.xml'), 'utf8');
+    expect(chart).toContain('\n');
+  });
 });
