@@ -47,6 +47,14 @@ const CHART_KEYS = new Set([
 
 const EMU_PER_PT = 12700;
 const DEFAULT_STROKE_PT = 1;
+const MAX_LINE_WIDTH_EMU = 20116800; // ST_LineWidth maxInclusive
+const MAX_LINE_WIDTH_PT = MAX_LINE_WIDTH_EMU / EMU_PER_PT;
+
+/** Convert line.width to EMU. Values above max pt are treated as already-EMU. */
+const lineWidthToEmu = (width: number): number => {
+  const emu = width > MAX_LINE_WIDTH_PT ? Math.round(width) : Math.round(width * EMU_PER_PT);
+  return Math.min(MAX_LINE_WIDTH_EMU, Math.max(1, emu));
+};
 
 const normalizeColor = (value: string): string => {
   const hex = value.trim().replace(/^#/, '').toUpperCase();
@@ -181,7 +189,7 @@ const setStroke = (spPr: Element, value: unknown): void => {
   } else throw new Error('Unsupported stroke value');
 
   const ln = doc.createElementNS(NS.a, 'a:ln');
-  ln.setAttribute('w', String(Math.round(widthPt * EMU_PER_PT)));
+  ln.setAttribute('w', String(lineWidthToEmu(widthPt)));
   ln.appendChild(solidFillXml(doc, color));
   if (dash) {
     const prstDash = doc.createElementNS(NS.a, 'a:prstDash');

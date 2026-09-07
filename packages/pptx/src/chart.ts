@@ -99,13 +99,15 @@ const plotXml = (chartType: ChartType, series: ChartSeriesInput[], categories: s
     return `<c:lineChart><c:grouping val="standard"/>${ser}<c:marker val="1"/><c:axId val="1"/><c:axId val="2"/></c:lineChart>`;
   }
   const barDir = chartType === 'bar' ? 'bar' : 'col';
+  // CT_BarChart order: barDir, grouping, varyColors?, ser*, dLbls?, gapWidth, overlap, serLines?, axId*
   // gapWidth 100 ≈ clearer clustered grouping than OOXML default 150.
-  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/><c:gapWidth val="100"/>${ser}<c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
+  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${ser}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
 };
 
 const axesXml = (chartType: ChartType) => {
   if (chartType === 'pie') return '';
-  return `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/><c:tickLblPos val="nextTo"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:crossAx val="1"/><c:tickLblPos val="nextTo"/></c:valAx>`;
+  // CT_CatAx / CT_ValAx: tickLblPos before spPr/txPr/crossAx (not after crossAx).
+  return `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/><c:crossAx val="1"/></c:valAx>`;
 };
 
 const titleXml = (title?: string) => {
@@ -225,9 +227,22 @@ export function applyChartTextColor(chartDoc: Document, colorInput: string): voi
     for (const node of descendants(chartDoc, local)) {
       const existing = directChild(node, 'txPr');
       if (existing) existing.parentNode?.removeChild(existing);
+      // Repair tickLblPos placed after crossAx (invalid CT_CatAx / CT_ValAx order).
+      const tickLblPos = directChild(node, 'tickLblPos');
+      const crossAxExisting = directChild(node, 'crossAx');
+      if (tickLblPos && crossAxExisting) {
+        const kids = children(node);
+        if (kids.indexOf(tickLblPos) > kids.indexOf(crossAxExisting)) {
+          node.removeChild(tickLblPos);
+          node.insertBefore(tickLblPos, crossAxExisting);
+        }
+      }
       const txPr = buildTxPr(doc, color);
-      // Place txPr near the end of axis/legend (after tickLblPos / overlay when present).
-      node.appendChild(txPr);
+      // CT_CatAx/CT_ValAx: txPr sits after tickLblPos/spPr and before crossAx.
+      // CT_Legend: txPr is last before extLst — append is fine.
+      const crossAx = directChild(node, 'crossAx');
+      if (crossAx) node.insertBefore(txPr, crossAx);
+      else node.appendChild(txPr);
     }
   }
 }
@@ -237,8 +252,29 @@ export function applyChartGapWidth(chartDoc: Document, gapWidth: number): void {
     throw new Error(`gapWidth must be a non-negative number, got ${String(gapWidth)}`);
   const val = String(Math.round(gapWidth));
   for (const plot of [...descendants(chartDoc, 'barChart'), ...descendants(chartDoc, 'lineChart')]) {
-    const gap = ensureChild(plot, 'gapWidth', NS.c, 'c:gapWidth', ['barDir', 'grouping']);
+    // After ser* / dLbls so gapWidth stays ahead of overlap / axId.
+    const gap = ensureChild(plot, 'gapWidth', NS.c, 'c:gapWidth', [
+      'barDir',
+      'grouping',
+      'varyColors',
+      'ser',
+      'dLbls',
+    ]);
     gap.setAttribute('val', val);
+    // Repair charts that still have gapWidth before ser (invalid CT_BarChart order).
+    const kids = children(plot);
+    const gapIndex = kids.indexOf(gap);
+    let lastSerOrDlbls = -1;
+    for (let i = 0; i < kids.length; i++) {
+      const name = kids[i]?.localName;
+      if (name === 'ser' || name === 'dLbls') lastSerOrDlbls = i;
+    }
+    if (lastSerOrDlbls >= 0 && gapIndex >= 0 && gapIndex < lastSerOrDlbls) {
+      const anchor = kids[lastSerOrDlbls]!;
+      plot.removeChild(gap);
+      if (anchor.nextSibling) plot.insertBefore(gap, anchor.nextSibling);
+      else plot.appendChild(gap);
+    }
   }
 }
 

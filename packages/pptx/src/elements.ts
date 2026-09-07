@@ -54,7 +54,10 @@ const tableXml = (id: number, e: Record<string, unknown>) => {
     const fill = header ? '1B4F72' : 'FFFFFF';
     const color = header ? 'FFFFFF' : '1A1A1A';
     const bold = header ? ' b="1"' : '';
-    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="${fill}"/></a:solidFill><a:ln w="6350"><a:solidFill><a:srgbClr val="D0D0D0"/></a:solidFill></a:ln></a:tcPr></a:tc>`;
+    // tcPr child order per OOXML: lnL/lnR/lnT/lnB … then EG_FillProperties (not a generic a:ln).
+    const border = (side: string) =>
+      `<a:${side} w="6350"><a:solidFill><a:srgbClr val="D0D0D0"/></a:solidFill></a:${side}>`;
+    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr>${border('lnL')}${border('lnR')}${border('lnT')}${border('lnB')}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
   };
   return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(e)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${rows.map((row, rowIndex) => `<a:tr h="370840">${Array.from({ length: cols }, (_, i) => cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0)).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };

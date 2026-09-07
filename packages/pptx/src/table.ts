@@ -11,9 +11,53 @@ const DEFAULT_ROW_H = '370840';
 const DEFAULT_COL_W = '914400';
 const EMU_PER_PT = 12700;
 const DEFAULT_STROKE_PT = 1;
+const MAX_LINE_WIDTH_EMU = 20116800; // ST_LineWidth maxInclusive
+const MAX_LINE_WIDTH_PT = MAX_LINE_WIDTH_EMU / EMU_PER_PT;
+
+/** Convert line.width to EMU. Values above max pt are treated as already-EMU. */
+const lineWidthToEmu = (width: number): number => {
+  const emu = width > MAX_LINE_WIDTH_PT ? Math.round(width) : Math.round(width * EMU_PER_PT);
+  return Math.min(MAX_LINE_WIDTH_EMU, Math.max(1, emu));
+};
 const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
 const TABLE_CELL_BORDER_SIDES = ['lnL', 'lnR', 'lnT', 'lnB'] as const;
+const TABLE_CELL_BORDER_LOCAL = new Set<string>([
+  ...TABLE_CELL_BORDER_SIDES,
+  'lnTlToBr',
+  'lnBlToTr',
+  'cell3D',
+]);
+const TABLE_CELL_FILL_LOCAL = new Set([
+  'noFill',
+  'solidFill',
+  'gradFill',
+  'blipFill',
+  'pattFill',
+  'grpFill',
+]);
 const SHAPE_KEY_SET = new Set(shapePropertyKeys);
+
+/** Insert fill after border sides (OOXML CT_TableCellProperties order). */
+const insertTcPrFill = (tcPr: Element, fill: Element): void => {
+  const kids = children(tcPr);
+  let lastBorder: Element | undefined;
+  for (const child of kids)
+    if (child.localName && TABLE_CELL_BORDER_LOCAL.has(child.localName)) lastBorder = child;
+  if (lastBorder?.nextSibling) tcPr.insertBefore(fill, lastBorder.nextSibling);
+  else if (lastBorder) tcPr.appendChild(fill);
+  else if (tcPr.firstChild) tcPr.insertBefore(fill, tcPr.firstChild);
+  else tcPr.appendChild(fill);
+};
+
+/** Insert a border side before fill / margins (OOXML CT_TableCellProperties order). */
+const insertTcPrBorder = (tcPr: Element, ln: Element): void => {
+  const kids = children(tcPr);
+  const fillOrLater = kids.find(
+    (child) => child.localName && !TABLE_CELL_BORDER_LOCAL.has(child.localName),
+  );
+  if (fillOrLater) tcPr.insertBefore(ln, fillOrLater);
+  else tcPr.appendChild(ln);
+};
 
 const directChildren = (node: Element, localName: string): Element[] =>
   children(node).filter((c) => c.localName === localName);
@@ -164,15 +208,10 @@ export function setTableCellFill(cell: Element, value: unknown): void {
     cell.appendChild(tcPr);
   }
   for (const child of [...children(tcPr)])
-    if (
-      child.localName &&
-      ['noFill', 'solidFill', 'gradFill', 'blipFill', 'pattFill', 'grpFill'].includes(child.localName)
-    )
-      tcPr.removeChild(child);
+    if (child.localName && TABLE_CELL_FILL_LOCAL.has(child.localName)) tcPr.removeChild(child);
 
   if (isNone(value)) {
-    if (tcPr.firstChild) tcPr.insertBefore(doc.createElementNS(NS.a, 'a:noFill'), tcPr.firstChild);
-    else tcPr.appendChild(doc.createElementNS(NS.a, 'a:noFill'));
+    insertTcPrFill(tcPr, doc.createElementNS(NS.a, 'a:noFill'));
     return;
   }
   let color: string;
@@ -187,8 +226,7 @@ export function setTableCellFill(cell: Element, value: unknown): void {
   const srgb = doc.createElementNS(NS.a, 'a:srgbClr');
   srgb.setAttribute('val', color);
   solidFill.appendChild(srgb);
-  if (tcPr.firstChild) tcPr.insertBefore(solidFill, tcPr.firstChild);
-  else tcPr.appendChild(solidFill);
+  insertTcPrFill(tcPr, solidFill);
 }
 
 const ensureTcPr = (cell: Element): Element => {
@@ -217,7 +255,7 @@ const setTableCellBorders = (cell: Element, value: unknown): void => {
     for (const side of TABLE_CELL_BORDER_SIDES) {
       const ln = doc.createElementNS(NS.a, `a:${side}`);
       ln.appendChild(doc.createElementNS(NS.a, 'a:noFill'));
-      tcPr.appendChild(ln);
+      insertTcPrBorder(tcPr, ln);
     }
     return;
   }
@@ -237,7 +275,7 @@ const setTableCellBorders = (cell: Element, value: unknown): void => {
     else if (record['dash'] !== undefined) throw new Error('stroke.dash must be a string');
   } else throw new Error('Unsupported stroke value');
 
-  const widthEmu = String(Math.round(widthPt * EMU_PER_PT));
+  const widthEmu = String(lineWidthToEmu(widthPt));
   for (const side of TABLE_CELL_BORDER_SIDES) {
     const ln = doc.createElementNS(NS.a, `a:${side}`);
     ln.setAttribute('w', widthEmu);
@@ -251,7 +289,7 @@ const setTableCellBorders = (cell: Element, value: unknown): void => {
       prstDash.setAttribute('val', dash);
       ln.appendChild(prstDash);
     }
-    tcPr.appendChild(ln);
+    insertTcPrBorder(tcPr, ln);
   }
 };
 

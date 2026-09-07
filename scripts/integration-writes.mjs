@@ -798,7 +798,7 @@ const runWriteSequence = async (runner, media, opts = {}) => {
       '--line.color',
       '#4472C4',
       '--line.width',
-      '12700',
+      '1',
       '--paragraph.align',
       'ctr',
       '--hyperlink',
