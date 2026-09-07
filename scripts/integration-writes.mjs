@@ -18,6 +18,8 @@
  *   --continue-on-error    keep going after a failed step / file
  *   --limit <n>            process at most n presentations (dir mode only)
  *   --skip-export          omit final export
+ *   --batch                merge consecutive writes into `apply` batch payloads;
+ *                          skips undo/redo and other non-batchable steps
  *   --help
  */
 
@@ -64,6 +66,7 @@ Options:
   --continue-on-error     do not stop on first failure
   --limit <n>             max presentations to process (dir mode)
   --skip-export           skip final export step
+  --batch                 merge writes into apply batches (skip undo/redo/…)
   --help                  show this help
 `);
 };
@@ -91,6 +94,7 @@ const parseArgs = (argv) => {
   const force = takeFlag(args, '--force');
   const continueOnError = takeFlag(args, '--continue-on-error');
   const skipExport = takeFlag(args, '--skip-export');
+  const batch = takeFlag(args, '--batch');
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
   const input = args[0];
@@ -107,6 +111,7 @@ const parseArgs = (argv) => {
     force,
     continueOnError,
     skipExport,
+    batch,
     limit,
   };
 };
@@ -139,18 +144,257 @@ const parseEnvelope = (stdout) => {
   return JSON.parse(line);
 };
 
-/** @typedef {{ name: string; ok: boolean; skipped?: boolean; reason?: string; command?: string; revision?: number; error?: string; ms: number }} StepResult */
+/** @typedef {{ name: string; ok: boolean; skipped?: boolean; reason?: string; command?: string; revision?: number; error?: string; ms: number; batched?: string[] }} StepResult */
+
+/** Steps that cannot participate in an `apply` batch. */
+const BATCH_SKIP_ACTIONS = new Set(['undo', 'redo']);
+
+const optionFromArgs = (list, name) => {
+  const i = list.indexOf(name);
+  return i >= 0 ? list[i + 1] : undefined;
+};
+
+/** Mirror of packages/deckuse/src/bin.ts parseProps (for CLI → command conversion). */
+const parseCliProps = (list) => {
+  /** @type {Record<string, unknown>} */
+  const props = {};
+  for (let i = 0; i < list.length; ) {
+    const token = list[i];
+    if (!token?.startsWith('--')) {
+      i += 1;
+      continue;
+    }
+    const key = token.slice(2);
+    const next = list[i + 1];
+    if (next === undefined || next.startsWith('--')) {
+      props[key] = true;
+      i += 1;
+      continue;
+    }
+    let value = /** @type {unknown} */ (next);
+    if (next === 'true') value = true;
+    else if (next === 'false') value = false;
+    else if (/^-?\d+(\.\d+)?$/.test(next)) value = Number(next);
+    else if (
+      (next.startsWith('{') && next.endsWith('}')) ||
+      (next.startsWith('[') && next.endsWith(']'))
+    ) {
+      try {
+        value = JSON.parse(next);
+      } catch {
+        value = next;
+      }
+    }
+    props[key] = value;
+    i += 2;
+  }
+  return props;
+};
+
+/**
+ * Convert a deckuse CLI write invocation into a protocol command object.
+ * Returns null when the args are not a mergeable write.
+ * @param {string[]} args
+ * @returns {Record<string, unknown> | null}
+ */
+const cliToWriteCommand = (args) => {
+  const action = args[0];
+  const opt = (name) => optionFromArgs(args, name);
+  if (action === 'set') {
+    if (args[1] === 'text') {
+      const target = args[2];
+      const value = opt('--value');
+      if (!target || value === undefined) return null;
+      return { type: 'setText', target, value };
+    }
+    const target = args[1];
+    if (!target || target.startsWith('--')) return null;
+    const props = parseCliProps(args.slice(2));
+    for (const key of [
+      'expect-revision',
+      'reason',
+      'dry-run',
+      'workspace',
+      'json',
+      'quiet',
+      'scope',
+    ]) {
+      delete props[key];
+    }
+    return {
+      type: 'set',
+      target,
+      properties: props,
+      scope: opt('--scope') ?? 'local',
+    };
+  }
+  if (action === 'add') {
+    if (args[1] === 'slide') {
+      /** @type {Record<string, unknown>} */
+      const command = { type: 'addSlide' };
+      if (opt('--after') !== undefined) command.after = Number(opt('--after'));
+      if (opt('--layout')) command.layout = opt('--layout');
+      if (opt('--name')) command.name = opt('--name');
+      return command;
+    }
+    if (args[1] === 'shape') {
+      const slide = opt('--slide');
+      const shapeType = opt('--type');
+      if (!slide || !shapeType) return null;
+      /** @type {Record<string, unknown>} */
+      const command = {
+        type: 'addShape',
+        slide: Number(slide),
+        shapeType,
+      };
+      if (opt('--name')) command.name = opt('--name');
+      if (opt('--role')) command.role = opt('--role');
+      if (opt('--x') !== undefined) command.x = Number(opt('--x'));
+      if (opt('--y') !== undefined) command.y = Number(opt('--y'));
+      if (opt('--width') !== undefined) command.width = Number(opt('--width'));
+      if (opt('--height') !== undefined) command.height = Number(opt('--height'));
+      if (opt('--file')) command.file = opt('--file');
+      if (opt('--text') !== undefined) command.text = opt('--text');
+      if (opt('--chart-type')) command.chartType = opt('--chart-type');
+      const rowsRaw = opt('--rows');
+      if (rowsRaw !== undefined) {
+        try {
+          command.rows = JSON.parse(rowsRaw);
+        } catch {
+          return null;
+        }
+      }
+      const dataRaw = opt('--data');
+      if (dataRaw !== undefined) {
+        try {
+          command.data = JSON.parse(dataRaw);
+        } catch {
+          return null;
+        }
+      }
+      return command;
+    }
+    return null;
+  }
+  if (action === 'remove') {
+    const target = args[1];
+    if (!target || target.startsWith('--')) return null;
+    return { type: 'remove', target };
+  }
+  if (action === 'replace-text') {
+    const source = opt('--source');
+    const target = opt('--target');
+    if (source === undefined || target === undefined || !source) return null;
+    /** @type {Record<string, unknown>} */
+    const command = { type: 'replaceText', find: source, replace: target };
+    if (args.includes('--regex')) command.regex = true;
+    if (opt('--limit') !== undefined) command.limit = Number(opt('--limit'));
+    if (opt('--selector')) command.selector = opt('--selector');
+    return command;
+  }
+  if (action === 'xfrm' && args[1] === 'set') {
+    const slide = opt('--slide');
+    const shape = opt('--shape');
+    const target =
+      opt('--target') ?? (slide && shape ? `slide:${slide}/shape:${shape}` : undefined);
+    if (!target) return null;
+    /** @type {Record<string, unknown>} */
+    const command = { type: 'xfrmSet', target };
+    if (opt('--x') !== undefined) command.x = Number(opt('--x'));
+    if (opt('--y') !== undefined) command.y = Number(opt('--y'));
+    const width = opt('--width') ?? opt('--cx');
+    const height = opt('--height') ?? opt('--cy');
+    if (width !== undefined) command.width = Number(width);
+    if (height !== undefined) command.height = Number(height);
+    if (opt('--rotation') !== undefined) command.rotation = Number(opt('--rotation'));
+    return command;
+  }
+  if (action === 'z' && args[1] === 'move') {
+    const target = args[2];
+    if (!target || target.startsWith('--')) return null;
+    /** @type {Record<string, unknown>} */
+    const command = { type: 'zMove', target };
+    if (opt('--above')) command.above = opt('--above');
+    if (opt('--below')) command.below = opt('--below');
+    if (args.includes('--to-front')) command.toFront = true;
+    if (args.includes('--to-back')) command.toBack = true;
+    return command;
+  }
+  return null;
+};
+
+/**
+ * Classify a step for --batch mode.
+ * @param {string[]} args
+ * @param {string} stdin
+ * @returns {{ kind: 'skip'; reason: string } | { kind: 'queue'; commands: Record<string, unknown>[] } | { kind: 'passthrough' }}
+ */
+const classifyBatchStep = (args, stdin) => {
+  const action = args[0];
+  if (!action) return { kind: 'passthrough' };
+  if (BATCH_SKIP_ACTIONS.has(action)) {
+    return { kind: 'skip', reason: 'not suitable for --batch' };
+  }
+  if (action === 'apply') {
+    if (!stdin) return { kind: 'passthrough' };
+    let parsed;
+    try {
+      parsed = JSON.parse(stdin);
+    } catch {
+      return { kind: 'passthrough' };
+    }
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Array.isArray(/** @type {{ operations?: unknown }} */ (parsed).operations)
+    ) {
+      // applyTransaction uses a different payload shape — run as its own apply.
+      return { kind: 'passthrough' };
+    }
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    if (
+      list.length > 0 &&
+      list.every(
+        (value) => typeof value === 'object' && value !== null && 'op' in value && !('type' in value),
+      )
+    ) {
+      return { kind: 'passthrough' };
+    }
+    /** @type {Record<string, unknown>[]} */
+    const commands = [];
+    for (const item of list) {
+      if (typeof item !== 'object' || item === null) return { kind: 'passthrough' };
+      const record = /** @type {Record<string, unknown>} */ (item);
+      if (record.type === 'batch' && Array.isArray(record.commands)) {
+        for (const nested of record.commands) {
+          if (typeof nested !== 'object' || nested === null) return { kind: 'passthrough' };
+          commands.push(/** @type {Record<string, unknown>} */ (nested));
+        }
+        continue;
+      }
+      if (typeof record.type !== 'string') return { kind: 'passthrough' };
+      commands.push(record);
+    }
+    return commands.length > 0 ? { kind: 'queue', commands } : { kind: 'passthrough' };
+  }
+  const write = cliToWriteCommand(args);
+  if (write) return { kind: 'queue', commands: [write] };
+  return { kind: 'passthrough' };
+};
 
 class Runner {
   /**
    * @param {string} bin
    * @param {string} workspace
-   * @param {{ continueOnError?: boolean }} opts
+   * @param {{ continueOnError?: boolean; batch?: boolean }} opts
    */
   constructor(bin, workspace, opts = {}) {
     this.bin = bin;
     this.workspace = workspace;
     this.continueOnError = Boolean(opts.continueOnError);
+    this.batchMode = Boolean(opts.batch);
+    /** @type {{ name: string; command: Record<string, unknown> }[]} */
+    this.pending = [];
     /** @type {StepResult[]} */
     this.steps = [];
     this.failed = false;
@@ -210,12 +454,37 @@ class Runner {
   }
 
   /**
+   * Flush queued writes as a single `apply` batch.
+   * @returns {Promise<object | null>}
+   */
+  async flushBatch() {
+    if (this.pending.length === 0) return null;
+    const queued = this.pending;
+    this.pending = [];
+    const commands = queued.map((item) => item.command);
+    const names = queued.map((item) => item.name);
+    const label = `batch apply (${String(commands.length)})`;
+    const detailNames =
+      names.length <= 4 ? names.join(', ') : `${names.slice(0, 3).join(', ')}, +${String(names.length - 3)} more`;
+    process.stdout.write(`  · flush ${label}: ${detailNames}\n`);
+    const envelope = await this.executeStep(
+      label,
+      ['apply', this.workspace, '--input', '-', '--json'],
+      JSON.stringify(commands),
+    );
+    const last = this.steps.at(-1);
+    if (last?.name === label) last.batched = names;
+    return envelope;
+  }
+
+  /**
+   * Execute a deckuse CLI step immediately (no batching).
    * @param {string} name
    * @param {string[]} args
    * @param {string} [stdin]
    * @param {{ optional?: boolean }} [opts]
    */
-  async step(name, args, stdin = '', opts = {}) {
+  async executeStep(name, args, stdin = '', opts = {}) {
     const command = this.formatCommand(args);
     if (this.failed && !this.continueOnError) {
       const result = {
@@ -292,6 +561,57 @@ class Runner {
     return envelope;
   }
 
+  /**
+   * @param {string} name
+   * @param {string[]} args
+   * @param {string} [stdin]
+   * @param {{ optional?: boolean }} [opts]
+   */
+  async step(name, args, stdin = '', opts = {}) {
+    if (!this.batchMode) {
+      return this.executeStep(name, args, stdin, opts);
+    }
+
+    const classified = classifyBatchStep(args, stdin);
+
+    if (classified.kind === 'skip') {
+      this.skip(name, classified.reason);
+      return null;
+    }
+
+    // Optional writes keep per-step failure semantics: flush first, then run alone.
+    if (opts.optional) {
+      await this.flushBatch();
+      return this.executeStep(name, args, stdin, opts);
+    }
+
+    if (classified.kind === 'queue') {
+      if (this.failed && !this.continueOnError) {
+        const result = {
+          name,
+          ok: false,
+          skipped: true,
+          reason: 'prior step failed',
+          command: this.formatCommand(args),
+          ms: 0,
+        };
+        this.steps.push(result);
+        this.logStep(result, result.command);
+        return null;
+      }
+      for (const command of classified.commands) {
+        this.pending.push({ name, command });
+      }
+      process.stdout.write(
+        `  · queue: ${name} — ${this.formatCommand(args)} (+${String(classified.commands.length)})\n`,
+      );
+      return { ok: true, queued: true };
+    }
+
+    await this.flushBatch();
+    return this.executeStep(name, args, stdin, opts);
+  }
+
   async listSlides() {
     const envelope = await this.step('list slides', ['list', 'slides', ...this.wsArgs()]);
     const items = envelope?.data?.items;
@@ -327,7 +647,7 @@ class Runner {
    * @param {number[]} slideIndexes
    */
   async inventory(slideIndexes) {
-    /** @type {Array<{ target: string; id?: string | number; name?: string; kind?: string; textPreview?: string; slide: number }>} */
+    /** @type {Array<{ target: string; id?: string | number; name?: string; kind?: string; textPreview?: string; parentId?: string; slide: number }>} */
     const shapes = [];
     for (const slide of slideIndexes) {
       const items = await this.listShapes(slide);
@@ -525,30 +845,58 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     runner.skip('mutate existing text shape', 'no text-bearing shape on deck');
   }
 
-  if (inv.shapes.length >= 2) {
-    const a = inv.shapes[0];
-    const b = inv.shapes[1];
-    if (a?.target && b?.target) {
-      await runner.step('z move --to-front (existing)', [
-        'z',
-        'move',
-        a.target,
-        '--to-front',
-        '--reason',
-        'integration-writes',
-        ...runner.wsArgs(),
-      ]);
-      await runner.step('z move --below (existing)', [
-        'z',
-        'move',
-        a.target,
-        '--below',
-        b.target,
-        '--reason',
-        'integration-writes',
-        ...runner.wsArgs(),
-      ]);
+  // z-order --below/--above require two shapes under the *same* parent.
+  // Flat inventories may list shapes across slides (or groups); never pair those.
+  const zSiblingPair = (() => {
+    /** @type {Map<string, typeof inv.shapes>} */
+    const byParent = new Map();
+    for (const s of inv.shapes) {
+      if (!s?.target) continue;
+      const key =
+        typeof s.parentId === 'string' && s.parentId.length > 0
+          ? s.parentId
+          : `slide:${String(s.slide)}`;
+      const list = byParent.get(key);
+      if (list) list.push(s);
+      else byParent.set(key, [s]);
     }
+    for (const group of byParent.values()) {
+      const a = group[0];
+      const b = group[1];
+      if (a?.target && b?.target) return /** @type {const} */ ([a, b]);
+    }
+    return null;
+  })();
+
+  const zAny = inv.shapes[0];
+  if (zAny?.target) {
+    await runner.step('z move --to-front (existing)', [
+      'z',
+      'move',
+      zAny.target,
+      '--to-front',
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+  }
+  if (zSiblingPair) {
+    const [a, b] = zSiblingPair;
+    await runner.step('z move --below (existing)', [
+      'z',
+      'move',
+      a.target,
+      '--below',
+      b.target,
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+  } else if (inv.shapes.length >= 2) {
+    runner.skip(
+      'z move --below (existing)',
+      'no two shapes share the same parent (e.g. one picture per slide)',
+    );
   }
 
   const existingTable = inv.tables[0];
@@ -981,8 +1329,11 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     await runner.step('export', ['export', out, ...runner.wsArgs()]);
   }
 
-  // undo last write (after export) to exercise undo without losing the exported artifact
+  // undo last write (after export) to exercise undo without losing the exported artifact.
+  // Skipped automatically under --batch (undo/redo are not batchable).
   await runner.step('undo', ['undo', '--steps', '1', ...runner.wsArgs()]);
+
+  await runner.flushBatch();
 
   return {
     slides: indexesAfter.length,
@@ -1020,7 +1371,12 @@ const processOne = async (pptxPath, options) => {
   const media = await ensureMedia(mediaDir);
   const runner = new Runner(options.bin, workspace, {
     continueOnError: options.continueOnError,
+    batch: options.batch,
   });
+
+  if (options.batch) {
+    process.stdout.write('  (batch mode: consecutive writes merged via apply)\n');
+  }
 
   const init = await runner.step('init', [
     'init',
@@ -1114,7 +1470,9 @@ const main = async () => {
     }
     files = [options.input];
     summaryDir = dirname(options.input);
-    process.stdout.write(`integration-writes: single file ${options.input}\n`);
+    process.stdout.write(
+      `integration-writes: single file ${options.input}${options.batch ? ' (--batch)' : ''}\n`,
+    );
   } else if (st.isDirectory()) {
     files = await collectPptx(options.input, options.recursive);
     if (options.limit !== undefined) files = files.slice(0, options.limit);
@@ -1125,7 +1483,7 @@ const main = async () => {
     }
     summaryDir = options.input;
     process.stdout.write(
-      `integration-writes: ${String(files.length)} file(s) under ${options.input}\n`,
+      `integration-writes: ${String(files.length)} file(s) under ${options.input}${options.batch ? ' (--batch)' : ''}\n`,
     );
   } else {
     process.stderr.write(`Not a file or directory: ${options.input}\n`);
@@ -1158,6 +1516,7 @@ const main = async () => {
   const summary = {
     ok: reports.every((r) => r.ok),
     input: options.input,
+    batch: Boolean(options.batch),
     total: reports.length,
     passed: reports.filter((r) => r.ok).length,
     failed: reports.filter((r) => !r.ok).length,
