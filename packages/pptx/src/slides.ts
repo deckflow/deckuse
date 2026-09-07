@@ -3,6 +3,7 @@ import { OpcArchive, type OpcRelationship } from '@deckflow/deckuse-opc';
 import { cleanupUnreferencedPart } from './picture.js';
 import { NS, REL, attr, descendants, first } from './xml.js';
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
+const NOTES_CT = 'application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml';
 const nextNumber = (archive: OpcArchive, prefix: string): number =>
   Math.max(
     0,
@@ -18,6 +19,43 @@ const nextRelId = (rels: readonly OpcRelationship[]): string => {
   while (used.has(`rId${String(n)}`)) n++;
   return `rId${String(n)}`;
 };
+
+/** Create a notes slide part for `slidePart` when missing; return the notes part URI. */
+export function ensureNotes(archive: OpcArchive, slidePart: string): string {
+  const existing = archive.getRelationships(slidePart).find((r) => r.type === REL.notes);
+  if (existing?.resolvedTarget && archive.getPart(existing.resolvedTarget))
+    return existing.resolvedTarget;
+
+  const number = nextNumber(archive, '/ppt/notesSlides/');
+  const part = `/ppt/notesSlides/notesSlide${String(number)}.xml`;
+  archive.setPart(
+    part,
+    new TextEncoder().encode(
+      `<p:notes xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder"/><p:cNvSpPr txBox="1"/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t></a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>`,
+    ),
+    NOTES_CT,
+  );
+  archive.setRelationships(part, [
+    {
+      id: 'rId1',
+      type: REL.slide,
+      target: relativeTarget(part, slidePart),
+      external: false,
+      resolvedTarget: slidePart,
+    },
+  ]);
+  const rels = [...archive.getRelationships(slidePart)];
+  const rid = nextRelId(rels);
+  rels.push({
+    id: rid,
+    type: REL.notes,
+    target: relativeTarget(slidePart, part),
+    external: false,
+    resolvedTarget: part,
+  });
+  archive.setRelationships(slidePart, rels);
+  return part;
+}
 const cloneMutableTargets = (
   archive: OpcArchive,
   sourcePart: string,

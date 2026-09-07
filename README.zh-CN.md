@@ -308,13 +308,14 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。
+- `setText` and `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。`setText` 中的换行会拆成多个段落。
 - `setTransform` for explicit object position, size, rotation, and flip changes.
-- `setProperties` for common shape and text properties.
+- `setProperties` for common shape and text properties，包括 `paragraph.align`、`paragraph.level`、`bullet`、填充透明度与 `hyperlink`。
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes, connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- Add shapes/text boxes（可选 `role` 写出 `p:ph` 占位符）, connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`ctrTitle`）。
 - `replacePicture` replaces embedded media in place while retaining the element reference and layer order.
-- Table-cell addressing; speaker-note reading and text editing.
+- Table-cell addressing；表格行列增删与单元格 `fill`；speaker-note 读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。
 - Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. An embedded workbook causes `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than a claim that workbook data was updated.
 - Common text and `srgbClr` color edits in master, layout, and theme parts.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity refers to uncompressed data for untouched entries, not ZIP byte identity.
@@ -326,7 +327,7 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 - Chart creation and edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
 - Embedded video/audio use a generated poster frame; playback timing and advanced media options are not edited.
 - Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
-- `setText` and `replaceText` collapse multi-run text in the targeted node into one run while retaining the first run’s style.
+- `setText` and `replaceText` collapse multi-run text within each paragraph into one run while retaining the first run’s style; newlines in `setText` create separate paragraphs.
 
 ## 开发检查
 

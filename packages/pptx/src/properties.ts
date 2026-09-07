@@ -1,12 +1,16 @@
 import { err, ok, type Result } from '@deckflow/deckuse-core';
+import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
 import { setColor } from './elements.js';
+import { setHyperlink } from './hyperlink.js';
 import { NS, children, descendants, first, setNodeText } from './xml.js';
 
 const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
 const FONT_FAMILY_ALIASES = ['fontFamily', 'font', 'typeface'] as const;
 const FONT_SIZE_ALIASES = ['fontSize', 'size'] as const;
 const TEXT_COLOR_ALIASES = ['textColor', 'fontColor'] as const;
+
+const ALIGN_VALUES = new Set(['l', 'ctr', 'r', 'just', 'justLow', 'dist', 'thaiDist']);
 
 const SHAPE_KEYS = new Set([
   'text',
@@ -18,6 +22,10 @@ const SHAPE_KEYS = new Set([
   'bold',
   'italic',
   'underline',
+  'hyperlink',
+  'paragraph.align',
+  'paragraph.level',
+  'bullet',
   ...STROKE_ALIASES,
   ...FONT_FAMILY_ALIASES,
   ...FONT_SIZE_ALIASES,
@@ -95,10 +103,21 @@ const ensureSpPr = (node: Element): Element => {
   return spPr;
 };
 
-const solidFillXml = (doc: NonNullable<Element['ownerDocument']>, color: string): Element => {
+const solidFillXml = (
+  doc: NonNullable<Element['ownerDocument']>,
+  color: string,
+  transparency?: number,
+): Element => {
   const solidFill = doc.createElementNS(NS.a, 'a:solidFill');
   const srgb = doc.createElementNS(NS.a, 'a:srgbClr');
   srgb.setAttribute('val', color);
+  if (transparency !== undefined) {
+    if (typeof transparency !== 'number' || !(transparency >= 0 && transparency <= 100))
+      throw new Error('fill.transparency must be a number from 0 to 100');
+    const alpha = doc.createElementNS(NS.a, 'a:alpha');
+    alpha.setAttribute('val', String(Math.round((1 - transparency / 100) * 100000)));
+    srgb.appendChild(alpha);
+  }
   solidFill.appendChild(srgb);
   return solidFill;
 };
@@ -121,15 +140,19 @@ const setFill = (spPr: Element, value: unknown): void => {
     return;
   }
   let color: string | undefined;
+  let transparency: number | undefined;
   if (typeof value === 'string') color = normalizeColor(value);
   else if (typeof value === 'object' && value !== null) {
     const record = value as Record<string, unknown>;
     if (record['type'] === 'solid' || record['color'] !== undefined) {
       if (typeof record['color'] !== 'string') throw new Error('fill.color must be a hex string');
       color = normalizeColor(record['color']);
+      if (typeof record['transparency'] === 'number') transparency = record['transparency'];
+      else if (record['transparency'] !== undefined)
+        throw new Error('fill.transparency must be a number from 0 to 100');
     } else throw new Error('Unsupported fill value');
   } else throw new Error('Unsupported fill value');
-  insertAfter(spPr, solidFillXml(doc, color), ['xfrm', 'prstGeom', 'custGeom']);
+  insertAfter(spPr, solidFillXml(doc, color, transparency), ['xfrm', 'prstGeom', 'custGeom']);
 };
 
 const setStroke = (spPr: Element, value: unknown): void => {
@@ -173,7 +196,6 @@ const runPropertyTargets = (node: Element): Element[] => {
   if (!doc) throw new Error('Element has no document');
   const targets: Element[] = [];
   for (const run of descendants(node, 'r')) {
-    // Skip non-text runs that are not under DrawingML text (still OK for ppt shapes).
     let rPr = directChild(run, 'rPr');
     if (!rPr) {
       rPr = doc.createElementNS(NS.a, 'a:rPr');
@@ -232,12 +254,91 @@ const setHidden = (node: Element, hidden: boolean): void => {
   else nvPr.removeAttribute('hidden');
 };
 
+const paragraphNodes = (node: Element): Element[] => {
+  const txBody = first(node, 'txBody');
+  const host = txBody ?? node;
+  return children(host).filter((c) => c.localName === 'p');
+};
+
+const ensurePPr = (paragraph: Element): Element => {
+  const existing = directChild(paragraph, 'pPr');
+  if (existing) return existing;
+  const doc = paragraph.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const pPr = doc.createElementNS(NS.a, 'a:pPr');
+  if (paragraph.firstChild) paragraph.insertBefore(pPr, paragraph.firstChild);
+  else paragraph.appendChild(pPr);
+  return pPr;
+};
+
+const BULLET_LOCAL_NAMES = [
+  'buFontTx',
+  'buFont',
+  'buNone',
+  'buAutoNum',
+  'buChar',
+  'buBlip',
+] as const;
+
+const setParagraphAlign = (node: Element, align: string): void => {
+  if (!ALIGN_VALUES.has(align))
+    throw new Error(`paragraph.align must be one of ${[...ALIGN_VALUES].join(', ')}`);
+  const paragraphs = paragraphNodes(node);
+  if (paragraphs.length === 0) throw new Error('Element has no paragraphs to align');
+  for (const p of paragraphs) ensurePPr(p).setAttribute('algn', align);
+};
+
+const setParagraphLevel = (node: Element, level: number): void => {
+  if (!Number.isInteger(level) || level < 0 || level > 8)
+    throw new Error('paragraph.level must be an integer from 0 to 8');
+  const paragraphs = paragraphNodes(node);
+  if (paragraphs.length === 0) throw new Error('Element has no paragraphs for level');
+  for (const p of paragraphs) {
+    const pPr = ensurePPr(p);
+    if (level === 0) pPr.removeAttribute('lvl');
+    else pPr.setAttribute('lvl', String(level));
+  }
+};
+
+const setBullet = (node: Element, value: unknown): void => {
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const paragraphs = paragraphNodes(node);
+  if (paragraphs.length === 0) throw new Error('Element has no paragraphs for bullets');
+
+  let mode: 'none' | 'char';
+  let char = '•';
+  if (value === false || value === 'none' || value === null) mode = 'none';
+  else if (value === true) mode = 'char';
+  else if (typeof value === 'string' && value.length > 0) {
+    mode = 'char';
+    char = value;
+  } else throw new Error('bullet must be true, false, "none", or a bullet character string');
+
+  for (const p of paragraphs) {
+    const pPr = ensurePPr(p);
+    removeDirectChildren(pPr, BULLET_LOCAL_NAMES);
+    if (mode === 'none') pPr.appendChild(doc.createElementNS(NS.a, 'a:buNone'));
+    else {
+      const buChar = doc.createElementNS(NS.a, 'a:buChar');
+      buChar.setAttribute('char', char);
+      pPr.appendChild(buChar);
+    }
+  }
+};
+
 const unknownKeys = (properties: Record<string, unknown>, allowed: Set<string>): string[] =>
   Object.keys(properties).filter((key) => !allowed.has(key));
+
+export type ShapePropertyContext = {
+  archive: OpcArchive;
+  partUri: string;
+};
 
 export function applyShapeProperties(
   node: Element,
   properties: Record<string, unknown>,
+  context?: ShapePropertyContext,
 ): Result<{ applied: string[] }> {
   const unexpected = unknownKeys(properties, SHAPE_KEYS);
   if (unexpected.length)
@@ -343,6 +444,34 @@ export function applyShapeProperties(
       if (typeof properties['hidden'] !== 'boolean') throw new Error('hidden must be a boolean');
       setHidden(node, properties['hidden']);
       applied.push('hidden');
+    }
+
+    if ('paragraph.align' in properties) {
+      if (typeof properties['paragraph.align'] !== 'string')
+        throw new Error('paragraph.align must be a string');
+      setParagraphAlign(node, properties['paragraph.align']);
+      applied.push('paragraph.align');
+    }
+
+    if ('paragraph.level' in properties) {
+      if (typeof properties['paragraph.level'] !== 'number')
+        throw new Error('paragraph.level must be a number');
+      setParagraphLevel(node, properties['paragraph.level']);
+      applied.push('paragraph.level');
+    }
+
+    if ('bullet' in properties) {
+      setBullet(node, properties['bullet']);
+      applied.push('bullet');
+    }
+
+    if ('hyperlink' in properties) {
+      if (!context) throw new Error('hyperlink requires archive context');
+      const value = properties['hyperlink'];
+      if (value !== null && typeof value !== 'string')
+        throw new Error('hyperlink must be a string URL or null');
+      setHyperlink(context.archive, context.partUri, node, value);
+      applied.push('hyperlink');
     }
   } catch (cause) {
     return err('INVALID_COMMAND', cause instanceof Error ? cause.message : 'Invalid properties');

@@ -11,6 +11,7 @@ export type TargetKind =
   | 'slide'
   | 'shape'
   | 'placeholder'
+  | 'notes'
   | 'text'
   | 'paragraph'
   | 'run';
@@ -134,6 +135,8 @@ export function parseTargetPath(raw: string): Result<ParsedTarget> {
       kind: 'placeholder',
       placeholder: second.slice('placeholder:'.length),
     };
+  } else if (second === 'notes') {
+    parsed = { ...parsed, kind: 'notes' };
   } else {
     return err('INVALID_COMMAND', `Unrecognized target segment: ${second}`, [], {
       target: trimmed,
@@ -210,6 +213,14 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
     return `master:${name}`;
   }
   if (item.kind === 'theme') return 'theme';
+  if (item.kind === 'notes') {
+    const page =
+      (item.slideId ? pages.get(item.slideId) : undefined) ??
+      (typeof item.location?.['slidePart'] === 'string'
+        ? pages.get(item.location['slidePart'])
+        : undefined);
+    return page ? `slide:${page}/notes` : item.ref.elementId ?? 'notes';
+  }
   if (item.slideId || item.partUri) {
     const page =
       (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
@@ -339,6 +350,56 @@ export function resolveTarget(
         target: `slide:${parsed.slide}`,
         uid: uidForItem(slide),
         item: slide,
+        slidePage: parsed.slide,
+        parsed,
+      },
+      diagnostics: [],
+    };
+  }
+
+  if (parsed.kind === 'notes') {
+    const notes = index.elements.find(
+      (item) => item.kind === 'notes' && item.slideId === slide.slideId,
+    );
+    if (notes) {
+      return {
+        ok: true,
+        value: {
+          target: `slide:${parsed.slide}/notes`,
+          uid: uidForItem(notes),
+          item: notes,
+          slidePage: parsed.slide,
+          parsed,
+        },
+        diagnostics: [],
+      };
+    }
+    // Synthetic notes target — mutate will call ensureNotes before writing.
+    const slideId = slide.slideId ?? String(parsed.slide);
+    const synthetic: IndexedElement = {
+      ref: {
+        documentId: slide.ref.documentId,
+        elementId: `notes:${slideId}`,
+        path: '',
+        revision: slide.ref.revision,
+      },
+      kind: 'notes',
+      partUri: '',
+      slideId,
+      location: {
+        slideId,
+        partUri: '',
+        region: 'speakerNotes',
+        slidePart: slide.partUri,
+        needsCreate: true,
+      },
+    };
+    return {
+      ok: true,
+      value: {
+        target: `slide:${parsed.slide}/notes`,
+        uid: uidForItem(synthetic),
+        item: synthetic,
         slidePage: parsed.slide,
         parsed,
       },

@@ -33,7 +33,7 @@ async function fixture(path: string) {
   a.setPart(
     '/ppt/slides/slide1.xml',
     e.encode(
-      `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:rPr lang="en-US"/><a:t>Hel</a:t></a:r><a:r><a:rPr lang="zh-CN"/><a:t>lo</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/></p:nvGraphicFramePr><a:graphic><a:graphicData><a:tbl><a:tr><a:tc><a:txBody><a:p><a:r><a:t>Cell</a:t></a:r></a:p></a:txBody></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Chart"/></p:nvGraphicFramePr><a:graphic><a:graphicData><c:chart r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>Hel</a:t></a:r><a:r><a:rPr lang="zh-CN"/><a:t>lo</a:t></a:r></a:p></p:txBody></p:sp><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/></p:nvGraphicFramePr><a:graphic><a:graphicData><a:tbl><a:tblGrid><a:gridCol w="914400"/></a:tblGrid><a:tr h="370840"><a:tc><a:txBody><a:p><a:r><a:t>Cell</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Chart"/></p:nvGraphicFramePr><a:graphic><a:graphicData><c:chart r:id="rId2"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
     ),
     'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
   );
@@ -1067,5 +1067,218 @@ describe('pptx adapter', () => {
         'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
       );
     }
+  });
+
+  it('placeholder hyperlink table paragraph notes phase1b writes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-phase1b-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    let revision = (init.value as { revision: string }).revision;
+
+    const setTitle = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setText',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/placeholder:title',
+        text: 'Phase1b\nTitle',
+      },
+      {},
+    );
+    expect(setTitle, JSON.stringify(setTitle)).toMatchObject({ ok: true });
+    if (!setTitle.ok) return;
+    revision = (setTitle.value as { revision: string }).revision;
+
+    const slideXml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(slideXml).toContain('<a:t>Phase1b</a:t>');
+    expect(slideXml).toContain('<a:t>Title</a:t>');
+    expect(slideXml).toContain('<p:ph type="title"/>');
+
+    const link = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'set',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        properties: { hyperlink: 'https://example.com/deck' },
+      },
+      {},
+    );
+    expect(link.ok).toBe(true);
+    if (!link.ok) return;
+    revision = (link.value as { revision: string }).revision;
+    const rels = await readFile(
+      join(workspace, 'source/ppt/slides/_rels/slide1.xml.rels'),
+      'utf8',
+    );
+    expect(rels).toContain('TargetMode="External"');
+    expect(rels).toContain('https://example.com/deck');
+    expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).toContain(
+      'hlinkClick',
+    );
+
+    const clearLink = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        properties: { hyperlink: null },
+      },
+      {},
+    );
+    expect(clearLink.ok).toBe(true);
+    if (!clearLink.ok) return;
+    revision = (clearLink.value as { revision: string }).revision;
+    expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).not.toContain(
+      'hlinkClick',
+    );
+
+    const para = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'set',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        properties: {
+          'paragraph.align': 'ctr',
+          'paragraph.level': 1,
+          bullet: true,
+        },
+      },
+      {},
+    );
+    expect(para.ok).toBe(true);
+    if (!para.ok) return;
+    revision = (para.value as { revision: string }).revision;
+    const titled = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(titled).toContain('algn="ctr"');
+    expect(titled).toContain('lvl="1"');
+    expect(titled).toContain('<a:buChar');
+
+    const insertRow = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:3',
+        properties: { insertRow: { index: 1, cells: ['New'] } },
+      },
+      {},
+    );
+    expect(insertRow.ok).toBe(true);
+    if (!insertRow.ok) return;
+    revision = (insertRow.value as { revision: string }).revision;
+
+    const insertCol = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:3',
+        properties: { insertColumn: { index: 1 } },
+      },
+      {},
+    );
+    expect(insertCol.ok).toBe(true);
+    if (!insertCol.ok) return;
+    revision = (insertCol.value as { revision: string }).revision;
+
+    const cellFill = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        ref: {
+          documentId: workspace,
+          elementId: '256:3:cell:0:0',
+        },
+        properties: { fill: 'FFCC00' },
+      },
+      {},
+    );
+    expect(cellFill, JSON.stringify(cellFill)).toMatchObject({ ok: true });
+    if (!cellFill.ok) return;
+    revision = (cellFill.value as { revision: string }).revision;
+    const tableXml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(tableXml).toContain('<a:t>New</a:t>');
+    expect(tableXml).toContain('val="FFCC00"');
+    expect([...tableXml.matchAll(/<a:gridCol /g)].length).toBe(2);
+
+    const addBlank = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addSlide',
+        workspaceId: workspace,
+        transactionId: revision,
+        layout: 'blank',
+      },
+      {},
+    );
+    expect(addBlank.ok).toBe(true);
+    if (!addBlank.ok) return;
+    revision = (addBlank.value as { revision: string }).revision;
+
+    const notesWrite = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setText',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:2/notes',
+        text: 'Fresh notes',
+      },
+      {},
+    );
+    expect(notesWrite, JSON.stringify(notesWrite)).toMatchObject({ ok: true });
+    if (!notesWrite.ok) return;
+    const slide2Rels = await readFile(
+      join(workspace, 'source/ppt/slides/_rels/slide2.xml.rels'),
+      'utf8',
+    );
+    expect(slide2Rels).toContain('notesSlide');
+    const notesFile = [...slide2Rels.matchAll(/Target="([^"]*notesSlide[^"]*)"/g)][0]?.[1];
+    expect(notesFile).toBeTruthy();
+    const resolvedNotes = join(workspace, 'source/ppt/notesSlides', notesFile!.split('/').pop()!);
+    const notesXml = await readFile(resolvedNotes, 'utf8');
+    expect(notesXml).toContain('Fresh notes');
+
+    const withRole = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: (notesWrite.value as { revision: string }).revision,
+        slide: 1,
+        shapeType: 'text',
+        name: 'BodyPh',
+        role: 'body',
+        text: 'Body copy',
+        x: 100,
+        y: 200,
+        width: 300,
+        height: 100,
+      },
+      {},
+    );
+    expect(withRole.ok).toBe(true);
+    if (!withRole.ok) return;
+    expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).toContain(
+      '<p:ph type="body"/>',
+    );
   });
 });

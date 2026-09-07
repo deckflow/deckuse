@@ -313,8 +313,12 @@ Common properties:
   font.family, font.size, font.weight, font.color, font.italic
   fill.kind, fill.color, fill.transparency
   line.kind, line.color, line.width, line.dash
-  paragraph.align, text-box.auto-fit, name, visible
+  paragraph.align, paragraph.level, bullet, hyperlink, name, visible
   x, y, width, height, rotation
+
+Table targets also accept:
+  insertRow / deleteRow / insertColumn / deleteColumn (object with index)
+  Cell targets accept fill
 
 Chart targets also accept:
   title, series (JSON array with name/values/color),

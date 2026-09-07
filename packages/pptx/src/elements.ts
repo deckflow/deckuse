@@ -27,10 +27,21 @@ const xfrm = (e: Record<string, unknown>) =>
 /** graphicFrame uses PresentationML p:xfrm (not DrawingML a:xfrm). */
 const graphicFrameXfrm = (e: Record<string, unknown>) =>
   `<p:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></p:xfrm>`;
-const textBody = (text: string) =>
-  `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${esc(text)}</a:t></a:r></a:p></p:txBody>`;
+const textBody = (text: string) => {
+  const lines = text.split('\n');
+  return `<p:txBody><a:bodyPr/><a:lstStyle/>${lines
+    .map((line) => `<a:p><a:r><a:t>${esc(line)}</a:t></a:r></a:p>`)
+    .join('')}</p:txBody>`;
+};
+const nvPrXml = (e: Record<string, unknown>) => {
+  const role = typeof e['role'] === 'string' ? e['role'] : undefined;
+  if (!role) return '<p:nvPr/>';
+  const idx = typeof e['placeholderIdx'] === 'string' ? e['placeholderIdx'] : undefined;
+  const idxAttr = idx !== undefined ? ` idx="${esc(idx)}"` : '';
+  return `<p:nvPr><p:ph type="${esc(role)}"${idxAttr}/></p:nvPr>`;
+};
 const shapeXml = (id: number, e: Record<string, unknown>) =>
-  `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
+  `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
 const connectorXml = (id: number, e: Record<string, unknown>) =>
   `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
 const groupXml = (id: number, e: Record<string, unknown>) =>

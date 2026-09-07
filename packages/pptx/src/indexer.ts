@@ -6,26 +6,39 @@ import { readSeriesColor } from './chart.js';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
 import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';
-const classify = (node: Element): ElementKind | undefined =>
-  node.localName === 'sp'
-    ? first(node, 'txBody')
-      ? 'textbox'
-      : 'shape'
-    : node.localName === 'pic'
-      ? first(node, 'videoFile')
-        ? 'video'
-        : first(node, 'audioFile')
-          ? 'audio'
-          : 'picture'
-      : node.localName === 'cxnSp'
-        ? 'connector'
-        : node.localName === 'grpSp'
-          ? 'group'
-          : first(node, 'tbl')
-            ? 'table'
-            : first(node, 'chart')
-              ? 'chart'
-              : undefined;
+
+const directChild = (node: Element, localName: string): Element | undefined =>
+  children(node).find((child) => child.localName === localName);
+
+const classify = (node: Element): ElementKind | undefined => {
+  if (node.localName === 'sp') return first(node, 'txBody') ? 'textbox' : 'shape';
+  if (node.localName === 'pic')
+    return first(node, 'videoFile') ? 'video' : first(node, 'audioFile') ? 'audio' : 'picture';
+  if (node.localName === 'cxnSp') return 'connector';
+  if (node.localName === 'grpSp') return 'group';
+  if (node.localName === 'graphicFrame') {
+    if (first(node, 'tbl')) return 'table';
+    if (first(node, 'chart')) return 'chart';
+  }
+  return undefined;
+};
+
+const readPlaceholder = (
+  node: Element,
+): { type: string; idx?: string } | undefined => {
+  const nv =
+    directChild(node, 'nvSpPr') ??
+    directChild(node, 'nvPicPr') ??
+    directChild(node, 'nvCxnSpPr') ??
+    directChild(node, 'nvGraphicFramePr') ??
+    directChild(node, 'nvGrpSpPr');
+  const nvPr = nv ? directChild(nv, 'nvPr') : undefined;
+  const ph = nvPr ? directChild(nvPr, 'ph') : undefined;
+  if (!ph) return undefined;
+  const type = attr(ph, 'type') ?? 'body';
+  const idx = attr(ph, 'idx');
+  return { type, ...(idx !== undefined ? { idx } : {}) };
+};
 const transformOf = (node: Element): Record<string, number | boolean> | undefined => {
   const x = first(node, 'xfrm');
   if (!x) return;
@@ -82,6 +95,18 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           transform = transformOf(child),
           name = attr(cNvPr(child), 'name'),
           text = textOf(child);
+        const ph = readPlaceholder(child);
+        const placeholderType = ph?.type;
+        const placeholderIdx = ph?.idx;
+        const pr = cNvPr(child);
+        const hlink = pr
+          ? children(pr).find((c) => c.localName === 'hlinkClick')
+          : undefined;
+        const hlinkRid =
+          hlink?.getAttributeNS(NS.r, 'id') ?? (hlink ? attr(hlink, 'r:id') : undefined);
+        const hlinkRel = hlinkRid
+          ? archive.getRelationships(partUri).find((r) => r.id === hlinkRid)
+          : undefined;
         const indexed: IndexedElement = {
           ref: { documentId, elementId: id, path: `${partUri}#${id}`, revision: rev },
           kind,
@@ -93,6 +118,13 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           ...(text ? { text } : {}),
           ...(transform ? { transform } : {}),
         };
+        if (placeholderType || hlinkRel) {
+          indexed.payload = {
+            ...(placeholderType ? { placeholder: placeholderType } : {}),
+            ...(placeholderIdx !== undefined ? { placeholderIdx } : {}),
+            ...(hlinkRel ? { hyperlink: hlinkRel.target } : {}),
+          };
+        }
         elements.push(indexed);
         if (kind === 'table') {
           const rows = descendants(child, 'tr');
@@ -133,6 +165,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
             const mediaPart = rel.resolvedTarget ?? rel.target;
             const external = Boolean(rel.external || (!embed && link && !mediaLink));
             indexed.payload = {
+              ...(indexed.payload ?? {}),
               mediaPart,
               href: external ? rel.target : mediaHref(documentId, mediaPart),
               ...(kind !== 'picture' ? { mediaKind: kind } : {}),
@@ -154,6 +187,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           if (cr?.resolvedTarget) {
             const chart = archive.readXml(cr.resolvedTarget);
             indexed.payload = {
+              ...(indexed.payload ?? {}),
               chartPart: cr.resolvedTarget,
               title: textOf(first(chart, 'title') ?? chart),
               series: descendants(chart, 'ser').map((ser) => {
@@ -174,7 +208,8 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
             };
           }
         }
-        walk(child, [...ancestors, own], id);
+        // Only groups nest addressable descendants; table cells are indexed above.
+        if (kind === 'group') walk(child, [...ancestors, own], id);
       }
     };
     walk(root(doc), [], `slide:${slideId}`);

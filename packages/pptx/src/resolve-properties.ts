@@ -550,6 +550,25 @@ export function resolveProperties(
       : { scope: 'default' },
   );
 
+  const hlink = typeof item.payload?.['hyperlink'] === 'string' ? item.payload['hyperlink'] : null;
+  all['hyperlink'] = prop(
+    hlink,
+    hlink,
+    hlink
+      ? { scope: 'local', target: resolved.target, path: 'hyperlink' }
+      : { scope: 'default' },
+  );
+
+  const phType =
+    typeof item.payload?.['placeholder'] === 'string' ? item.payload['placeholder'] : null;
+  all['placeholder'] = prop(
+    phType,
+    phType,
+    phType
+      ? { scope: 'local', target: resolved.target, path: 'placeholder' }
+      : { scope: 'default' },
+  );
+
   return {
     target: resolved.target,
     uid: resolved.uid,
@@ -615,6 +634,18 @@ export const mapDottedProperties = (
         break;
       case 'visible':
         out['hidden'] = value === false;
+        break;
+      case 'paragraph.align':
+        out['paragraph.align'] = value;
+        break;
+      case 'paragraph.level':
+        out['paragraph.level'] = typeof value === 'string' ? Number(value) : value;
+        break;
+      case 'bullet':
+        out['bullet'] = value;
+        break;
+      case 'hyperlink':
+        out['hyperlink'] = value === '' ? null : value;
         break;
       default:
         out[key] = value;

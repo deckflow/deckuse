@@ -15,9 +15,10 @@ import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from '
 import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
-import { addSlide, duplicateSlide, removeSlide } from './slides.js';
+import { addSlide, duplicateSlide, ensureNotes, removeSlide } from './slides.js';
+import { applyTableCellProperties, applyTableProperties } from './table.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
-import { REL, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
+import { REL, NS, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
@@ -31,8 +32,10 @@ export const nodeFor = (doc: Document, item: IndexedElement): Element | undefine
   if (['slide', 'notes', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
   if (item.kind === 'tableCell') {
     const rawTableId = item.location?.['tableId'],
-      tableId = typeof rawTableId === 'string' ? rawTableId : '',
-      tableTail = tableId.split('.').at(-1) ?? '';
+      tableId = typeof rawTableId === 'string' ? rawTableId : '';
+    // elementId is `${slideId}:${ancestorPath}` — strip slide prefix, then take the leaf cNvPr id.
+    const afterSlide = tableId.includes(':') ? tableId.slice(tableId.indexOf(':') + 1) : tableId;
+    const tableTail = afterSlide.split('.').at(-1) ?? afterSlide;
     if (!tableTail) return undefined;
     const table = shapeByCNvPrId(doc, tableTail);
     if (!table) return;
@@ -79,6 +82,41 @@ const transform = (node: Element, t: Record<string, unknown>): void => {
   }
 };
 
+const indexSlidePartForNotes = (archive: OpcArchive, item: IndexedElement): string | undefined => {
+  if (!item.slideId) return undefined;
+  const presentation = archive.readXml('/ppt/presentation.xml');
+  const rels = archive.getRelationships('/ppt/presentation.xml');
+  for (const sld of descendants(presentation, 'sldId')) {
+    const id = attr(sld, 'id');
+    if (id !== item.slideId) continue;
+    const rid = sld.getAttributeNS(NS.r, 'id') ?? attr(sld, 'r:id');
+    const rel = rels.find((r) => r.id === rid);
+    return rel?.resolvedTarget;
+  }
+  return undefined;
+};
+
+const materializeNotes = (
+  archive: OpcArchive,
+  item: IndexedElement,
+): Result<IndexedElement> => {
+  if (item.kind !== 'notes') return ok(item);
+  if (item.partUri && archive.getPart(item.partUri)) return ok(item);
+  const slidePart =
+    typeof item.location?.['slidePart'] === 'string'
+      ? item.location['slidePart']
+      : indexSlidePartForNotes(archive, item);
+  if (!slidePart)
+    return err('ELEMENT_NOT_FOUND', `Cannot locate slide for notes ${item.ref.elementId ?? ''}`);
+  const partUri = ensureNotes(archive, slidePart);
+  return ok({
+    ...item,
+    partUri,
+    ref: { ...item.ref, path: partUri },
+    location: { ...item.location, partUri, slidePart, region: 'speakerNotes' },
+  });
+};
+
 const writeText = (
   archive: OpcArchive,
   item: IndexedElement,
@@ -95,15 +133,18 @@ const writeText = (
       });
     return ok(undefined, diagnostics);
   }
-  const doc = archive.readXml(item.partUri),
-    node = nodeFor(doc, item);
+  const notesItem = materializeNotes(archive, item);
+  if (!notesItem.ok) return notesItem;
+  const target = notesItem.value;
+  const doc = archive.readXml(target.partUri),
+    node = nodeFor(doc, target);
   if (!node)
     return err(
       'ELEMENT_NOT_FOUND',
-      `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
+      `Element XML node was not found: ${target.ref.elementId ?? target.ref.path ?? ''}`,
     );
   setNodeText(node, text);
-  archive.writeXml(item.partUri, doc);
+  archive.writeXml(target.partUri, doc);
   return ok(undefined, diagnostics);
 };
 
@@ -222,7 +263,7 @@ const resolveCommandRef = (
       ...(command.target !== undefined ? { target: command.target } : {}),
     });
     if (!got.ok) return got;
-    const item = findIndexed(index, got.value.ref);
+    const item = got.value.resolved?.item ?? findIndexed(index, got.value.ref);
     if (!item) return err('ELEMENT_NOT_FOUND', 'Element reference was not found');
     return {
       ok: true,
@@ -241,7 +282,8 @@ const resolveCommandRef = (
     ...('target' in command && command.target !== undefined ? { target: command.target } : {}),
   });
   if (!got.ok) return got;
-  const item = findIndexed(index, got.value.ref);
+  // Prefer the item from target resolution so synthetic notes (not yet in the index) work.
+  const item = got.value.resolved?.item ?? findIndexed(index, got.value.ref);
   if (!item) return err('ELEMENT_NOT_FOUND', 'Element reference was not found');
   return {
     ok: true,
@@ -503,17 +545,21 @@ export async function mutate(
     }
   }
 
-  const doc = archive.readXml(item.partUri),
-    node = nodeFor(doc, item);
+  const notesReady = materializeNotes(archive, item);
+  if (!notesReady.ok) return notesReady;
+  const liveItem = notesReady.value;
+
+  const doc = archive.readXml(liveItem.partUri),
+    node = nodeFor(doc, liveItem);
   if (!node)
     return err(
       'ELEMENT_NOT_FOUND',
-      `Element XML node was not found: ${item.ref.elementId ?? item.ref.path ?? ''}`,
+      `Element XML node was not found: ${liveItem.ref.elementId ?? liveItem.ref.path ?? ''}`,
     );
 
   const chartPart =
-    item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string'
-      ? item.payload['chartPart']
+    liveItem.kind === 'chart' && typeof liveItem.payload?.['chartPart'] === 'string'
+      ? liveItem.payload['chartPart']
       : undefined;
   let chartMutated = false;
 
@@ -565,8 +611,21 @@ export async function mutate(
           code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
           message: 'Chart cache changed; embedded workbook was not modified',
         });
+    } else if (liveItem.kind === 'table') {
+      const applied = applyTableProperties(node, properties);
+      if (!applied.ok) return applied;
+      if (applied.value.applied.length === 0)
+        return err('INVALID_COMMAND', 'set requires at least one supported property');
+    } else if (liveItem.kind === 'tableCell') {
+      const applied = applyTableCellProperties(node, properties);
+      if (!applied.ok) return applied;
+      if (applied.value.applied.length === 0)
+        return err('INVALID_COMMAND', 'set requires at least one supported property');
     } else {
-      const applied = applyShapeProperties(node, properties);
+      const applied = applyShapeProperties(node, properties, {
+        archive,
+        partUri: liveItem.partUri,
+      });
       if (!applied.ok) return applied;
       if (applied.value.applied.length === 0)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
@@ -575,7 +634,7 @@ export async function mutate(
     const moved = applyZMove(doc, node, command, index);
     if (!moved.ok) return moved;
   } else if (command.type === 'replacePicture') {
-    if (item.kind !== 'picture')
+    if (liveItem.kind !== 'picture')
       return err('INVALID_COMMAND', 'replacePicture requires a picture element');
     const loaded = await loadPictureBytes({
       ...(command.path !== undefined ? { path: command.path } : {}),
@@ -584,32 +643,34 @@ export async function mutate(
     if (!loaded.ok) return loaded;
     const replaced = replacePictureMedia(
       archive,
-      item.partUri,
+      liveItem.partUri,
       node,
       loaded.value.data,
       loaded.value.ext,
     );
     if (!replaced.ok) return replaced;
   } else if (command.type === 'remove') {
-    if (item.kind === 'picture') detachPictureAndCleanup(archive, item.partUri, doc, node);
-    else if (item.kind === 'video' || item.kind === 'audio')
-      detachMediaAndCleanup(archive, item.partUri, doc, node);
+    if (liveItem.kind === 'picture') detachPictureAndCleanup(archive, liveItem.partUri, doc, node);
+    else if (liveItem.kind === 'video' || liveItem.kind === 'audio')
+      detachMediaAndCleanup(archive, liveItem.partUri, doc, node);
     else node.parentNode?.removeChild(node);
   } else if (command.type === 'duplicate') duplicateElement(doc, node);
   else if (command.type === 'add') {
-    const parent = item.kind === 'slide' ? (first(doc, 'spTree') ?? node) : node;
-    await addElement(archive, item.partUri, doc, parent, command.element);
+    const parent = liveItem.kind === 'slide' ? (first(doc, 'spTree') ?? node) : node;
+    await addElement(archive, liveItem.partUri, doc, parent, command.element);
   } else {
     return err('INVALID_COMMAND', `Unhandled mutation type`);
   }
 
-  archive.writeXml(item.partUri, doc);
-  const changedParts = [item.partUri];
+  archive.writeXml(liveItem.partUri, doc);
+  const changedParts = [liveItem.partUri];
   if (chartMutated && chartPart) changedParts.push(chartPart);
+  if (liveItem.kind === 'notes' && typeof liveItem.location?.['slidePart'] === 'string')
+    changedParts.push(liveItem.location['slidePart']);
   return ok(
     {
       changed: true,
-      slides: slidesForItem(index, item),
+      slides: slidesForItem(index, liveItem),
       diagnostics,
       ...(target ? { changedTargets: [target] } : {}),
       changedParts,
