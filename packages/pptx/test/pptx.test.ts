@@ -65,6 +65,13 @@ async function fixture(path: string) {
     ),
     'application/vnd.openxmlformats-officedocument.drawingml.chart+xml',
   );
+  a.setPart(
+    '/docProps/app.xml',
+    e.encode(
+      `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides><Notes>1</Notes></Properties>`,
+    ),
+    'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+  );
   a.setPart('/custom/unknown.bin', e.encode('keep me'));
   await a.writeFile(path);
 }
@@ -1067,6 +1074,96 @@ describe('pptx adapter', () => {
         'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
       );
     }
+
+    const appXml = await readFile(join(workspace, 'source/docProps/app.xml'), 'utf8');
+    expect(appXml).toMatch(/<Slides>3<\/Slides>/);
+    // Blank added slides have no notes relationship; original fixture keeps 1 notes slide.
+    expect(appXml).toMatch(/<Notes>1<\/Notes>/);
+  });
+
+  it('insertRow/insertColumn preserve a16 rowId/colId on modern tables', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-a16-table-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const a = new OpcArchive();
+    const enc = new TextEncoder();
+    const mainCt =
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
+    a.setPart(
+      '/[Content_Types].xml',
+      enc.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${mainCt}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      enc.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+      ),
+      mainCt,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      enc.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:a16="http://schemas.microsoft.com/office/drawing/2014/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="2" name="Table"/></p:nvGraphicFramePr><a:graphic><a:graphicData><a:tbl><a:tblGrid><a:gridCol w="914400"><a:extLst><a:ext uri="{9D8B030D-6E8A-4147-A177-3AD203B41FA5}"><a16:colId val="20000"/></a:ext></a:extLst></a:gridCol></a:tblGrid><a:tr h="370840"><a:tc><a:txBody><a:p><a:r><a:t>Cell</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:extLst><a:ext uri="{0D108BD9-81ED-4DB2-BD59-A6C34878D82A}"><a16:rowId val="10000"/></a:ext></a:extLst></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    let revision = (init.value as { revision: string }).revision;
+
+    const insertRow = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        properties: { insertRow: { index: 0, cells: ['New'] } },
+      },
+      {},
+    );
+    expect(insertRow.ok).toBe(true);
+    if (!insertRow.ok) return;
+    revision = (insertRow.value as { revision: string }).revision;
+
+    const insertCol = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:2',
+        properties: { insertColumn: { index: 0 } },
+      },
+      {},
+    );
+    expect(insertCol.ok).toBe(true);
+    if (!insertCol.ok) return;
+
+    const tableXml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    const colIds = [...tableXml.matchAll(/a16:colId[^>]*val="(\d+)"/g)].map((m) => m[1]);
+    const rowIds = [...tableXml.matchAll(/a16:rowId[^>]*val="(\d+)"/g)].map((m) => m[1]);
+    expect(colIds.length).toBe(2);
+    expect(rowIds.length).toBe(2);
+    expect(new Set(colIds).size).toBe(2);
+    expect(new Set(rowIds).size).toBe(2);
   });
 
   it('placeholder hyperlink table paragraph notes phase1b writes', async () => {

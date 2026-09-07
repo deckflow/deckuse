@@ -4,6 +4,7 @@ import { cleanupUnreferencedPart } from './picture.js';
 import { NS, REL, attr, descendants, first } from './xml.js';
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
 const NOTES_CT = 'application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml';
+const EP_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties';
 const nextNumber = (archive: OpcArchive, prefix: string): number =>
   Math.max(
     0,
@@ -18,6 +19,37 @@ const nextRelId = (rels: readonly OpcRelationship[]): string => {
   let n = 1;
   while (used.has(`rId${String(n)}`)) n++;
   return `rId${String(n)}`;
+};
+
+/** Keep docProps/app.xml Slides/Notes in sync with the package (PowerPoint repairs on mismatch). */
+const syncAppSlideCounts = (archive: OpcArchive): void => {
+  const part = archive.getPart('/docProps/app.xml');
+  if (!part) return;
+  const slideCount = descendants(
+    archive.readXml('/ppt/presentation.xml'),
+    'sldId',
+  ).length;
+  let notesCount = 0;
+  for (const [slidePart, rels] of archive.relationships) {
+    if (!slidePart.startsWith('/ppt/slides/')) continue;
+    if (rels.some((r) => r.type === REL.notes)) notesCount++;
+  }
+  const app = archive.readXml('/docProps/app.xml');
+  let dirty = false;
+  for (const [localName, value] of [
+    ['Slides', String(slideCount)],
+    ['Notes', String(notesCount)],
+  ] as const) {
+    const el = descendants(app, localName).find(
+      (node) => !node.namespaceURI || node.namespaceURI === EP_NS,
+    );
+    if (!el) continue;
+    if ((el.textContent ?? '') === value) continue;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(app.createTextNode(value));
+    dirty = true;
+  }
+  if (dirty) archive.writeXml('/docProps/app.xml', app, part.mediaType);
 };
 
 /** Create a notes slide part for `slidePart` when missing; return the notes part URI. */
@@ -157,6 +189,7 @@ export function addSlide(
   else if (anchor) list.appendChild(sld);
   else list.appendChild(sld);
   archive.writeXml('/ppt/presentation.xml', doc);
+  syncAppSlideCounts(archive);
   return part;
 }
 export function duplicateSlide(archive: OpcArchive, part: string): string {
@@ -186,6 +219,7 @@ export function removeSlide(archive: OpcArchive, part: string): void {
   archive.deletePart(part);
   for (const target of targets) cleanupUnreferencedPart(archive, target);
   archive.writeXml('/ppt/presentation.xml', doc);
+  syncAppSlideCounts(archive);
 }
 export function slideElementPart(refPart: string): string {
   return refPart.split('#')[0] ?? refPart;

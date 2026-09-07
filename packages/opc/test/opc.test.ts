@@ -134,4 +134,34 @@ describe('OPC archive', () => {
       'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
     );
   });
+
+  it('does not emit Content_Types Override for .rels when Default exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'opc-rels-ct-'));
+    const archive = new OpcArchive();
+    archive.contentTypes.defaults.set(
+      'rels',
+      'application/vnd.openxmlformats-package.relationships+xml',
+    );
+    archive.contentTypes.defaults.set('xml', 'application/xml');
+    archive.setPart(
+      '/ppt/presentation.xml',
+      enc.encode(
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+    );
+    archive.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    const dir = join(root, 'source');
+    await archive.writeDirectory(dir);
+    const ct = await readFile(join(dir, '[Content_Types].xml'), 'utf8');
+    expect(ct).toContain('Extension="rels"');
+    expect(ct).not.toContain('PartName="/ppt/_rels/presentation.xml.rels"');
+  });
 });

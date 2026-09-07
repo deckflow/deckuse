@@ -5,7 +5,7 @@ import {
   shapePropertyKeys,
   type ShapePropertyContext,
 } from './properties.js';
-import { NS, attr, children, first, setNodeText } from './xml.js';
+import { NS, attr, children, descendants, first, setNodeText } from './xml.js';
 
 const DEFAULT_ROW_H = '370840';
 const DEFAULT_COL_W = '914400';
@@ -13,6 +13,11 @@ const EMU_PER_PT = 12700;
 const DEFAULT_STROKE_PT = 1;
 const MAX_LINE_WIDTH_EMU = 20116800; // ST_LineWidth maxInclusive
 const MAX_LINE_WIDTH_PT = MAX_LINE_WIDTH_EMU / EMU_PER_PT;
+
+/** DrawingML 2014 table unique ids (PowerPoint writes these on modern tables). */
+const NS_A16 = 'http://schemas.microsoft.com/office/drawing/2014/main';
+const COL_ID_URI = '{9D8B030D-6E8A-4147-A177-3AD203B41FA5}';
+const ROW_ID_URI = '{0D108BD9-81ED-4DB2-BD59-A6C34878D82A}';
 
 /** Convert line.width to EMU. Values above max pt are treated as already-EMU. */
 const lineWidthToEmu = (width: number): number => {
@@ -101,6 +106,46 @@ const makeCell = (doc: NonNullable<Element['ownerDocument']>, text = ''): Elemen
   return tc;
 };
 
+/** True when any gridCol already carries a16:colId (PowerPoint modern table). */
+const tableUsesColIds = (tbl: Element): boolean =>
+  descendants(tbl, 'colId').some(
+    (el) => el.namespaceURI === NS_A16 || el.prefix === 'a16' || el.localName === 'colId',
+  );
+
+/** True when any row already carries a16:rowId. */
+const tableUsesRowIds = (tbl: Element): boolean =>
+  descendants(tbl, 'rowId').some(
+    (el) => el.namespaceURI === NS_A16 || el.prefix === 'a16' || el.localName === 'rowId',
+  );
+
+const nextTableUniqueId = (tbl: Element, localName: 'colId' | 'rowId'): string => {
+  let max = 0;
+  for (const el of descendants(tbl, localName)) {
+    const n = Number(attr(el, 'val') ?? 0);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  // PowerPoint typically uses 10000+ for rows and 20000+ for cols; stay above either.
+  return String(Math.max(max + 1, localName === 'colId' ? 20000 : 10000));
+};
+
+const attachA16Id = (
+  parent: Element,
+  kind: 'colId' | 'rowId',
+  id: string,
+): void => {
+  const doc = parent.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const uri = kind === 'colId' ? COL_ID_URI : ROW_ID_URI;
+  const extLst = doc.createElementNS(NS.a, 'a:extLst');
+  const ext = doc.createElementNS(NS.a, 'a:ext');
+  ext.setAttribute('uri', uri);
+  const idEl = doc.createElementNS(NS_A16, `a16:${kind}`);
+  idEl.setAttribute('val', id);
+  ext.appendChild(idEl);
+  extLst.appendChild(ext);
+  parent.appendChild(extLst);
+};
+
 const parseIndex = (value: unknown, name: string): number => {
   if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
   if (typeof value === 'object' && value !== null && 'index' in value) {
@@ -135,6 +180,9 @@ export function insertTableRow(node: Element, spec: unknown): void {
   const tr = doc.createElementNS(NS.a, 'a:tr');
   tr.setAttribute('h', DEFAULT_ROW_H);
   for (let i = 0; i < colCount; i++) tr.appendChild(makeCell(doc, texts[i] ?? ''));
+  // Keep a16:rowId complete when the source table already uses them — partial
+  // coverage makes PowerPoint prompt to repair the package.
+  if (tableUsesRowIds(tbl)) attachA16Id(tr, 'rowId', nextTableUniqueId(tbl, 'rowId'));
   const anchor = rows[index];
   if (anchor) tbl.insertBefore(tr, anchor);
   else tbl.appendChild(tr);
@@ -165,6 +213,7 @@ export function insertTableColumn(node: Element, spec: unknown): void {
   const cols = directChildren(grid, 'gridCol');
   const gridCol = doc.createElementNS(NS.a, 'a:gridCol');
   gridCol.setAttribute('w', cols[0] ? (attr(cols[0], 'w') ?? DEFAULT_COL_W) : DEFAULT_COL_W);
+  if (tableUsesColIds(tbl)) attachA16Id(gridCol, 'colId', nextTableUniqueId(tbl, 'colId'));
   const colAnchor = cols[index];
   if (colAnchor) grid.insertBefore(gridCol, colAnchor);
   else grid.appendChild(gridCol);

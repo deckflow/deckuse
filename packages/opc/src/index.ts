@@ -365,8 +365,18 @@ export class OpcArchive {
   setPart(name: string, data: Uint8Array, mediaType = 'application/octet-stream'): void {
     const normalized = normalizePartName(name);
     this.parts.set(normalized, { name: normalized, mediaType, data });
-    if (mediaType !== 'application/octet-stream')
+    // Prefer Default Extension over per-part Override when they already match
+    // (e.g. .rels). Promoting Defaults into Overrides makes some Office builds
+    // treat the package as damaged.
+    const ext = posix.extname(normalized).slice(1).toLowerCase();
+    const byDefault = ext ? this.contentTypes.defaults.get(ext) : undefined;
+    if (mediaType === 'application/octet-stream') {
+      this.contentTypes.overrides.delete(normalized);
+    } else if (byDefault === mediaType) {
+      this.contentTypes.overrides.delete(normalized);
+    } else {
       this.contentTypes.overrides.set(normalized, mediaType);
+    }
   }
   deletePart(name: string): boolean {
     const normalized = normalizePartName(name);
@@ -423,6 +433,14 @@ export class OpcArchive {
     }
     for (const [partName, contentType] of [...this.contentTypes.overrides].sort()) {
       if (!this.parts.has(partName)) continue;
+      // Drop Overrides that duplicate an extension Default (common for .rels /
+      // .xml after relationship rewrites).
+      const ext = posix.extname(partName).slice(1).toLowerCase();
+      const byDefault = ext ? this.contentTypes.defaults.get(ext) : undefined;
+      if (byDefault === contentType) {
+        this.contentTypes.overrides.delete(partName);
+        continue;
+      }
       const element = doc.createElementNS(doc.documentElement.namespaceURI, 'Override');
       element.setAttribute('PartName', partName);
       element.setAttribute('ContentType', contentType);
