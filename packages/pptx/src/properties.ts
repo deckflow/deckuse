@@ -255,9 +255,10 @@ const setHidden = (node: Element, hidden: boolean): void => {
 };
 
 const paragraphNodes = (node: Element): Element[] => {
-  const txBody = first(node, 'txBody');
-  const host = txBody ?? node;
-  return children(host).filter((c) => c.localName === 'p');
+  const txBodies = descendants(node, 'txBody');
+  if (txBodies.length > 0)
+    return txBodies.flatMap((body) => children(body).filter((c) => c.localName === 'p'));
+  return children(node).filter((c) => c.localName === 'p');
 };
 
 const ensurePPr = (paragraph: Element): Element => {

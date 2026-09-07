@@ -1,9 +1,19 @@
 import { err, ok, type Result } from '@deckflow/deckuse-core';
 import type { Element } from '@xmldom/xmldom';
+import {
+  applyShapeProperties,
+  shapePropertyKeys,
+  type ShapePropertyContext,
+} from './properties.js';
 import { NS, attr, children, first, setNodeText } from './xml.js';
 
 const DEFAULT_ROW_H = '370840';
 const DEFAULT_COL_W = '914400';
+const EMU_PER_PT = 12700;
+const DEFAULT_STROKE_PT = 1;
+const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
+const TABLE_CELL_BORDER_SIDES = ['lnL', 'lnR', 'lnT', 'lnB'] as const;
+const SHAPE_KEY_SET = new Set(shapePropertyKeys);
 
 const directChildren = (node: Element, localName: string): Element[] =>
   children(node).filter((c) => c.localName === localName);
@@ -181,7 +191,71 @@ export function setTableCellFill(cell: Element, value: unknown): void {
   else tcPr.appendChild(solidFill);
 }
 
-const TABLE_KEYS = new Set([
+const ensureTcPr = (cell: Element): Element => {
+  const doc = cell.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  let tcPr = directChildren(cell, 'tcPr')[0] ?? first(cell, 'tcPr');
+  if (!tcPr) {
+    tcPr = doc.createElementNS(NS.a, 'a:tcPr');
+    cell.appendChild(tcPr);
+  }
+  return tcPr;
+};
+
+const tableCells = (node: Element): Element[] =>
+  directChildren(tblOf(node), 'tr').flatMap((tr) => directChildren(tr, 'tc'));
+
+const setTableCellBorders = (cell: Element, value: unknown): void => {
+  const doc = cell.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const tcPr = ensureTcPr(cell);
+  for (const child of [...children(tcPr)])
+    if (child.localName && (TABLE_CELL_BORDER_SIDES as readonly string[]).includes(child.localName))
+      tcPr.removeChild(child);
+
+  if (isNone(value)) {
+    for (const side of TABLE_CELL_BORDER_SIDES) {
+      const ln = doc.createElementNS(NS.a, `a:${side}`);
+      ln.appendChild(doc.createElementNS(NS.a, 'a:noFill'));
+      tcPr.appendChild(ln);
+    }
+    return;
+  }
+
+  let color = '0000FF';
+  let widthPt = DEFAULT_STROKE_PT;
+  let dash: string | undefined;
+  if (typeof value === 'string') color = normalizeColor(value);
+  else if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    if (typeof record['color'] === 'string') color = normalizeColor(record['color']);
+    else if (record['color'] !== undefined) throw new Error('stroke.color must be a hex string');
+    const width = record['width'] ?? record['widthPt'];
+    if (typeof width === 'number' && Number.isFinite(width) && width > 0) widthPt = width;
+    else if (width !== undefined) throw new Error('stroke.width must be a positive number (pt)');
+    if (typeof record['dash'] === 'string') dash = record['dash'];
+    else if (record['dash'] !== undefined) throw new Error('stroke.dash must be a string');
+  } else throw new Error('Unsupported stroke value');
+
+  const widthEmu = String(Math.round(widthPt * EMU_PER_PT));
+  for (const side of TABLE_CELL_BORDER_SIDES) {
+    const ln = doc.createElementNS(NS.a, `a:${side}`);
+    ln.setAttribute('w', widthEmu);
+    const solidFill = doc.createElementNS(NS.a, 'a:solidFill');
+    const srgb = doc.createElementNS(NS.a, 'a:srgbClr');
+    srgb.setAttribute('val', color);
+    solidFill.appendChild(srgb);
+    ln.appendChild(solidFill);
+    if (dash) {
+      const prstDash = doc.createElementNS(NS.a, 'a:prstDash');
+      prstDash.setAttribute('val', dash);
+      ln.appendChild(prstDash);
+    }
+    tcPr.appendChild(ln);
+  }
+};
+
+const TABLE_STRUCTURAL_KEYS = new Set([
   'insertRow',
   'deleteRow',
   'insertColumn',
@@ -195,38 +269,74 @@ const TABLE_CELL_KEYS = new Set(['text', 'fill']);
 export function applyTableProperties(
   node: Element,
   properties: Record<string, unknown>,
+  context?: ShapePropertyContext,
 ): Result<{ applied: string[] }> {
-  const unexpected = Object.keys(properties).filter((k) => !TABLE_KEYS.has(k));
+  const structural: Record<string, unknown> = {};
+  const visual: Record<string, unknown> = {};
+  const unexpected: string[] = [];
+  for (const [key, value] of Object.entries(properties)) {
+    if (TABLE_STRUCTURAL_KEYS.has(key)) structural[key] = value;
+    else if (SHAPE_KEY_SET.has(key)) visual[key] = value;
+    else unexpected.push(key);
+  }
   if (unexpected.length)
     return err('INVALID_COMMAND', `Unsupported table setProperties keys: ${unexpected.join(', ')}`);
+
   const applied: string[] = [];
   try {
-    if ('insertRow' in properties) {
-      insertTableRow(node, properties['insertRow']);
+    if ('insertRow' in structural) {
+      insertTableRow(node, structural['insertRow']);
       applied.push('insertRow');
     }
-    if ('deleteRow' in properties) {
-      deleteTableRow(node, properties['deleteRow']);
+    if ('deleteRow' in structural) {
+      deleteTableRow(node, structural['deleteRow']);
       applied.push('deleteRow');
     }
-    if ('insertColumn' in properties) {
-      insertTableColumn(node, properties['insertColumn']);
+    if ('insertColumn' in structural) {
+      insertTableColumn(node, structural['insertColumn']);
       applied.push('insertColumn');
     }
-    if ('deleteColumn' in properties) {
-      deleteTableColumn(node, properties['deleteColumn']);
+    if ('deleteColumn' in structural) {
+      deleteTableColumn(node, structural['deleteColumn']);
       applied.push('deleteColumn');
     }
-    if (typeof properties['text'] === 'string') {
-      setNodeText(node, properties['text']);
+    if (typeof structural['text'] === 'string') {
+      setNodeText(node, structural['text']);
       applied.push('text');
-    } else if (properties['text'] !== undefined) throw new Error('text must be a string');
-    if (typeof properties['name'] === 'string') {
+    } else if (structural['text'] !== undefined) throw new Error('text must be a string');
+    if (typeof structural['name'] === 'string') {
       const pr = first(node, 'cNvPr');
       if (!pr) throw new Error('Element has no cNvPr to set name');
-      pr.setAttribute('name', properties['name']);
+      pr.setAttribute('name', structural['name']);
       applied.push('name');
-    } else if (properties['name'] !== undefined) throw new Error('name must be a string');
+    } else if (structural['name'] !== undefined) throw new Error('name must be a string');
+
+    // Table fill/line map onto cells — graphicFrame has no spPr.
+    if ('fill' in visual) {
+      const cells = tableCells(node);
+      if (cells.length === 0) throw new Error('Table has no cells to fill');
+      for (const cell of cells) setTableCellFill(cell, visual['fill']);
+      applied.push('fill');
+      delete visual['fill'];
+    }
+
+    const strokeKeys = STROKE_ALIASES.filter((key) => key in visual);
+    if (strokeKeys.length > 1)
+      throw new Error(`Use only one stroke alias; found: ${strokeKeys.join(', ')}`);
+    if (strokeKeys[0]) {
+      const key = strokeKeys[0];
+      const cells = tableCells(node);
+      if (cells.length === 0) throw new Error('Table has no cells for stroke');
+      for (const cell of cells) setTableCellBorders(cell, visual[key]);
+      applied.push(key);
+      delete visual[key];
+    }
+
+    if (Object.keys(visual).length > 0) {
+      const styled = applyShapeProperties(node, visual, context);
+      if (!styled.ok) return styled;
+      applied.push(...styled.value.applied);
+    }
   } catch (cause) {
     return err(
       'INVALID_COMMAND',

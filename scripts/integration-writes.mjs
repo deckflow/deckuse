@@ -339,11 +339,16 @@ class Runner {
     const withText = shapes.filter(
       (s) => typeof s.textPreview === 'string' && s.textPreview.trim().length > 0,
     );
+    // Prefer textbox/shape for style mutations (fill/line/font). Tables expose
+    // textPreview but use a different setProperties surface (rows/cols/cells).
+    const STYLABLE_KINDS = new Set(['textbox', 'shape']);
+    const stylableWithText = withText.filter((s) => STYLABLE_KINDS.has(s.kind));
+    const stylable = shapes.filter((s) => STYLABLE_KINDS.has(s.kind));
     const findByName = (name) => shapes.find((s) => s.name === name);
     return {
       shapes,
       withText,
-      textShape: withText[0] ?? shapes.find((s) => s.kind === 'textbox' || s.kind === 'shape'),
+      textShape: stylableWithText[0] ?? stylable[0],
       pictures: byKind('picture'),
       tables: byKind('table'),
       charts: byKind('chart'),

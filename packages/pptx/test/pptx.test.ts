@@ -1219,6 +1219,37 @@ describe('pptx adapter', () => {
     expect(tableXml).toContain('val="FFCC00"');
     expect([...tableXml.matchAll(/<a:gridCol /g)].length).toBe(2);
 
+    const tableStyle = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'set',
+        workspaceId: workspace,
+        transactionId: revision,
+        target: 'slide:1/shape:3',
+        properties: {
+          fontSize: 18,
+          bold: true,
+          textColor: '1A1A1A',
+          fill: { color: 'F5F5F5' },
+          line: { color: '4472C4', width: 1 },
+          'paragraph.align': 'ctr',
+          hyperlink: 'https://example.com/table',
+        },
+      },
+      {},
+    );
+    expect(tableStyle, JSON.stringify(tableStyle)).toMatchObject({ ok: true });
+    if (!tableStyle.ok) return;
+    revision = (tableStyle.value as { revision: string }).revision;
+    const styledTable = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(styledTable).toContain('sz="1800"');
+    expect(styledTable).toContain('b="1"');
+    expect(styledTable).toContain('val="1A1A1A"');
+    expect(styledTable).toContain('val="F5F5F5"');
+    expect(styledTable).toContain('<a:lnL ');
+    expect(styledTable).toContain('algn="ctr"');
+    expect(styledTable).toContain('hlinkClick');
+
     const addBlank = await pptxAdapter.execute(
       {
         version: '2.0',

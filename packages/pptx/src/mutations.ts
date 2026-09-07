@@ -796,7 +796,10 @@ export async function mutate(
           message: 'Chart cache changed; embedded workbook was not modified',
         });
     } else if (liveItem.kind === 'table') {
-      const applied = applyTableProperties(node, properties);
+      const applied = applyTableProperties(node, properties, {
+        archive,
+        partUri: liveItem.partUri,
+      });
       if (!applied.ok) return applied;
       if (applied.value.applied.length === 0)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
