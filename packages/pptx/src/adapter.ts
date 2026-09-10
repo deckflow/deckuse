@@ -17,6 +17,7 @@ import {
   targetPathForItem,
   uidForItem,
 } from './addressing.js';
+import { editionMetadata } from './edition.js';
 import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
 import { loadIndex } from './index-sync.js';
 import { mutate } from './mutations.js';
@@ -54,7 +55,12 @@ const WRITE_TYPES = new Set([
 
 export const pptxCapabilities = {
   protocol: '2.0',
+  ...editionMetadata,
   slides: { add: true, duplicate: true, remove: true },
+  // Master/layout/theme: list + resolve only in community; writes gated in mutations.
+  masters: { list: true, edit: false },
+  layouts: { list: true, edit: false },
+  theme: { list: true, edit: false },
   elements: [
     'shape',
     'textbox',
@@ -71,6 +77,8 @@ export const pptxCapabilities = {
   media: { video: true, audio: true, autoPoster: true },
   chart: {
     create: true,
+    families: ['bar', 'column', 'line', 'pie'],
+    basicOnly: true,
     title: true,
     seriesCache: true,
     seriesColor: true,
@@ -452,6 +460,7 @@ export const pptxAdapter: FormatAdapter = {
           package: packagePath(workspace),
           elementCount: index.elements.length,
           capabilities: pptxCapabilities,
+          ...editionMetadata,
           branch: 'main',
         });
       }

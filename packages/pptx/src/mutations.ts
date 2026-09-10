@@ -9,6 +9,7 @@ import {
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { resolveTarget, resolveToRef, cNvPrIdOf } from './addressing.js';
+import { assertWritable } from './edition.js';
 import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
@@ -302,6 +303,8 @@ const writeText = (
   text: string,
   diagnostics: Diagnostic[],
 ): Result<void> => {
+  const gated = assertWritable(item, archive);
+  if (!gated.ok) return gated;
   if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
     const result = updateChart(archive, item.payload['chartPart'], { title: text });
     if (result.workbook)
@@ -692,6 +695,13 @@ export async function mutate(
       'TRANSACTION_CONFLICT',
       `Expected revision ${item.ref.revision}, current ${index.revision}`,
     );
+
+  // Edition capability gate (master/layout/theme/advanced chart writes).
+  // Slide add/remove/duplicate and addSlide layout binding are not gated here.
+  if (item.kind !== 'slide') {
+    const gated = assertWritable(item, archive);
+    if (!gated.ok) return gated;
+  }
 
   const diagnostics: Diagnostic[] = [];
   if (item.kind === 'slide') {

@@ -11,6 +11,7 @@ import { helpTopicFromArgs, resolveHelp } from './help.js';
 import { runCommand } from './index.js';
 import { startMonitor } from './monitor.js';
 import { renderPage } from './render.js';
+import { EDITION } from './edition.js';
 import { version } from './version.js';
 
 const args = process.argv.slice(2);
@@ -226,7 +227,7 @@ try {
     const ok = await execute('stdin', parsed);
     if (!ok) process.exitCode = 1;
   } else if (clean[0] === '--version' || clean[0] === '-v' || clean[0] === '-V') {
-    process.stdout.write(`deckuse ${version}\n`);
+    process.stdout.write(`deckuse ${version} (edition=${EDITION})\n`);
   } else {
     const helpTopic = helpTopicFromArgs(clean);
     if (helpTopic !== null) {

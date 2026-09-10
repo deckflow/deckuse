@@ -13,6 +13,8 @@
 
 Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office 文档自动化引擎。它将文档打开为带版本的工作区，让智能体用语义地址（如 `slide:1/shape:2`）检查并精确定位结构，执行显式变更、验证结果，再导出新文档。
 
+本仓库为**社区版**（`edition=community`），说明见 [docs/edition.md](docs/edition.md)。商业版在独立仓库 `deckuse-commercial`。
+
 目前已实现 PPTX（**协议 2.0 / Phase 1a**）。DOCX、XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。
 
 ## 为何选择 Deckuse
@@ -316,8 +318,8 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 - 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`ctrTitle`）。
 - `replacePicture` replaces embedded media in place while retaining the element reference and layer order.
 - Table-cell addressing；表格行列增删与单元格 `fill`；speaker-note 读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。
-- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. An embedded workbook causes `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than a claim that workbook data was updated.
-- Common text and `srgbClr` color edits in master, layout, and theme parts.
+- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. An embedded workbook causes `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than a claim that workbook data was updated. 社区版对高级图表（其它 family、组合图、ChartEx）仅保留、不可编辑。
+- 可 list / resolve master、layout、theme；社区版拒绝写入这些部件（`UNSUPPORTED_CAPABILITY`）。Master/Layout 编辑见商业版仓库。
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity refers to uncompressed data for untouched entries, not ZIP byte identity.
 
 ## 限制

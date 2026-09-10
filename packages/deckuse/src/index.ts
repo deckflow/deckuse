@@ -45,3 +45,10 @@ export {
   type RenderOptions,
   type RenderResult,
 } from './render.js';
+export {
+  EDITION,
+  EDITION_VARIANT,
+  DISTRIBUTION_CHANNEL,
+  editionMetadata,
+  type Edition,
+} from './edition.js';
