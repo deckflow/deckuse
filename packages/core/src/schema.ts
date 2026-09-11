@@ -50,18 +50,36 @@ export type ElementRef = z.infer<typeof elementRefSchema>;
 export const targetPathSchema = z.string().min(1);
 export type TargetPath = z.infer<typeof targetPathSchema>;
 
+/** EMU number, or unit string (`120px`, `5%`, `1.5in`, …). Bare numbers are EMU. */
+export const lengthValueSchema = z.union([z.number(), z.string().min(1)]);
+export type LengthValue = z.infer<typeof lengthValueSchema>;
+
 export const transformSchema = z
   .object({
-    x: z.number().optional(),
-    y: z.number().optional(),
-    width: z.number().positive().optional(),
-    height: z.number().positive().optional(),
+    x: lengthValueSchema.optional(),
+    y: lengthValueSchema.optional(),
+    width: lengthValueSchema.optional(),
+    height: lengthValueSchema.optional(),
     rotation: z.number().optional(),
     flipHorizontal: z.boolean().optional(),
     flipVertical: z.boolean().optional(),
   })
   .strict();
 export type Transform = z.infer<typeof transformSchema>;
+
+export const textBlockSchema = z
+  .object({
+    text: z.string(),
+    fontSize: z.number().positive().optional(),
+    fontFamily: z.string().min(1).optional(),
+    textColor: z.string().min(1).optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    underline: z.boolean().optional(),
+    align: z.enum(['l', 'ctr', 'r', 'just', 'left', 'center', 'right', 'justify']).optional(),
+  })
+  .strict();
+export type TextBlock = z.infer<typeof textBlockSchema>;
 
 export const resolveModeSchema = z.enum(['effective', 'direct', 'both']);
 export type ResolveMode = z.infer<typeof resolveModeSchema>;
@@ -188,8 +206,19 @@ const setTextCommandSchema = z
     target: z.string().min(1).optional(),
     text: z.string().optional(),
     value: z.string().optional(),
+    /** Rich paragraphs: each block becomes one `a:p` with its own run style. */
+    blocks: z.array(textBlockSchema).min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.blocks === undefined && value.text === undefined && value.value === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'setText requires text, value, or blocks',
+        path: ['text'],
+      });
+    }
+  });
 
 const replaceTextCommandSchema = z
   .object({
@@ -246,10 +275,10 @@ const xfrmSetCommandSchema = z
     target: z.string().min(1).optional(),
     slide: z.number().int().positive().optional(),
     shape: z.union([z.number().int().positive(), z.string().min(1)]).optional(),
-    x: z.number().optional(),
-    y: z.number().optional(),
-    width: z.number().positive().optional(),
-    height: z.number().positive().optional(),
+    x: lengthValueSchema.optional(),
+    y: lengthValueSchema.optional(),
+    width: lengthValueSchema.optional(),
+    height: lengthValueSchema.optional(),
     rotation: z.number().optional(),
     flipX: z.boolean().optional(),
     flipY: z.boolean().optional(),
@@ -266,6 +295,27 @@ const zMoveCommandSchema = z
     below: z.string().min(1).optional(),
     toFront: z.boolean().optional(),
     toBack: z.boolean().optional(),
+  })
+  .strict();
+
+const alignElementsCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('alignElements'),
+    slide: z.number().int().positive(),
+    targets: z.array(z.string().min(1)).min(1),
+    mode: z.enum([
+      'left',
+      'right',
+      'top',
+      'bottom',
+      'center-h',
+      'center-v',
+      'distribute-h',
+      'distribute-v',
+    ]),
+    gap: lengthValueSchema.optional(),
   })
   .strict();
 
@@ -302,6 +352,10 @@ const chartDataSchema = z
             name: z.string().min(1),
             values: z.array(z.number()),
             color: z.string().min(1).optional(),
+            /** For combo charts: primary (left) or secondary (right) value axis. */
+            axis: z.enum(['primary', 'secondary']).optional(),
+            /** For combo charts: render this series as bar/column or line. */
+            chart: z.enum(['bar', 'column', 'line']).optional(),
           })
           .strict(),
       )
@@ -330,15 +384,20 @@ const addShapeCommandSchema = z
     ]),
     name: z.string().min(1).optional(),
     role: z.string().min(1).optional(),
-    x: z.number().optional(),
-    y: z.number().optional(),
-    width: z.number().positive().optional(),
-    height: z.number().positive().optional(),
+    x: lengthValueSchema.optional(),
+    y: lengthValueSchema.optional(),
+    width: lengthValueSchema.optional(),
+    height: lengthValueSchema.optional(),
     file: z.string().min(1).optional(),
     text: z.string().optional(),
     rows: z.array(z.array(z.string())).optional(),
-    chartType: z.enum(['bar', 'column', 'line', 'pie']).optional(),
+    /** Table visual preset. */
+    theme: z.enum(['minimal', 'zebra']).optional(),
+    /** Column alignments by index: l|ctr|r (or left|center|right). */
+    alignColumns: z.array(z.enum(['l', 'ctr', 'r', 'left', 'center', 'right'])).optional(),
+    chartType: z.enum(['bar', 'column', 'line', 'pie', 'combo']).optional(),
     data: chartDataSchema.optional(),
+    showDataLabels: z.boolean().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -367,7 +426,7 @@ const addShapeCommandSchema = z
         ctx.addIssue({
           code: 'custom',
           message:
-            '--type chart requires --chart-type <bar|column|line|pie> (example: --chart-type column --data \'{"categories":["Q1"],"series":[{"name":"S1","values":[1]}]}\')',
+            '--type chart requires --chart-type <bar|column|line|pie|combo> (example: --chart-type column --data \'{"categories":["Q1"],"series":[{"name":"S1","values":[1]}]}\')',
           path: ['chartType'],
         });
       }
@@ -378,6 +437,19 @@ const addShapeCommandSchema = z
             '--type chart requires --data \'<json>\' with categories + series (example: --data \'{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}\')',
           path: ['data'],
         });
+      }
+      if (value.chartType === 'combo' && value.data) {
+        const charts = new Set(
+          value.data.series.map((s) => s.chart ?? 'column'),
+        );
+        if (!charts.has('line') || (![...charts].some((c) => c === 'bar' || c === 'column'))) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'combo charts require at least one bar/column series and one line series (set series[].chart)',
+            path: ['data', 'series'],
+          });
+        }
       }
     }
   });
@@ -477,6 +549,7 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   setCommandSchema,
   xfrmSetCommandSchema,
   zMoveCommandSchema,
+  alignElementsCommandSchema,
   addCommandSchema,
   addSlideCommandSchema,
   addShapeCommandSchema,
@@ -512,6 +585,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   setCommandSchema,
   xfrmSetCommandSchema,
   zMoveCommandSchema,
+  alignElementsCommandSchema,
   addCommandSchema,
   addSlideCommandSchema,
   addShapeCommandSchema,

@@ -1,14 +1,17 @@
 import {
   err,
   ok,
+  parseLength,
   type AtomicCommand,
   type Diagnostic,
   type ElementRef,
+  type LengthInput,
   type Result,
 } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
 import { resolveTarget, resolveToRef, cNvPrIdOf } from './addressing.js';
+import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { assertWritable } from './edition.js';
 import { addElement, duplicateElement, updateChart } from './elements.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
@@ -17,14 +20,51 @@ import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, ensureNotes, removeSlide } from './slides.js';
+import { lengthContextFor } from './slide-size.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
 import { applyTableCellProperties, applyTableProperties } from './table.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
-import { REL, NS, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
+import {
+  REL,
+  NS,
+  attr,
+  children,
+  cNvPr,
+  descendants,
+  first,
+  root,
+  setNodeText,
+  setNodeTextBlocks,
+} from './xml.js';
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 const directChild = (node: Element, localName: string): Element | undefined =>
   children(node).find((child) => child.localName === localName);
+
+const resolveLengthField = (
+  archive: OpcArchive,
+  value: LengthInput | undefined,
+  axis: 'x' | 'y',
+): number | undefined => {
+  if (value === undefined) return undefined;
+  return parseLength(value, lengthContextFor(archive, axis));
+};
+
+const normalizeTransformFields = (
+  archive: OpcArchive,
+  fields: Record<string, unknown>,
+): Record<string, unknown> => {
+  const out = { ...fields };
+  for (const key of ['x', 'width'] as const) {
+    if (out[key] !== undefined)
+      out[key] = resolveLengthField(archive, out[key] as LengthInput, 'x');
+  }
+  for (const key of ['y', 'height'] as const) {
+    if (out[key] !== undefined && out[key] !== 'auto')
+      out[key] = resolveLengthField(archive, out[key] as LengthInput, 'y');
+  }
+  return out;
+};
 
 export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
   descendants(doc).find(
@@ -670,18 +710,26 @@ export async function mutate(
     }
     const doc = archive.readXml(slide.partUri);
     const parent = first(doc, 'spTree') ?? root(doc);
-    const element = shapeTypeToElement(command.shapeType, {
-      ...(command.name !== undefined ? { name: command.name } : {}),
-      ...(role !== undefined ? { role } : {}),
+    const geom = normalizeTransformFields(archive, {
       ...(command.x !== undefined ? { x: command.x } : {}),
       ...(command.y !== undefined ? { y: command.y } : {}),
       ...(command.width !== undefined ? { width: command.width } : {}),
       ...(command.height !== undefined ? { height: command.height } : {}),
+    });
+    const element = shapeTypeToElement(command.shapeType, {
+      ...(command.name !== undefined ? { name: command.name } : {}),
+      ...(role !== undefined ? { role } : {}),
+      ...geom,
       ...(command.file !== undefined ? { file: command.file } : {}),
       ...(command.text !== undefined ? { text: command.text } : {}),
       ...(command.rows !== undefined ? { rows: command.rows } : {}),
+      ...(command.theme !== undefined ? { theme: command.theme } : {}),
+      ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
       ...(command.chartType !== undefined ? { chartType: command.chartType } : {}),
       ...(command.data !== undefined ? { data: command.data } : {}),
+      ...(command.showDataLabels !== undefined
+        ? { showDataLabels: command.showDataLabels }
+        : {}),
     });
     const created = await addElement(archive, slide.partUri, doc, parent, element);
     archive.writeXml(slide.partUri, doc);
@@ -690,6 +738,44 @@ export async function mutate(
       changed: true,
       slides: [command.slide],
       changedTargets: [`slide:${command.slide}/shape:${id}`],
+      changedParts: [slide.partUri],
+    });
+  }
+
+  if (command.type === 'alignElements') {
+    const slides = index.elements.filter((item) => item.kind === 'slide');
+    const slide = slides[command.slide - 1];
+    if (!slide)
+      return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
+        target: `slide:${command.slide}`,
+      });
+    const doc = archive.readXml(slide.partUri);
+    const boxes = [];
+    for (const target of command.targets) {
+      const resolved = resolveTarget(index, target);
+      if (!resolved.ok) return resolved;
+      const node = nodeFor(doc, resolved.value.item);
+      if (!node)
+        return err('ELEMENT_NOT_FOUND', `Element XML node was not found: ${target}`, [], {
+          target,
+        });
+      const box = readBBox(node);
+      if (!box)
+        return err('INVALID_COMMAND', `Target has no geometry (xfrm): ${target}`, [], { target });
+      boxes.push(box);
+    }
+    const updates = computeAlignUpdates(
+      boxes,
+      command.mode,
+      command.gap,
+      lengthContextFor(archive, command.mode.includes('v') ? 'y' : 'x'),
+    );
+    for (const update of updates) writeBBox(update.node, update);
+    archive.writeXml(slide.partUri, doc);
+    return ok({
+      changed: true,
+      slides: [command.slide],
+      changedTargets: [...command.targets],
       changedParts: [slide.partUri],
     });
   }
@@ -772,28 +858,62 @@ export async function mutate(
   let chartMutated = false;
 
   if (command.type === 'setText') {
-    const text = command.text ?? command.value;
-    if (text === undefined) return err('INVALID_COMMAND', 'setText requires text or value');
-    if (chartPart) {
-      const result = updateChart(archive, chartPart, { title: text });
-      chartMutated = true;
-      if (result.workbook)
-        diagnostics.push({
-          severity: 'warning',
-          code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
-          message: 'Chart cache changed; embedded workbook was not modified',
-        });
-    } else setNodeText(node, text);
-  } else if (command.type === 'setTransform')
-    transform(node, command.transform, { archive, partUri: liveItem.partUri });
-  else if (command.type === 'xfrmSet') {
+    if (command.blocks !== undefined) {
+      if (chartPart)
+        return err('INVALID_COMMAND', 'Chart titles do not support rich text blocks');
+      setNodeTextBlocks(
+        node,
+        command.blocks.map((block) => {
+          const styled: {
+            text: string;
+            fontSize?: number;
+            fontFamily?: string;
+            textColor?: string;
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            align?: string;
+          } = { text: block.text };
+          if (block.fontSize !== undefined) styled.fontSize = block.fontSize;
+          if (block.fontFamily !== undefined) styled.fontFamily = block.fontFamily;
+          if (block.textColor !== undefined) styled.textColor = block.textColor;
+          if (block.bold !== undefined) styled.bold = block.bold;
+          if (block.italic !== undefined) styled.italic = block.italic;
+          if (block.underline !== undefined) styled.underline = block.underline;
+          if (block.align !== undefined) styled.align = block.align;
+          return styled;
+        }),
+      );
+    } else {
+      const text = command.text ?? command.value;
+      if (text === undefined) return err('INVALID_COMMAND', 'setText requires text, value, or blocks');
+      if (chartPart) {
+        const result = updateChart(archive, chartPart, { title: text });
+        chartMutated = true;
+        if (result.workbook)
+          diagnostics.push({
+            severity: 'warning',
+            code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
+            message: 'Chart cache changed; embedded workbook was not modified',
+          });
+      } else setNodeText(node, text);
+    }
+  } else if (command.type === 'setTransform') {
+    transform(node, normalizeTransformFields(archive, command.transform as Record<string, unknown>), {
+      archive,
+      partUri: liveItem.partUri,
+    });
+  } else if (command.type === 'xfrmSet') {
+    const geom = normalizeTransformFields(archive, {
+      ...(command.x !== undefined ? { x: command.x } : {}),
+      ...(command.y !== undefined ? { y: command.y } : {}),
+      ...(command.width !== undefined ? { width: command.width } : {}),
+      ...(command.height !== undefined ? { height: command.height } : {}),
+    });
     transform(
       node,
       {
-        ...(command.x !== undefined ? { x: command.x } : {}),
-        ...(command.y !== undefined ? { y: command.y } : {}),
-        ...(command.width !== undefined ? { width: command.width } : {}),
-        ...(command.height !== undefined ? { height: command.height } : {}),
+        ...geom,
         ...(command.rotation !== undefined ? { rotation: command.rotation } : {}),
         ...(command.flipX !== undefined ? { flipX: command.flipX } : {}),
         ...(command.flipY !== undefined ? { flipY: command.flipY } : {}),

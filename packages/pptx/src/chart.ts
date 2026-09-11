@@ -15,13 +15,17 @@ export const DEFAULT_SERIES_COLORS = [
   '1ABC9C',
 ] as const;
 
-export type ChartType = 'bar' | 'column' | 'line' | 'pie';
+export type ChartType = 'bar' | 'column' | 'line' | 'pie' | 'combo';
 
 export interface ChartSeriesInput {
   name: string;
   values: number[];
   /** Optional `#RRGGBB` or `RRGGBB` series fill. */
   color?: string;
+  /** Combo only: primary (left) or secondary (right) value axis. */
+  axis?: 'primary' | 'secondary';
+  /** Combo only: which plot family draws this series. */
+  chart?: 'bar' | 'column' | 'line';
 }
 
 export interface ChartCreateInput {
@@ -29,6 +33,9 @@ export interface ChartCreateInput {
   title?: string;
   categories: string[];
   series: ChartSeriesInput[];
+  showDataLabels?: boolean;
+  /** Number format code for value axis / numLit (e.g. `0%`, `#,##0`). */
+  valueFormatCode?: string;
 }
 
 const esc = (value: string) =>
@@ -66,22 +73,30 @@ const strLitPoints = (values: string[]) =>
     .join('')}`;
 
 /** Literal number points for c:numLit (not nested c:numCache — that belongs under c:numRef). */
-const numLitPoints = (values: number[]) =>
-  `<c:formatCode>General</c:formatCode><c:ptCount val="${String(values.length)}"/>${values
+const numLitPoints = (values: number[], formatCode = 'General') =>
+  `<c:formatCode>${esc(formatCode)}</c:formatCode><c:ptCount val="${String(values.length)}"/>${values
     .map((v, i) => `<c:pt idx="${String(i)}"><c:v>${String(v)}</c:v></c:pt>`)
     .join('')}`;
 
 const seriesSpPrXml = (color: string) =>
   `<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr>`;
 
-const seriesXml = (series: ChartSeriesInput[], categories: string[]) =>
+const dLblsXml = (show: boolean) =>
+  `<c:dLbls><c:showLegendKey val="0"/><c:showVal val="${show ? '1' : '0'}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
+
+const seriesXml = (
+  series: ChartSeriesInput[],
+  categories: string[],
+  options: { formatCode?: string; axIdVal?: string; startIndex?: number } = {},
+) =>
   series
-    .map((ser, index) => {
+    .map((ser, localIndex) => {
+      const index = (options.startIndex ?? 0) + localIndex;
       const cats =
         categories.length > 0
           ? `<c:cat><c:strLit>${strLitPoints(categories)}</c:strLit></c:cat>`
           : '';
-      const vals = `<c:val><c:numLit>${numLitPoints(ser.values)}</c:numLit></c:val>`;
+      const vals = `<c:val><c:numLit>${numLitPoints(ser.values, options.formatCode)}</c:numLit></c:val>`;
       const tx = `<c:tx><c:v>${esc(ser.name)}</c:v></c:tx>`;
       const color = ser.color
         ? normalizeHexColor(ser.color)
@@ -90,24 +105,75 @@ const seriesXml = (series: ChartSeriesInput[], categories: string[]) =>
     })
     .join('');
 
-const plotXml = (chartType: ChartType, series: ChartSeriesInput[], categories: string[]) => {
-  const ser = seriesXml(series, categories);
+const plotXml = (
+  chartType: ChartType,
+  series: ChartSeriesInput[],
+  categories: string[],
+  showDataLabels: boolean,
+  formatCode?: string,
+) => {
+  if (chartType === 'combo') {
+    const barSeries = series.filter((s) => (s.chart ?? 'column') !== 'line');
+    const lineSeries = series.filter((s) => (s.chart ?? 'column') === 'line');
+    const barDir = barSeries.some((s) => s.chart === 'bar') ? 'bar' : 'col';
+    const primaryBar = barSeries.filter((s) => (s.axis ?? 'primary') === 'primary');
+    const secondaryBar = barSeries.filter((s) => s.axis === 'secondary');
+    const primaryLine = lineSeries.filter((s) => (s.axis ?? 'primary') === 'primary');
+    const secondaryLine = lineSeries.filter((s) => s.axis === 'secondary');
+    // Put bar on primary (ax 1/2), line typically secondary (ax 1/3) when dual axis requested.
+    const useSecondary = secondaryBar.length + secondaryLine.length > 0 || lineSeries.length > 0;
+    let nextIdx = 0;
+    const take = (list: ChartSeriesInput[]) => {
+      const opts: { formatCode?: string; startIndex?: number } = { startIndex: nextIdx };
+      if (formatCode !== undefined) opts.formatCode = formatCode;
+      const xml = seriesXml(list, categories, opts);
+      nextIdx += list.length;
+      return xml;
+    };
+    const barPrimary = take(primaryBar.length ? primaryBar : barSeries);
+    const lineOnSecondary = useSecondary ? take(secondaryLine.length ? secondaryLine : lineSeries) : '';
+    const leftoverLine = !useSecondary ? take(primaryLine) : '';
+    const leftoverBarSec = take(secondaryBar);
+    const barChart =
+      primaryBar.length || barSeries.length
+        ? `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${barPrimary}${leftoverBarSec}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`
+        : '';
+    const lineAxId = useSecondary ? '3' : '2';
+    const lineChart =
+      lineSeries.length > 0
+        ? `<c:lineChart><c:grouping val="standard"/>${useSecondary ? lineOnSecondary : leftoverLine}<c:marker val="1"/>${dLblsXml(showDataLabels)}<c:axId val="1"/><c:axId val="${lineAxId}"/></c:lineChart>`
+        : '';
+    return `${barChart}${lineChart}`;
+  }
+  const ser = seriesXml(
+    series,
+    categories,
+    formatCode !== undefined ? { formatCode } : {},
+  );
   if (chartType === 'pie') {
-    return `<c:pieChart><c:varyColors val="1"/>${ser}<c:dLbls><c:showPercent val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/></c:dLbls></c:pieChart>`;
+    return `<c:pieChart><c:varyColors val="1"/>${ser}${dLblsXml(showDataLabels)}</c:pieChart>`;
   }
   if (chartType === 'line') {
-    return `<c:lineChart><c:grouping val="standard"/>${ser}<c:marker val="1"/><c:axId val="1"/><c:axId val="2"/></c:lineChart>`;
+    return `<c:lineChart><c:grouping val="standard"/>${ser}<c:marker val="1"/>${dLblsXml(showDataLabels)}<c:axId val="1"/><c:axId val="2"/></c:lineChart>`;
   }
   const barDir = chartType === 'bar' ? 'bar' : 'col';
-  // CT_BarChart order: barDir, grouping, varyColors?, ser*, dLbls?, gapWidth, overlap, serLines?, axId*
-  // gapWidth 100 ≈ clearer clustered grouping than OOXML default 150.
-  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${ser}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
+  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${ser}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
 };
 
-const axesXml = (chartType: ChartType) => {
+const axesXml = (chartType: ChartType, series: ChartSeriesInput[], formatCode?: string) => {
   if (chartType === 'pie') return '';
-  // CT_CatAx / CT_ValAx: tickLblPos before spPr/txPr/crossAx (not after crossAx).
-  return `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/><c:crossAx val="1"/></c:valAx>`;
+  const numFmt =
+    formatCode && formatCode !== 'General'
+      ? `<c:numFmt formatCode="${esc(formatCode)}" sourceLinked="0"/>`
+      : '';
+  if (chartType === 'combo') {
+    const needsSecondary =
+      series.some((s) => s.axis === 'secondary') || series.some((s) => (s.chart ?? 'column') === 'line');
+    const primary = `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
+    if (!needsSecondary) return primary;
+    return `${primary}<c:valAx><c:axId val="3"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="r"/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/><c:crosses val="max"/></c:valAx>`;
+  }
+  return `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
 };
 
 const titleXml = (title?: string) => {
@@ -118,9 +184,11 @@ const titleXml = (title?: string) => {
 export function buildChartXml(input: ChartCreateInput): string {
   const categories = input.categories;
   const series = input.series;
+  const showDataLabels = input.showDataLabels === true;
+  const formatCode = input.valueFormatCode;
   const legend =
     input.chartType === 'pie' ? '' : '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>';
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories)}${axesXml(input.chartType)}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories, showDataLabels, formatCode)}${axesXml(input.chartType, series, formatCode)}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
 }
 
 export function createChartPart(
@@ -512,5 +580,73 @@ export function applyChartProperties(
           ? '8893A8'
           : 'FFFFFF';
     applyChartMajorGridlines(chartDoc, properties['showMajorGridlines'], gridColor);
+  }
+
+  if (typeof properties['showDataLabels'] === 'boolean')
+    applyChartDataLabels(chartDoc, properties['showDataLabels']);
+
+  const formatCode =
+    typeof properties['valueFormatCode'] === 'string'
+      ? properties['valueFormatCode']
+      : typeof properties['axisFormatCode'] === 'string'
+        ? properties['axisFormatCode']
+        : undefined;
+  if (typeof formatCode === 'string') applyChartValueFormat(chartDoc, formatCode);
+}
+
+export function applyChartDataLabels(chartDoc: Document, show: boolean): void {
+  for (const plot of [
+    ...descendants(chartDoc, 'barChart'),
+    ...descendants(chartDoc, 'lineChart'),
+    ...descendants(chartDoc, 'pieChart'),
+  ]) {
+    let dLbls = directChild(plot, 'dLbls');
+    if (!dLbls) {
+      dLbls = chartDoc.createElementNS(NS.c, 'c:dLbls');
+      const after =
+        [...children(plot)].reverse().find((c) => c.localName === 'ser') ??
+        directChild(plot, 'varyColors') ??
+        directChild(plot, 'grouping') ??
+        directChild(plot, 'barDir');
+      if (after?.nextSibling) plot.insertBefore(dLbls, after.nextSibling);
+      else if (after) plot.appendChild(dLbls);
+      else plot.appendChild(dLbls);
+    }
+    const setFlag = (name: string, val: string) => {
+      let node = directChild(dLbls!, name);
+      if (!node) {
+        node = chartDoc.createElementNS(NS.c, `c:${name}`);
+        dLbls!.appendChild(node);
+      }
+      node.setAttribute('val', val);
+    };
+    setFlag('showVal', show ? '1' : '0');
+    setFlag('showPercent', '0');
+    setFlag('showCatName', '0');
+    setFlag('showSerName', '0');
+  }
+}
+
+export function applyChartValueFormat(chartDoc: Document, formatCode: string): void {
+  for (const ax of descendants(chartDoc, 'valAx')) {
+    let numFmt = directChild(ax, 'numFmt');
+    if (!numFmt) {
+      numFmt = chartDoc.createElementNS(NS.c, 'c:numFmt');
+      const after = directChild(ax, 'tickLblPos') ?? directChild(ax, 'majorGridlines');
+      if (after?.nextSibling) ax.insertBefore(numFmt, after.nextSibling);
+      else if (after) ax.appendChild(numFmt);
+      else ax.appendChild(numFmt);
+    }
+    numFmt.setAttribute('formatCode', formatCode);
+    numFmt.setAttribute('sourceLinked', '0');
+  }
+  for (const lit of [...descendants(chartDoc, 'numLit'), ...descendants(chartDoc, 'numCache')]) {
+    let code = directChild(lit, 'formatCode');
+    if (!code) {
+      code = chartDoc.createElementNS(NS.c, 'c:formatCode');
+      if (lit.firstChild) lit.insertBefore(code, lit.firstChild);
+      else lit.appendChild(code);
+    }
+    code.textContent = formatCode;
   }
 }

@@ -7,9 +7,15 @@ import {
   type CommandEnvelope,
   type Result,
 } from '@deckflow/deckuse-core';
+import { resolveCliText } from './cli-text.js';
 import { helpTopicFromArgs, resolveHelp } from './help.js';
 import { runCommand } from './index.js';
-import { startMonitor } from './monitor.js';
+import {
+  monitorStart,
+  monitorStatus,
+  monitorStop,
+  runMonitorForeground,
+} from './monitor-daemon.js';
 import { renderPage } from './render.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
@@ -219,6 +225,14 @@ const optionFrom = (list: string[], name: string): string | undefined => {
   return i >= 0 ? list[i + 1] : undefined;
 };
 
+/** Pass through bare numbers as number; keep unit strings for protocol parseLength. */
+const lengthArg = (raw: string | undefined): number | string | undefined => {
+  if (raw === undefined) return undefined;
+  if (raw === 'auto') return 'auto';
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
+  return raw;
+};
+
 const main = async (): Promise<void> => {
 try {
   if (clean.length === 0) {
@@ -367,6 +381,24 @@ try {
           }
         }
         const chartType = optionFrom(clean, '--chart-type');
+        const textRaw = takeFlag(clean, '--text-raw');
+        const textFile = optionFrom(clean, '--text-file');
+        const textOpt = optionFrom(clean, '--text');
+        const initialText = await resolveCliText({
+          ...(textOpt !== undefined ? { value: textOpt } : {}),
+          ...(textFile !== undefined ? { textFile } : {}),
+          raw: textRaw,
+        });
+        const theme = optionFrom(clean, '--theme');
+        const alignColumnsRaw = optionFrom(clean, '--align-columns');
+        let alignColumns: Array<'l' | 'ctr' | 'r' | 'left' | 'center' | 'right'> | undefined;
+        if (alignColumnsRaw) {
+          try {
+            alignColumns = JSON.parse(alignColumnsRaw) as typeof alignColumns;
+          } catch {
+            alignColumns = alignColumnsRaw.split(',').map((s) => s.trim()) as typeof alignColumns;
+          }
+        }
         ok = await execute('deckuse add shape', {
           ...base,
           type: 'addShape',
@@ -374,19 +406,26 @@ try {
           shapeType,
           ...(optionFrom(clean, '--name') ? { name: optionFrom(clean, '--name') } : {}),
           ...(optionFrom(clean, '--role') ? { role: optionFrom(clean, '--role') } : {}),
-          ...(optionFrom(clean, '--x') ? { x: Number(optionFrom(clean, '--x')) } : {}),
-          ...(optionFrom(clean, '--y') ? { y: Number(optionFrom(clean, '--y')) } : {}),
-          ...(optionFrom(clean, '--width') ? { width: Number(optionFrom(clean, '--width')) } : {}),
-          ...(optionFrom(clean, '--height')
-            ? { height: Number(optionFrom(clean, '--height')) }
+          ...(lengthArg(optionFrom(clean, '--x')) !== undefined
+            ? { x: lengthArg(optionFrom(clean, '--x')) }
+            : {}),
+          ...(lengthArg(optionFrom(clean, '--y')) !== undefined
+            ? { y: lengthArg(optionFrom(clean, '--y')) }
+            : {}),
+          ...(lengthArg(optionFrom(clean, '--width')) !== undefined
+            ? { width: lengthArg(optionFrom(clean, '--width')) }
+            : {}),
+          ...(lengthArg(optionFrom(clean, '--height')) !== undefined
+            ? { height: lengthArg(optionFrom(clean, '--height')) }
             : {}),
           ...(optionFrom(clean, '--file') ? { file: optionFrom(clean, '--file') } : {}),
-          ...(optionFrom(clean, '--text') !== undefined
-            ? { text: optionFrom(clean, '--text') }
-            : {}),
+          ...(initialText !== undefined ? { text: initialText } : {}),
           ...(rows !== undefined ? { rows } : {}),
+          ...(theme ? { theme } : {}),
+          ...(alignColumns ? { alignColumns } : {}),
           ...(chartType ? { chartType } : {}),
           ...(data !== undefined ? { data } : {}),
+          ...(takeFlag(clean, '--show-data-labels') ? { showDataLabels: true } : {}),
         });
       } else throw new Error('Usage: deckuse add <slide|shape> ...');
     } else if (action === 'remove') {
@@ -403,15 +442,44 @@ try {
       const base = await mutationExtras(workspace);
       if (clean[1] === 'text') {
         const target = clean[2];
-        const value = optionFrom(clean, '--value');
-        if (!target || value === undefined)
-          throw new Error('Usage: deckuse set text <target> --value <text>');
-        ok = await execute('deckuse set text', {
-          ...base,
-          type: 'setText',
-          target,
-          value,
-        });
+        const textRaw = takeFlag(clean, '--text-raw');
+        const textFile = optionFrom(clean, '--text-file');
+        const valueOpt = optionFrom(clean, '--value');
+        const blocksRaw = optionFrom(clean, '--blocks');
+        if (!target)
+          throw new Error(
+            'Usage: deckuse set text <target> --value <text> | --text-file <path> | --blocks <json>',
+          );
+        if (blocksRaw !== undefined) {
+          let blocks: unknown;
+          try {
+            blocks = JSON.parse(blocksRaw);
+          } catch {
+            throw new Error('--blocks must be JSON array of {text, fontSize?, textColor?, ...}');
+          }
+          ok = await execute('deckuse set text', {
+            ...base,
+            type: 'setText',
+            target,
+            blocks,
+          });
+        } else {
+          const value = await resolveCliText({
+            ...(valueOpt !== undefined ? { value: valueOpt } : {}),
+            ...(textFile !== undefined ? { textFile } : {}),
+            raw: textRaw,
+          });
+          if (value === undefined)
+            throw new Error(
+              'Usage: deckuse set text <target> --value <text> | --text-file <path> | --blocks <json>',
+            );
+          ok = await execute('deckuse set text', {
+            ...base,
+            type: 'setText',
+            target,
+            value,
+          });
+        }
       } else {
         const target = clean[1];
         if (!target) throw new Error('Usage: deckuse set <target> --font.size 42 ...');
@@ -467,16 +535,40 @@ try {
         ...(await mutationExtras(workspace)),
         type: 'xfrmSet',
         target,
-        ...(optionFrom(clean, '--x') ? { x: Number(optionFrom(clean, '--x')) } : {}),
-        ...(optionFrom(clean, '--y') ? { y: Number(optionFrom(clean, '--y')) } : {}),
-        ...(optionFrom(clean, '--width') || optionFrom(clean, '--cx')
-          ? { width: Number(optionFrom(clean, '--width') ?? optionFrom(clean, '--cx')) }
+        ...(lengthArg(optionFrom(clean, '--x')) !== undefined
+          ? { x: lengthArg(optionFrom(clean, '--x')) }
           : {}),
-        ...(optionFrom(clean, '--height') || optionFrom(clean, '--cy')
-          ? { height: Number(optionFrom(clean, '--height') ?? optionFrom(clean, '--cy')) }
+        ...(lengthArg(optionFrom(clean, '--y')) !== undefined
+          ? { y: lengthArg(optionFrom(clean, '--y')) }
+          : {}),
+        ...(lengthArg(optionFrom(clean, '--width') ?? optionFrom(clean, '--cx')) !== undefined
+          ? { width: lengthArg(optionFrom(clean, '--width') ?? optionFrom(clean, '--cx')) }
+          : {}),
+        ...(lengthArg(optionFrom(clean, '--height') ?? optionFrom(clean, '--cy')) !== undefined
+          ? { height: lengthArg(optionFrom(clean, '--height') ?? optionFrom(clean, '--cy')) }
           : {}),
         ...(optionFrom(clean, '--rotation')
           ? { rotation: Number(optionFrom(clean, '--rotation')) }
+          : {}),
+      });
+    } else if (action === 'align') {
+      const workspace = await findWorkspace(workspaceOpt);
+      const slide = optionFrom(clean, '--slide');
+      const targetsRaw = optionFrom(clean, '--targets');
+      const mode = optionFrom(clean, '--mode');
+      if (!slide || !targetsRaw || !mode)
+        throw new Error(
+          'Usage: deckuse align --slide <n> --targets <t1,t2,...> --mode <left|right|top|bottom|center-h|center-v|distribute-h|distribute-v> [--gap <length>]',
+        );
+      const targets = targetsRaw.split(',').map((t) => t.trim()).filter(Boolean);
+      ok = await execute('deckuse align', {
+        ...(await mutationExtras(workspace)),
+        type: 'alignElements',
+        slide: Number(slide),
+        targets,
+        mode,
+        ...(lengthArg(optionFrom(clean, '--gap')) !== undefined
+          ? { gap: lengthArg(optionFrom(clean, '--gap')) }
           : {}),
       });
     } else if (action === 'z') {
@@ -622,15 +714,56 @@ try {
         ...(revisionOpt ? { revision: revisionOpt } : {}),
       });
     } else if (action === 'monitor') {
-      const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+      const sub =
+        clean[1] === 'start' || clean[1] === 'stop' || clean[1] === 'status' ? clean[1] : undefined;
+      const daemonWorker = takeFlag(clean, '--daemon-worker');
+      const positionalWorkspace = sub
+        ? clean[2] && !clean[2].startsWith('--')
+          ? clean[2]
+          : undefined
+        : clean[1] && !clean[1].startsWith('--')
+          ? clean[1]
+          : undefined;
+      const workspace = await findWorkspace(workspaceOpt ?? positionalWorkspace);
       const port = Number(optionFrom(clean, '--port') ?? 4173);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new Error('--port must be an integer between 0 and 65535');
-      const monitor = await startMonitor(workspace, {
-        host: optionFrom(clean, '--host') ?? '0.0.0.0',
+      const host = optionFrom(clean, '--host') ?? '0.0.0.0';
+
+      if (sub === 'start') {
+        const meta = await monitorStart(workspace, { host, port });
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse monitor start',
+          data: meta,
+        });
+        return;
+      }
+      if (sub === 'stop') {
+        const result = await monitorStop(workspace);
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse monitor stop',
+          data: result,
+        });
+        return;
+      }
+      if (sub === 'status') {
+        const result = await monitorStatus(workspace);
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse monitor status',
+          data: result,
+        });
+        return;
+      }
+
+      const monitor = await runMonitorForeground(workspace, {
+        host,
         port,
+        asDaemonWorker: daemonWorker,
       });
-      process.stdout.write(`Deckuse monitor: ${monitor.url}\n`);
+      if (!daemonWorker) process.stdout.write(`Deckuse monitor: ${monitor.url}\n`);
       const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
         process.stderr.write(`deckuse monitor: received ${signal}, shutting down\n`);
         await monitor.close();

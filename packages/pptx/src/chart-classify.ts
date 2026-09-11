@@ -20,7 +20,7 @@ const plotAreaChartFamilies = (plotArea: Element): string[] =>
 
 /**
  * Classify a Legacy Chart / ChartEx document as basic or advanced.
- * Fail closed: anything not a single basic family is advanced.
+ * Fail closed: anything not a single basic family (or community-allowed bar+line combo) is advanced.
  */
 export const classifyChartDocument = (doc: Document): ChartVariant => {
   const docEl = root(doc);
@@ -32,6 +32,14 @@ export const classifyChartDocument = (doc: Document): ChartVariant => {
   if (!plotArea) return 'advanced';
 
   const families = plotAreaChartFamilies(plotArea);
+  // Community-allowed limited combo: exactly barChart + lineChart.
+  if (
+    families.length === 2 &&
+    families.includes('barChart') &&
+    families.includes('lineChart')
+  ) {
+    return 'basic';
+  }
   if (families.length !== 1) return 'advanced';
   const only = families[0]!;
   if (!BASIC_CHART_LOCAL_NAMES.has(only)) return 'advanced';

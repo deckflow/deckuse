@@ -133,7 +133,7 @@ describe('deckuse CLI', () => {
   it('provides version and Phase 1a help', async () => {
     const version = await run(['-V']);
     expect(version).toMatchObject({ code: 0, stderr: '' });
-    expect(version.stdout).toMatch(/^deckuse \d+\.\d+\.\d+\n$/);
+    expect(version.stdout).toMatch(/^deckuse \d+\.\d+\.\d+( \(edition=\w+\))?\n$/);
 
     const help = await run(['--help']);
     expect(help).toMatchObject({ code: 0, stderr: '' });
@@ -167,7 +167,7 @@ describe('deckuse CLI', () => {
 
     const setText = await run(['help', 'set', 'text']);
     expect(setText).toMatchObject({ code: 0, stderr: '' });
-    expect(setText.stdout).toContain('usage: deckuse set text <target> --value <text>');
+    expect(setText.stdout).toContain('usage: deckuse set text <target>');
     expect(setText.stdout).toContain('--value <text>');
 
     const nested = await run(['xfrm', 'set', '--slide', '1', '-h']);

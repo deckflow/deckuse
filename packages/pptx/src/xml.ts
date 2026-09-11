@@ -144,6 +144,93 @@ export const setNodeText = (node: Node, text: string): void => {
     node.appendChild(paragraph);
   }
 };
+
+export interface TextBlockStyle {
+  readonly text: string;
+  readonly fontSize?: number;
+  readonly fontFamily?: string;
+  readonly textColor?: string;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly align?: string;
+}
+
+const normalizeAlign = (align: string | undefined): string | undefined => {
+  if (!align) return undefined;
+  const map: Record<string, string> = {
+    left: 'l',
+    l: 'l',
+    center: 'ctr',
+    ctr: 'ctr',
+    right: 'r',
+    r: 'r',
+    justify: 'just',
+    just: 'just',
+  };
+  return map[align] ?? align;
+};
+
+const buildRunPr = (doc: Document, block: TextBlockStyle): Element => {
+  const rPr = doc.createElementNS(NS.a, 'a:rPr');
+  rPr.setAttribute('lang', 'en-US');
+  if (block.fontSize !== undefined)
+    rPr.setAttribute('sz', String(Math.round(block.fontSize * 100)));
+  if (block.bold) rPr.setAttribute('b', '1');
+  if (block.italic) rPr.setAttribute('i', '1');
+  if (block.underline) rPr.setAttribute('u', 'sng');
+  if (block.fontFamily) {
+    const latin = doc.createElementNS(NS.a, 'a:latin');
+    latin.setAttribute('typeface', block.fontFamily);
+    rPr.appendChild(latin);
+    const ea = doc.createElementNS(NS.a, 'a:ea');
+    ea.setAttribute('typeface', block.fontFamily);
+    rPr.appendChild(ea);
+  }
+  if (block.textColor) {
+    const hex = block.textColor.replace(/^#/, '').toUpperCase();
+    const solid = doc.createElementNS(NS.a, 'a:solidFill');
+    const srgb = doc.createElementNS(NS.a, 'a:srgbClr');
+    srgb.setAttribute('val', hex);
+    solid.appendChild(srgb);
+    if (rPr.firstChild) rPr.insertBefore(solid, rPr.firstChild);
+    else rPr.appendChild(solid);
+  }
+  return rPr;
+};
+
+/** Write styled paragraph blocks (one `a:p` per block) into a shape/notes txBody. */
+export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[]): void => {
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Node has no document');
+  let container = paragraphContainer(node);
+  if (!container) {
+    if (node.nodeType === 1) {
+      container = doc.createElementNS(NS.a, 'a:txBody');
+      container.appendChild(doc.createElementNS(NS.a, 'a:bodyPr'));
+      container.appendChild(doc.createElementNS(NS.a, 'a:lstStyle'));
+      (node as Element).appendChild(container);
+    } else throw new Error('Cannot locate txBody for rich text blocks');
+  }
+  for (const child of [...children(container)])
+    if (child.localName === 'p') container.removeChild(child);
+  for (const block of blocks) {
+    const paragraph = doc.createElementNS(NS.a, 'a:p');
+    const align = normalizeAlign(block.align);
+    if (align) {
+      const pPr = doc.createElementNS(NS.a, 'a:pPr');
+      pPr.setAttribute('algn', align);
+      paragraph.appendChild(pPr);
+    }
+    const run = doc.createElementNS(NS.a, 'a:r');
+    run.appendChild(buildRunPr(doc, block));
+    const t = doc.createElementNS(NS.a, 'a:t');
+    t.appendChild(doc.createTextNode(block.text));
+    run.appendChild(t);
+    paragraph.appendChild(run);
+    container.appendChild(paragraph);
+  }
+};
 export const cNvPr = (node: Element): Element | undefined => first(node, 'cNvPr');
 export const nextShapeId = (doc: Document): number =>
   Math.max(0, ...descendants(doc, 'cNvPr').map((item) => Number(attr(item, 'id') ?? 0))) + 1;

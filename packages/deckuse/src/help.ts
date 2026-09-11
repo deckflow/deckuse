@@ -29,13 +29,14 @@ Commands:
   set           Set text or dotted properties on a target
   replace-text  Find/replace text across the deck
   xfrm          Set geometry (x/y/width/height/rotation)
+  align         Align or distribute shapes on a slide
   z             Change z-order
   apply         Apply one or many JSON / JSONL write commands
   validate      Validate package / relationships
   history       Show write history
   undo          Undo recent write revisions
   export        Pack workspace to .pptx
-  monitor       Live HTML preview server
+  monitor       Live HTML preview server (foreground or start/status/stop)
   render        Screenshot one slide to PNG (for visual review)
   query         Back-compat selector query (prefer search / list)
 
@@ -253,9 +254,9 @@ Run 'deckuse add <slide|shape> --help' for details.`,
   'add shape': {
     usage: 'deckuse add shape --slide <n> --type <kind> [options]',
     summary:
-      'Insert a shape on a slide. Geometry uses EMU integers (1 CSS px @ 96 DPI = 9525 EMU).',
+      'Insert a shape on a slide. Geometry accepts EMU numbers or unit strings (px|pt|cm|mm|in|%).',
     example:
-      'deckuse add shape --slide 1 --type text --text "Hello" --name Title --x 0 --y 0 --width 914400 --height 457200 --json',
+      'deckuse add shape --slide 1 --type text --text "Hello\\nWorld" --name Title --x 5% --y 120px --width 90% --height 150px --json',
     details: `Required:
   --slide <n>               One-based slide index
   --type <kind>             text | rect | rounded-rect | ellipse | line | image | group | table | chart | video | audio
@@ -265,28 +266,34 @@ Common options:
   --role <role>             OOXML p:ph type (title, body, subTitle, ctrTitle, …).
                             Aliases: subtitle→subTitle, centertitle→ctrTitle.
                             Unknown roles are rejected (INVALID_COMMAND).
-  --x <emu>                 X position in EMU
-  --y <emu>                 Y position in EMU
-  --width <emu>             Width in EMU
-  --height <emu>            Height in EMU
+  --x/--y/--width/--height  EMU number, or unit string: 120px, 12pt, 1.5in, 5%, …
+                            Bare numbers are EMU. % is relative to slide size.
+                            px uses 96 DPI (1px = 9525 EMU).
 
 Type-specific:
-  --text <text>             Initial text (--type text)
+  --text <text>             Initial text (--type text). Supports \\n / \\t escapes.
+  --text-file <path>        Read initial text from a UTF-8 file
+  --text-raw                Disable escape processing for --text
   --file <path>             Media path (required for image | video | audio)
   --rows <json>             string[][] JSON (required for table)
-  --chart-type <kind>       bar | column | line | pie (required for chart)
+  --height auto             Table only: compute height from row count × font heuristic
+  --theme <name>            Table theme: minimal | zebra
+  --align-columns <list>    Table column aligns (JSON array or comma list: l,ctr,r)
+  --chart-type <kind>       bar | column | line | pie | combo (required for chart)
   --data <json>             Chart data JSON (required for chart):
-                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1],"color?":"#5B8DEF"}]}
+                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1],"color?":"#5B8DEF","chart?":"column","axis?":"primary"}]}
+  --show-data-labels        Enable chart data labels on create
 
 Chart styling (via set / apply setProperties on a chart target):
   title, series[{name,values,color}], textColor / font.color,
-  gapWidth, showMajorGridlines
+  gapWidth, showMajorGridlines, showDataLabels, valueFormatCode / axisFormatCode
 
 Examples:
-  deckuse add shape --slide 1 --type text --text 'Hello' --json
+  deckuse add shape --slide 1 --type text --text 'Hello\\nWorld' --json
   deckuse add shape --slide 1 --type image --file ./photo.png --json
-  deckuse add shape --slide 1 --type table --rows '[["A","B"],["1","2"]]' --json
-  deckuse add shape --slide 1 --type chart --chart-type column --data '{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}' --json
+  deckuse add shape --slide 1 --type table --rows '[["A","B"],["1","2"]]' --height auto --theme zebra --json
+  deckuse add shape --slide 1 --type chart --chart-type column --data '{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}' --show-data-labels --json
+  deckuse add shape --slide 1 --type chart --chart-type combo --data '{"categories":["Q1","Q2"],"series":[{"name":"Rev","values":[10,20],"chart":"column"},{"name":"Margin","values":[0.1,0.2],"chart":"line","axis":"secondary"}]}' --json
   deckuse add shape --slide 1 --type video --file ./clip.mp4 --json
   deckuse add shape --slide 1 --type audio --file ./track.mp3 --json
 
@@ -326,6 +333,7 @@ Table targets also accept:
 Chart targets also accept:
   title, series (JSON array with name/values/color),
   textColor | font.color, gapWidth, showMajorGridlines,
+  showDataLabels, valueFormatCode | axisFormatCode,
   fill | background, gridlineColor
 
 Options:
@@ -337,17 +345,26 @@ Run 'deckuse set text --help' for the text form.`,
   },
 
   'set text': {
-    usage: 'deckuse set text <target> --value <text> [options]',
-    summary: 'Replace the full text body of a target. Does not search across the deck.',
-    example: "deckuse set text slide:1/shape:2 --value 'Hello' --json",
+    usage:
+      'deckuse set text <target> (--value <text> | --text-file <path> | --blocks <json>) [options]',
+    summary:
+      'Replace the full text body of a target. CLI \\n/\\t escapes become real characters unless --text-raw.',
+    example: "deckuse set text slide:1/shape:2 --value 'Line1\\nLine2' --json",
     details: `Arguments:
   <target>                  e.g. slide:1/shape:2 or slide:1/shape:2/text
 
-Required:
-  --value <text>            Replacement text (use $'...' for newlines in shells)
+Text source (choose one):
+  --value <text>            Replacement text (\\n \\t \\\\ unescaped unless --text-raw)
+  --text-file <path>        Read UTF-8 text from file
+  --blocks <json>           Rich paragraphs: [{"text":"…","fontSize":12,"textColor":"6B7280","bold":true}, …]
 
 Options:
-  ${WRITE_GLOBALS}`,
+  --text-raw                Keep escape sequences in --value literal
+  ${WRITE_GLOBALS}
+
+Notes:
+  Prefer protocol JSON setText (real newlines or blocks) for agents.
+  Each blocks[] entry becomes one styled paragraph.`,
   },
 
   'replace-text': {
@@ -389,21 +406,38 @@ Run 'deckuse xfrm set --help' for details.`,
 
   'xfrm set': {
     usage: 'deckuse xfrm set (--target <t> | --slide <n> --shape <id>) [geometry]',
-    summary: 'Set x/y/width/height/rotation on one shape in EMU / degrees.',
+    summary:
+      'Set x/y/width/height/rotation. Lengths may be EMU numbers or unit strings (px|pt|cm|mm|in|%).',
     example:
-      'deckuse xfrm set --target slide:1/shape:2 --x 914400 --y 1371600 --width 6858000 --height 1371600',
+      'deckuse xfrm set --target slide:1/shape:2 --x 5% --y 120px --width 90% --height 150px',
     details: `Addressing (one required):
   --target <target>         e.g. slide:1/shape:2
   --slide <n> --shape <id>  Combined into slide:<n>/shape:<id>
 
 Geometry (all optional; supplied fields applied together):
-  --x <emu>                 X position
-  --y <emu>                 Y position
-  --width <emu>             Width (--cx alias)
-  --height <emu>            Height (--cy alias)
+  --x/--y/--width/--height  EMU or unit string (px, pt, cm, mm, in, %). Bare number = EMU.
+  --cx/--cy                 Aliases for width/height
   --rotation <deg>          Clockwise rotation
 
 Options:
+  ${WRITE_GLOBALS}`,
+  },
+
+  align: {
+    usage:
+      'deckuse align --slide <n> --targets <t1,t2,...> --mode <mode> [--gap <length>]',
+    summary:
+      'Align or distribute shapes. Compiles to absolute EMU xfrm writes (not a layout engine).',
+    example:
+      'deckuse align --slide 2 --targets "slide:2/shape:3,slide:2/shape:4,slide:2/shape:5" --mode distribute-h --gap 20px --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+  --targets <list>          Comma-separated targets
+  --mode <mode>             left | right | top | bottom | center-h | center-v |
+                            distribute-h | distribute-v
+
+Options:
+  --gap <length>            Optional gap for distribute-* (px|pt|cm|in|%|EMU)
   ${WRITE_GLOBALS}`,
   },
 
@@ -460,9 +494,52 @@ Accepted input shapes (batch-capable):
   JSONL                     One command object per line
 
 Notes:
-  One invocation can apply many write commands (JSON array, JSONL, or
-  { "operations": [...] }); multiple commands run as one atomic batch.
-  Only write command types are accepted.
+  Prefer apply for agent workflows: one revision, one audit entry, atomic rollback.
+  Only write command types are accepted (setText, setProperties, addShape,
+  setTransform / xfrmSet, alignElements, …).
+
+Template (ops.json) — add KPI card shapes then style them:
+
+  {
+    "operations": [
+      {
+        "type": "addShape",
+        "slide": 2,
+        "shapeType": "rect",
+        "name": "kpi-1",
+        "x": "5%",
+        "y": "120px",
+        "width": "20%",
+        "height": "150px"
+      },
+      {
+        "type": "addShape",
+        "slide": 2,
+        "shapeType": "text",
+        "name": "kpi-1-label",
+        "x": "5%",
+        "y": "130px",
+        "width": "20%",
+        "height": "130px",
+        "text": "Revenue"
+      },
+      {
+        "type": "setText",
+        "target": "slide:2/shape:3",
+        "blocks": [
+          { "text": "全年总收入", "fontSize": 12, "textColor": "6B7280" },
+          { "text": "598 百万元", "fontSize": 20, "textColor": "059669", "bold": true }
+        ]
+      },
+      {
+        "type": "alignElements",
+        "slide": 2,
+        "targets": ["slide:2/shape:3", "slide:2/shape:4", "slide:2/shape:5"],
+        "mode": "distribute-h",
+        "gap": "20px"
+      }
+    ]
+  }
 
 Examples:
   deckuse apply --input ops.json --json
@@ -528,10 +605,18 @@ Options:
   },
 
   monitor: {
-    usage: 'deckuse monitor [<workspace>] [--host <addr>] [--port <n>]',
-    summary: 'Start a live HTML preview server for the workspace.',
-    example: 'deckuse monitor --workspace ./workspace --port 4173',
-    details: `Arguments:
+    usage:
+      'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>]',
+    summary:
+      'Live HTML preview. Bare `monitor` is foreground; start/status/stop manage a background daemon.',
+    example: 'deckuse monitor start --workspace ./workspace --port 4173',
+    details: `Subcommands:
+  (none)                    Foreground server until SIGINT/SIGTERM
+  start                     Detach a background daemon (writes .deckuse/monitor/daemon.json)
+  status                    Show daemon pid / url / reachability
+  stop                      SIGTERM the daemon and clear daemon.json
+
+Arguments:
   <workspace>               Optional workspace path (or use --workspace)
 
 Options:
@@ -539,8 +624,11 @@ Options:
   --port <n>                Port 0–65535 (default: 4173)
   --workspace <path>        Workspace root
 
-Notes:
-  Blocks until SIGINT/SIGTERM. Browser subscribers drive render updates.`,
+Examples:
+  deckuse monitor --port 4173
+  deckuse monitor start --port 4173
+  deckuse monitor status --json
+  deckuse monitor stop`,
   },
 
   render: {

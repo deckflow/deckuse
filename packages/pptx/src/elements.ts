@@ -1,5 +1,6 @@
 import { OpcArchive, parseXml } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
+import { EMU_PER_PT, parseLength, type LengthInput } from '@deckflow/deckuse-core';
 import {
   applyChartProperties,
   chartGraphicFrameXml,
@@ -9,6 +10,7 @@ import {
 import { addMediaPart, mediaPicXml } from './media.js';
 import { addPicturePart } from './picture.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
+import { lengthContextFor } from './slide-size.js';
 import {
   NS,
   REL,
@@ -23,11 +25,32 @@ const value = (obj: Record<string, unknown>, key: string, fallback: string): str
   typeof obj[key] === 'string' ? obj[key] : fallback;
 const num = (obj: Record<string, unknown>, key: string, fallback: number): number =>
   typeof obj[key] === 'number' ? obj[key] : fallback;
-const xfrm = (e: Record<string, unknown>) =>
-  `<a:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></a:xfrm>`;
+
+const resolveEmu = (
+  raw: unknown,
+  fallback: number,
+  axis: 'x' | 'y',
+  archive?: OpcArchive,
+): number => {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw === 'number' || typeof raw === 'string') {
+    try {
+      return parseLength(raw as LengthInput, {
+        ...(archive ? lengthContextFor(archive, axis) : {}),
+        axis,
+      });
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+};
+
+const xfrm = (e: Record<string, unknown>, archive?: OpcArchive) =>
+  `<a:xfrm><a:off x="${String(resolveEmu(e['x'], 0, 'x', archive))}" y="${String(resolveEmu(e['y'], 0, 'y', archive))}"/><a:ext cx="${String(resolveEmu(e['width'], 914400, 'x', archive))}" cy="${String(resolveEmu(e['height'], 914400, 'y', archive))}"/></a:xfrm>`;
 /** graphicFrame uses PresentationML p:xfrm (not DrawingML a:xfrm). */
-const graphicFrameXfrm = (e: Record<string, unknown>) =>
-  `<p:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></p:xfrm>`;
+const graphicFrameXfrm = (e: Record<string, unknown>, archive?: OpcArchive) =>
+  `<p:xfrm><a:off x="${String(resolveEmu(e['x'], 0, 'x', archive))}" y="${String(resolveEmu(e['y'], 0, 'y', archive))}"/><a:ext cx="${String(resolveEmu(e['width'], 914400, 'x', archive))}" cy="${String(resolveEmu(e['height'], 914400, 'y', archive))}"/></p:xfrm>`;
 const textBody = (text: string) => {
   const lines = text.split('\n');
   return `<p:txBody><a:bodyPr/><a:lstStyle/>${lines
@@ -43,26 +66,78 @@ const nvPrXml = (e: Record<string, unknown>) => {
   const idxAttr = idx !== undefined ? ` idx="${esc(idx)}"` : '';
   return `<p:nvPr><p:ph type="${esc(normalized.type)}"${idxAttr}/></p:nvPr>`;
 };
-const shapeXml = (id: number, e: Record<string, unknown>) =>
-  `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
-const connectorXml = (id: number, e: Record<string, unknown>) =>
-  `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
-const groupXml = (id: number, e: Record<string, unknown>) =>
-  `<p:grpSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGrpSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Group ${String(id)}`))}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="${String(num(e, 'x', 0))}" y="${String(num(e, 'y', 0))}"/><a:ext cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/><a:chOff x="0" y="0"/><a:chExt cx="${String(num(e, 'width', 914400))}" cy="${String(num(e, 'height', 914400))}"/></a:xfrm></p:grpSpPr></p:grpSp>`;
-const tableXml = (id: number, e: Record<string, unknown>) => {
+const shapeXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) =>
+  `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
+const connectorXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) =>
+  `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
+const groupXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
+  const w = resolveEmu(e['width'], 914400, 'x', archive);
+  const h = resolveEmu(e['height'], 914400, 'y', archive);
+  return `<p:grpSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGrpSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Group ${String(id)}`))}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="${String(resolveEmu(e['x'], 0, 'x', archive))}" y="${String(resolveEmu(e['y'], 0, 'y', archive))}"/><a:ext cx="${String(w)}" cy="${String(h)}"/><a:chOff x="0" y="0"/><a:chExt cx="${String(w)}" cy="${String(h)}"/></a:xfrm></p:grpSpPr></p:grpSp>`;
+};
+
+/** Heuristic row height: ~1.65× body font (default 11pt). */
+export const estimateTableRowHeightEmu = (fontPt = 11): number =>
+  Math.round(fontPt * EMU_PER_PT * 1.65);
+
+export const estimateTableHeightEmu = (rowCount: number, fontPt = 11): number =>
+  Math.max(1, rowCount) * estimateTableRowHeightEmu(fontPt);
+
+const normalizeColAlign = (align: string | undefined): string => {
+  if (!align) return 'ctr';
+  const map: Record<string, string> = {
+    left: 'l',
+    l: 'l',
+    center: 'ctr',
+    ctr: 'ctr',
+    right: 'r',
+    r: 'r',
+  };
+  return map[align] ?? 'ctr';
+};
+
+const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
   const rows = Array.isArray(e['rows']) ? (e['rows'] as unknown[][]) : [['']];
   const cols = Math.max(1, ...rows.map((r) => r.length));
-  const colW = String(Math.floor(num(e, 'width', 914400 * cols) / cols));
-  const cellXml = (text: string, header: boolean) => {
-    const fill = header ? '1B4F72' : 'FFFFFF';
-    const color = header ? 'FFFFFF' : '1A1A1A';
-    const bold = header ? ' b="1"' : '';
-    // tcPr child order per OOXML: lnL/lnR/lnT/lnB … then EG_FillProperties (not a generic a:ln).
+  const width = resolveEmu(e['width'], 914400 * cols, 'x', archive);
+  const colW = String(Math.floor(width / cols));
+  const rowH = estimateTableRowHeightEmu(11);
+  const heightRaw = e['height'];
+  const height =
+    heightRaw === 'auto' || heightRaw === undefined
+      ? estimateTableHeightEmu(rows.length)
+      : resolveEmu(heightRaw, estimateTableHeightEmu(rows.length), 'y', archive);
+  const theme = typeof e['theme'] === 'string' ? e['theme'] : 'minimal';
+  const alignColumns = Array.isArray(e['alignColumns'])
+    ? (e['alignColumns'] as string[])
+    : [];
+  const sized = { ...e, width, height };
+  const cellXml = (text: string, header: boolean, colIndex: number, rowIndex: number) => {
+    let fill = 'FFFFFF';
+    let color = '1A1A1A';
+    let bold = '';
+    if (theme === 'zebra') {
+      if (header) {
+        fill = '1B4F72';
+        color = 'FFFFFF';
+        bold = ' b="1"';
+      } else {
+        fill = rowIndex % 2 === 1 ? 'F2F4F7' : 'FFFFFF';
+      }
+    } else {
+      // minimal
+      if (header) {
+        fill = 'F7F7F7';
+        color = '1A1A1A';
+        bold = ' b="1"';
+      }
+    }
+    const algn = normalizeColAlign(alignColumns[colIndex]);
     const border = (side: string) =>
       `<a:${side} w="6350"><a:solidFill><a:srgbClr val="D0D0D0"/></a:solidFill></a:${side}>`;
-    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr>${border('lnL')}${border('lnR')}${border('lnT')}${border('lnB')}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
+    return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr>${border('lnL')}${border('lnR')}${border('lnT')}${border('lnB')}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
   };
-  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(e)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${rows.map((row, rowIndex) => `<a:tr h="370840">${Array.from({ length: cols }, (_, i) => cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0)).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(sized, archive)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${rows.map((row, rowIndex) => `<a:tr h="${String(rowH)}">${Array.from({ length: cols }, (_, i) => cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0, i, rowIndex)).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };
 async function pictureXml(
   archive: OpcArchive,
@@ -76,7 +151,7 @@ async function pictureXml(
   });
   if (!added.ok) throw new Error(added.error.message);
   const rid = added.value.rid;
-  return `<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Picture ${String(id)}`))}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(e)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+  return `<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Picture ${String(id)}`))}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
 
 function chartXml(
@@ -89,7 +164,13 @@ function chartXml(
   const data = (e['data'] ?? {}) as {
     title?: string;
     categories?: string[];
-    series?: { name: string; values: number[]; color?: string }[];
+    series?: {
+      name: string;
+      values: number[];
+      color?: string;
+      axis?: 'primary' | 'secondary';
+      chart?: 'bar' | 'column' | 'line';
+    }[];
   };
   const series = Array.isArray(data.series) ? data.series : [];
   if (series.length === 0) throw new Error('Chart requires data.series with at least one series');
@@ -98,8 +179,11 @@ function chartXml(
     ...(typeof data.title === 'string' ? { title: data.title } : {}),
     categories: Array.isArray(data.categories) ? data.categories : [],
     series,
+    ...(typeof e['showDataLabels'] === 'boolean' ? { showDataLabels: e['showDataLabels'] } : {}),
   });
-  return chartGraphicFrameXml(id, created.rid, e);
+  const width = resolveEmu(e['width'], 914400 * 4, 'x', archive);
+  const height = resolveEmu(e['height'], 914400 * 3, 'y', archive);
+  return chartGraphicFrameXml(id, created.rid, { ...e, width, height });
 }
 
 async function avMediaXml(
@@ -115,7 +199,13 @@ async function avMediaXml(
   if (!added.ok) throw new Error(added.error.message);
   return mediaPicXml(
     id,
-    e,
+    {
+      ...e,
+      x: resolveEmu(e['x'], 0, 'x', archive),
+      y: resolveEmu(e['y'], 0, 'y', archive),
+      width: resolveEmu(e['width'], 914400, 'x', archive),
+      height: resolveEmu(e['height'], 914400, 'y', archive),
+    },
     kind,
     added.value.fileRid,
     added.value.mediaRid,
@@ -133,14 +223,14 @@ export async function addElement(
   const kind = value(e, 'kind', value(e, 'type', 'textbox')),
     id = nextShapeId(doc);
   let xml: string;
-  if (kind === 'connector') xml = connectorXml(id, e);
-  else if (kind === 'group') xml = groupXml(id, e);
-  else if (kind === 'table') xml = tableXml(id, e);
+  if (kind === 'connector') xml = connectorXml(id, e, archive);
+  else if (kind === 'group') xml = groupXml(id, e, archive);
+  else if (kind === 'table') xml = tableXml(id, e, archive);
   else if (kind === 'picture') xml = await pictureXml(archive, slidePart, id, e);
   else if (kind === 'chart') xml = chartXml(archive, slidePart, id, e);
   else if (kind === 'video') xml = await avMediaXml(archive, slidePart, id, e, 'video');
   else if (kind === 'audio') xml = await avMediaXml(archive, slidePart, id, e, 'audio');
-  else xml = shapeXml(id, e);
+  else xml = shapeXml(id, e, archive);
   const node = parseXml(xml).documentElement,
     imported = doc.importNode(node, true);
   parent.appendChild(imported);

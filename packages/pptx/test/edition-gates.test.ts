@@ -286,6 +286,13 @@ describe('community edition write gates', () => {
           `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart/><c:lineChart/></c:plotArea></c:chart></c:chartSpace>`,
         ),
       ),
+    ).toBe('basic');
+    expect(
+      classifyChartDocument(
+        parse(
+          `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:pieChart/><c:lineChart/></c:plotArea></c:chart></c:chartSpace>`,
+        ),
+      ),
     ).toBe('advanced');
     expect(
       classifyChartDocument(

@@ -294,7 +294,8 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `list`, `get`, `search`, and back-compat `query` / `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs. CLI `--value` unescapes `\n`/`\t` unless `--text-raw`; use `--blocks` / protocol `blocks` for multi-style KPI paragraphs.
+- Geometry accepts **EMU numbers or unit strings** (`px` @ 96 DPI, `pt`, `cm`, `mm`, `in`, `%` of slide). `alignElements` / `deckuse align` distributes or aligns targets into absolute EMU writes.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties, including `paragraph.align`, `paragraph.level`, `bullet`, `fill` transparency, and `hyperlink`.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
@@ -302,11 +303,13 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - `role` must be an OOXML placeholder type (`title`, `body`, `subTitle`, `ctrTitle`, …). Common aliases like `subtitle`→`subTitle` are normalized; non-OOXML labels (for example `card`) are rejected so PowerPoint does not prompt to repair.
 - Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `subTitle`, `ctrTitle`).
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
-- Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing).
-- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, combo, ChartEx) are preserve-only in the community edition.
+- Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing). Tables support `height: "auto"`, themes `minimal`/`zebra`, and `alignColumns`.
+- Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, and value format codes. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, ChartEx) are preserve-only in the community edition.
 - List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
-- `monitor` for live HTML preview and `render` for single-slide PNG screenshots (office2html + Playwright).
+- `monitor` for live HTML preview (`monitor start|status|stop` for a background daemon) and `render` for single-slide PNG screenshots (office2html + Playwright).
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
+
+Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md).
 
 ### `setProperties` example
 
