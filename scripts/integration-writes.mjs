@@ -16,6 +16,7 @@
  *   --recursive            scan subdirectories for .pptx (dir mode only)
  *   --force                remove existing workspace before init
  *   --continue-on-error    keep going after a failed step / file
+ *                          (directory scans already continue past unreadable packages)
  *   --limit <n>            process at most n presentations (dir mode only)
  *   --skip-export          omit final export
  *   --batch                merge consecutive writes into `apply` batch payloads;
@@ -1438,8 +1439,25 @@ const processOne = async (pptxPath, options) => {
     workspace,
     '--json',
   ]);
-  if (!init?.ok && !options.continueOnError) {
-    return { pptx: pptxPath, workspace, ok: false, steps: runner.steps };
+  if (!init?.ok) {
+    const errCode =
+      init && typeof init === 'object' && init.error && typeof init.error === 'object'
+        ? init.error.code
+        : undefined;
+    const unreadable = errCode === 'IO_ERROR';
+    if (unreadable) {
+      process.stdout.write(
+        '  → SKIP  unreadable package (IO_ERROR); not a product regression\n',
+      );
+    }
+    return {
+      pptx: pptxPath,
+      workspace,
+      ok: false,
+      unreadable,
+      steps: runner.steps,
+      failedSteps: runner.steps.filter((s) => !s.ok),
+    };
   }
 
   let summary = {};
@@ -1551,7 +1569,8 @@ const main = async () => {
     try {
       const report = await processOne(file, options);
       reports.push(report);
-      if (!report.ok && !options.continueOnError) break;
+      // Unreadable corpus packages (truncated ZIP, etc.) should not abort a directory scan.
+      if (!report.ok && !options.continueOnError && !report.unreadable) break;
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       process.stdout.write(`  → FAIL  ${message}\n`);
@@ -1578,6 +1597,7 @@ const main = async () => {
       pptx: r.pptx,
       workspace: r.workspace,
       ok: r.ok,
+      unreadable: r.unreadable || undefined,
       failedSteps: (r.failedSteps ?? []).map((s) => s.name),
       error: r.error,
     })),
