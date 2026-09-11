@@ -212,6 +212,23 @@ describe('community edition write gates', () => {
     );
     expect(basicWrite.ok).toBe(true);
 
+    const basicList = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'list',
+        workspaceId: basicWs,
+        resource: 'shapes',
+        slide: 1,
+      },
+      {},
+    );
+    expect(basicList.ok).toBe(true);
+    if (basicList.ok) {
+      const chart = (basicList.value as { items: Array<{ kind: string; chartVariant?: string }> })
+        .items.find((i) => i.kind === 'chart');
+      expect(chart?.chartVariant).toBe('basic');
+    }
+
     const advRoot = await mkdtemp(join(tmpdir(), 'deckuse-edition-adv-chart-'));
     const advSource = join(advRoot, 'source.pptx'),
       advWs = join(advRoot, 'workspace');
@@ -235,6 +252,23 @@ describe('community edition write gates', () => {
     );
     expect(advWrite.ok).toBe(false);
     if (!advWrite.ok) expect(advWrite.error.code).toBe('UNSUPPORTED_CAPABILITY');
+
+    const advList = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'list',
+        workspaceId: advWs,
+        resource: 'shapes',
+        slide: 1,
+      },
+      {},
+    );
+    expect(advList.ok).toBe(true);
+    if (advList.ok) {
+      const chart = (advList.value as { items: Array<{ kind: string; chartVariant?: string }> })
+        .items.find((i) => i.kind === 'chart');
+      expect(chart?.chartVariant).toBe('advanced');
+    }
   });
 
   it('classifies chart families as basic or advanced', () => {

@@ -483,7 +483,7 @@ class Runner {
    * @param {string} name
    * @param {string[]} args
    * @param {string} [stdin]
-   * @param {{ optional?: boolean }} [opts]
+   * @param {{ optional?: boolean; expectErrorCode?: string }} [opts]
    */
   async executeStep(name, args, stdin = '', opts = {}) {
     const command = this.formatCommand(args);
@@ -522,9 +522,23 @@ class Runner {
       return null;
     }
     if (!envelope.ok) {
+      const errCode = envelope.error?.code;
       const errMsg = envelope.error
         ? `${envelope.error.code}: ${envelope.error.message}`
         : `exit ${String(result.code)}`;
+      if (opts.expectErrorCode && errCode === opts.expectErrorCode) {
+        const stepResult = {
+          name,
+          ok: true,
+          skipped: true,
+          reason: `expected ${opts.expectErrorCode}: ${envelope.error?.message ?? errMsg}`,
+          command,
+          ms,
+        };
+        this.steps.push(stepResult);
+        this.logStep(stepResult, command);
+        return envelope;
+      }
       if (opts.optional) {
         const stepResult = {
           name,
@@ -550,6 +564,19 @@ class Runner {
       this.logStep(stepResult, command);
       return envelope;
     }
+    if (opts.expectErrorCode) {
+      this.failed = true;
+      const stepResult = {
+        name,
+        ok: false,
+        command,
+        error: `expected ${opts.expectErrorCode} but command succeeded`,
+        ms,
+      };
+      this.steps.push(stepResult);
+      this.logStep(stepResult, command);
+      return envelope;
+    }
     const stepResult = {
       name,
       ok: true,
@@ -566,7 +593,7 @@ class Runner {
    * @param {string} name
    * @param {string[]} args
    * @param {string} [stdin]
-   * @param {{ optional?: boolean }} [opts]
+   * @param {{ optional?: boolean; expectErrorCode?: string }} [opts]
    */
   async step(name, args, stdin = '', opts = {}) {
     if (!this.batchMode) {
@@ -580,8 +607,8 @@ class Runner {
       return null;
     }
 
-    // Optional writes keep per-step failure semantics: flush first, then run alone.
-    if (opts.optional) {
+    // Optional / expected-error writes keep per-step failure semantics: flush first, then run alone.
+    if (opts.optional || opts.expectErrorCode) {
       await this.flushBatch();
       return this.executeStep(name, args, stdin, opts);
     }
@@ -648,7 +675,7 @@ class Runner {
    * @param {number[]} slideIndexes
    */
   async inventory(slideIndexes) {
-    /** @type {Array<{ target: string; id?: string | number; name?: string; kind?: string; textPreview?: string; parentId?: string; slide: number }>} */
+    /** @type {Array<{ target: string; id?: string | number; name?: string; kind?: string; textPreview?: string; parentId?: string; slide: number; chartVariant?: 'basic' | 'advanced' }>} */
     const shapes = [];
     for (const slide of slideIndexes) {
       const items = await this.listShapes(slide);
@@ -666,13 +693,17 @@ class Runner {
     const stylableWithText = withText.filter((s) => STYLABLE_KINDS.has(s.kind));
     const stylable = shapes.filter((s) => STYLABLE_KINDS.has(s.kind));
     const findByName = (name) => shapes.find((s) => s.name === name);
+    const charts = byKind('chart');
     return {
       shapes,
       withText,
       textShape: stylableWithText[0] ?? stylable[0],
       pictures: byKind('picture'),
       tables: byKind('table'),
-      charts: byKind('chart'),
+      charts,
+      /** Community edition may write basic charts only (pie/line/bar|column). */
+      basicCharts: charts.filter((s) => s.chartVariant === 'basic'),
+      advancedCharts: charts.filter((s) => s.chartVariant !== 'basic'),
       findByName,
     };
   }
@@ -922,11 +953,14 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     );
   }
 
-  const existingChart = inv.charts[0];
-  if (existingChart?.target) {
+  // Community edition rejects advanced chart writes (doughnut/radar/combo/ChartEx…).
+  // Prefer a basic chart for mutation; if only advanced charts exist, assert the gate.
+  const existingBasicChart = inv.basicCharts[0];
+  const existingAdvancedChart = inv.advancedCharts[0];
+  if (existingBasicChart?.target) {
     await runner.step('set chart props (existing)', [
       'set',
-      existingChart.target,
+      existingBasicChart.target,
       '--title',
       `${PREFIX} Chart`,
       '--gapWidth',
@@ -937,6 +971,25 @@ const runWriteSequence = async (runner, media, opts = {}) => {
       'integration-writes',
       ...runner.wsArgs(),
     ]);
+  } else if (existingAdvancedChart?.target) {
+    await runner.step(
+      'set chart props (existing advanced → deny)',
+      [
+        'set',
+        existingAdvancedChart.target,
+        '--title',
+        `${PREFIX} Chart`,
+        '--gapWidth',
+        '120',
+        '--showMajorGridlines',
+        'true',
+        '--reason',
+        'integration-writes',
+        ...runner.wsArgs(),
+      ],
+      '',
+      { expectErrorCode: 'UNSUPPORTED_CAPABILITY' },
+    );
   }
 
   const existingPicture = inv.pictures[0];

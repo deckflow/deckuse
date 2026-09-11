@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type { ElementRef } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
+import { classifyChartPart } from './chart-classify.js';
 import { readSeriesColor } from './chart.js';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
@@ -189,6 +190,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
             indexed.payload = {
               ...(indexed.payload ?? {}),
               chartPart: cr.resolvedTarget,
+              chartVariant: classifyChartPart(archive, cr.resolvedTarget),
               title: textOf(first(chart, 'title') ?? chart),
               series: descendants(chart, 'ser').map((ser) => {
                 const color = readSeriesColor(ser);
@@ -206,6 +208,9 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
                 .getRelationships(cr.resolvedTarget)
                 .some((r) => r.type === REL.package),
             };
+          } else {
+            // Fail closed: unresolvable chart parts are advanced (commercial-only edits).
+            indexed.payload = { ...(indexed.payload ?? {}), chartVariant: 'advanced' };
           }
         }
         // Only groups nest addressable descendants; table cells are indexed above.

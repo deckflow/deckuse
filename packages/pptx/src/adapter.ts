@@ -235,6 +235,15 @@ const listResource = (
         zOrder: z,
         textPreview: item.text?.slice(0, 80),
         parentId: item.parentId,
+        ...(item.kind === 'chart'
+          ? {
+              chartVariant:
+                item.payload?.['chartVariant'] === 'basic' ||
+                item.payload?.['chartVariant'] === 'advanced'
+                  ? item.payload['chartVariant']
+                  : 'advanced',
+            }
+          : {}),
       }));
   }
   if (resource === 'layouts' || resource === 'masters') {
