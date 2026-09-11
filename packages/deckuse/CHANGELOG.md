@@ -1,5 +1,22 @@
 # @deckflow/deckuse
 
+## 1.1.0
+
+### Minor Changes
+
+- add monitor feature
+
+### Patch Changes
+
+- Updated dependencies
+  - @deckflow/deckuse-core@1.1.0
+  - @deckflow/deckuse-pptx@1.1.0
+  - @deckflow/deckuse-workspace@1.1.0
+  - @deckflow/deckuse-docx@0.1.1
+  - @deckflow/deckuse-key@0.1.1
+  - @deckflow/deckuse-numbers@0.1.1
+  - @deckflow/deckuse-xlsx@0.1.1
+
 ## 1.0.2
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @deckflow/deckuse-opc
 
+## 1.1.0
+
+### Minor Changes
+
+- add monitor feature
+
 ## 1.0.0
 
 ### Major Changes

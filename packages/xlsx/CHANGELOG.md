@@ -1,5 +1,12 @@
 # @deckflow/deckuse-xlsx
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies
+  - @deckflow/deckuse-core@1.1.0
+
 ## 0.1.0
 
 ### Major Changes

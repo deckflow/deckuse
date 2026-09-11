@@ -1,5 +1,11 @@
 # @deckflow/deckuse-core
 
+## 1.1.0
+
+### Minor Changes
+
+- add monitor feature
+
 ## 1.0.0
 
 ### Major Changes

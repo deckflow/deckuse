@@ -1,5 +1,18 @@
 # @deckflow/deckuse-pptx
 
+## 1.1.0
+
+### Minor Changes
+
+- add monitor feature
+
+### Patch Changes
+
+- Updated dependencies
+  - @deckflow/deckuse-core@1.1.0
+  - @deckflow/deckuse-opc@1.1.0
+  - @deckflow/deckuse-workspace@1.1.0
+
 ## 1.0.0
 
 ### Major Changes
