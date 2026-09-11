@@ -27,7 +27,7 @@ existing.pptx → init → list / get → set / add → validate → export
 
 每次成功的写操作会自动提交 Git 版本、更新 `operations.jsonl`、重建 `package.pptx`，并刷新 `.deckuse/index.json`。可使用 `undo` 撤销、`history` 查看操作历史。
 
-Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是渲染引擎，无法可靠判断幻灯片是否美观或版式是否正确。`render` / 语义 `diff` / `branch` 在 Phase 1a 之后交付。
+Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是完整的 PowerPoint 渲染或版式引擎，无法可靠判断幻灯片是否美观或版式是否正确。可用 `monitor` 做实时 HTML 预览，用 `render` 将单页截成 PNG 供智能体视觉复查。语义 `diff` / `branch` 仍在 Phase 1a 之后交付。
 
 ## 安装
 
@@ -52,7 +52,7 @@ deckuse get slide:1/shape:2 --workspace ./workspace --resolve both --json
 # 语义目标写入（一次写 = 一次 revision）。
 deckuse set text slide:1/shape:2 --workspace ./workspace --value 'Hello' --json
 deckuse set slide:1/shape:2 --workspace ./workspace --font.size 42 --fill.color '#0A2930' --json
-deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 100 --height 100 --json
+deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 914400 --height 457200 --json
 
 # 验证、历史、撤销、导出。
 deckuse validate --workspace ./workspace --json
@@ -60,11 +60,14 @@ deckuse history --workspace ./workspace --json
 deckuse undo --workspace ./workspace --steps 1 --json
 deckuse export ./out.pptx --workspace ./workspace --json
 
-# 实时预览编辑；浏览器订阅后才开始渲染。
+# 实时 HTML 预览；浏览器订阅后才开始转换。
 deckuse monitor --workspace ./workspace --port 4173
+
+# 将单页截成 PNG 供视觉复查（需要 Chrome / Chromium / Edge）。
+deckuse render --page 1 --workspace ./workspace --json
 ```
 
-全局选项包括 `--workspace`、`--json`、`--dry-run`、`--expect-revision`、`--reason`。完整契约见 [DECKUSE-CLI-PHASE-1.md](DECKUSE-CLI-PHASE-1.md)。
+全局选项包括 `--workspace`、`--json`、`--dry-run`、`--expect-revision`、`--reason`。完整 CLI 契约见 `deckuse --help` 或 `deckuse <command> --help`。
 
 工作区布局：
 
@@ -85,18 +88,18 @@ workspace/
 
 ### 选择器
 
-`query` accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
+Phase 1a 优先使用 `search text` / `search shape` 与 `list`。`query` 仍可用作兼容入口，接受选择器字符串或命令中的结构化选择器。空格分隔的条件以 AND 组合。
 
-| Syntax                                 | Meaning                                              |
-| -------------------------------------- | ---------------------------------------------------- |
-| `*` or `all`                           | Match every indexed element.                         |
-| `kind=textbox`                         | Match an element kind by case-insensitive substring. |
-| `text=Quarter`                         | Match text that contains the literal value.          |
-| `text~=pattern`                        | Match text with a Unicode regular expression.        |
-| `hasText=true`                         | Match elements that contain text.                    |
-| `slide=256`, `id=256:10`, `name=Title` | Filter by slide ID, element ID, or name.             |
+| 语法                                     | 含义                                   |
+| ---------------------------------------- | -------------------------------------- |
+| `*` 或 `all`                             | 匹配所有已索引元素。                   |
+| `kind=textbox`                           | 按不区分大小写的子串匹配元素 kind。    |
+| `text=Quarter`                           | 匹配包含字面量的文本。                 |
+| `text~=pattern`                          | 用 Unicode 正则匹配文本。              |
+| `hasText=true`                           | 匹配含文本的元素。                     |
+| `slide=256`、`id=256:10`、`name=Title` | 按幻灯片 ID、元素 ID 或名称过滤。      |
 
-Query results provide stable element references. A reference includes a document ID and an element ID or structural path; array positions are not stable identifiers.
+查询结果提供稳定的元素引用。引用包含文档 ID 以及元素 ID 或结构路径；数组下标不是稳定标识符。
 
 ## 通用智能体工作流
 
@@ -168,7 +171,7 @@ deckuse query ./workspace 'text~=https?://' --limit 1000 --json
 deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
 ```
 
-这是内容和结构 QA，不是视觉 QA。Deckuse 不渲染幻灯片，也不判断文本是否与其他内容重叠。
+这是内容和结构 QA，不是视觉 QA。`render` / `monitor` 仅作人或智能体复查辅助；Deckuse 不会检测重叠，也不会评判版式质量。
 
 ### 5. 仅修改一张幻灯片上的一个项目
 
@@ -256,25 +259,25 @@ deckuse validate ./customer-a --json
 
 **Request：**“从已批准的演示文稿生成区域版和企业版变体。”
 
-从同一母版为每个变体初始化新的工作区。每个变体都有自己的命令文件和输出路径。当一个变体的全部更改必须具备原子性时，使用 `batch`：若任一命令失败，批次中的所有变更均不会持久化。
+从同一母版为每个变体初始化新的工作区。每个变体都有自己的命令文件和输出路径。优先使用 `apply` 配合 JSON 数组、JSONL 或 `{ "operations": [...] }`：一次调用中的多条写命令作为一次原子 batch 执行（任一失败则全部不落盘）。协议层的 `batch` 命令形式仍然支持。
 
 ```json
-{
-  "type": "batch",
-  "atomic": true,
-  "commands": [
-    {
-      "type": "replaceText",
-      "find": "Default Message",
-      "replace": "Regional Message"
-    },
-    {
-      "type": "replaceText",
-      "find": "Default Offer",
-      "replace": "Enterprise Offer"
-    }
-  ]
-}
+[
+  {
+    "type": "replaceText",
+    "find": "Default Message",
+    "replace": "Regional Message"
+  },
+  {
+    "type": "replaceText",
+    "find": "Default Offer",
+    "replace": "Enterprise Offer"
+  }
+]
+```
+
+```sh
+deckuse apply ./regional --input regional.json --json
 ```
 
 这既保留了一份已批准的源演示文稿，也使每个变体都能从显式变更集复现。
@@ -287,7 +290,7 @@ deckuse validate ./customer-a --json
 
 Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性的导出路径。智能体负责理解任务，并决定哪些操作适用。
 
-### `setProperties` example
+### `setProperties` 示例
 
 ```json
 {
@@ -304,32 +307,33 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 }
 ```
 
-`stroke` and `fill` accept a hexadecimal color string. Use `none`, `false`, or `null` for no stroke or fill. `stroke.width` is in points and defaults to `1`.
+`stroke` 与 `fill` 可接受十六进制颜色字符串。使用 `none`、`false` 或 `null` 表示无描边/无填充。`stroke.width` 单位为磅，默认 `1`。
 
 ## PPTX 功能
 
-- Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
-- `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。`setText` 中的换行会拆成多个段落。
-- `setTransform` for explicit object position, size, rotation, and flip changes.
-- `setProperties` for common shape and text properties，包括 `paragraph.align`、`paragraph.level`、`bullet`、填充透明度与 `hyperlink`。
-- Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes（可选 `role` 写出 `p:ph` 占位符）, connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- 持久工作区、修订冲突检测、dry-run、原子 batch 与操作日志。
+- `inspect`、`list`、`get`、`search`，以及兼容用的 `query` / `getText`；稳定引用在可用时包含幻灯片 ID、部件 URI、cNvPr ID 与祖先路径。
+- `setText` 与 `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。`setText` 中的换行会拆成多个段落。
+- `setTransform` 用于显式设置对象位置、尺寸、旋转与翻转。
+- `setProperties` 用于常见形状与文本属性，包括 `paragraph.align`、`paragraph.level`、`bullet`、填充透明度与 `hyperlink`。
+- 可添加、复制与删除幻灯片；复制幻灯片时会克隆可变的备注与图表部件，版式与媒体可安全共享。
+- 可添加形状/文本框（可选 `role` 写出 `p:ph` 占位符）、连接线、组合、图片（文件路径或 base64）、表格、图表（仅缓存）以及嵌入的视频/音频；可复制或删除元素。
 - 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`ctrTitle`）。
-- `replacePicture` replaces embedded media in place while retaining the element reference and layer order.
-- Table-cell addressing；表格行列增删与单元格 `fill`；speaker-note 读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。
-- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. An embedded workbook causes `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than a claim that workbook data was updated. 社区版对高级图表（其它 family、组合图、ChartEx）仅保留、不可编辑。
+- `replacePicture` 就地替换图片嵌入媒体，并保留元素引用与图层顺序。
+- 表格单元格寻址；表格行列增删与单元格 `fill`；演讲者备注读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。
+- 可创建图表（`bar` / `column` / `line` / `pie`）并编辑标题、系列名与缓存值。存在嵌入工作簿时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED`，不会声称已更新工作簿。社区版对高级图表（其它 family、组合图、ChartEx）仅保留、不可编辑。
 - 可 list / resolve master、layout、theme；社区版拒绝写入这些部件（`UNSUPPORTED_CAPABILITY`）。Master/Layout 编辑见商业版仓库。
-- Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity refers to uncompressed data for untouched entries, not ZIP byte identity.
+- `monitor` 提供实时 HTML 预览，`render` 可将单页截成 PNG（office2html + Playwright）。
+- 尽可能保留未知部件与未改动节点。ZIP 会重新压缩，保真度针对未改动条目的未压缩数据，而非 ZIP 字节级一致。
 
 ## 限制
 
-- Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
-- It does not render presentations. Do not rely on it to assess visual quality, detect overlap, or automatically improve slide design.
-- Chart creation and edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
-- Embedded video/audio use a generated poster frame; playback timing and advanced media options are not edited.
-- Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
-- `setText` and `replaceText` collapse multi-run text within each paragraph into one run while retaining the first run’s style; newlines in `setText` create separate paragraphs.
+- Deckuse 未实现完整的 PowerPoint DrawingML、动画编辑、SmartArt 编辑、OLE 编辑或宏编辑。
+- 它不是完整的 PowerPoint 渲染或版式引擎。`monitor` 与 `render` 仅提供 HTML/PNG 复查辅助；不要依赖它们评判视觉质量、检测重叠或自动改善版式。
+- 图表创建与编辑仅更新 OOXML 图表缓存；不会重写嵌入的 Excel 工作簿。
+- 嵌入的视频/音频使用生成的海报帧；播放时序与高级媒体选项不可编辑。
+- 复制幻灯片会克隆备注与图表部件，并复用版式、主题与媒体。复杂自定义 XML 扩展会保留，但不做语义编辑。
+- `setText` 与 `replaceText` 会将每个段落内的多 run 文本折叠为单个 run，并保留首个 run 的样式；`setText` 中的换行会创建新段落。
 
 ## 开发检查
 
@@ -341,4 +345,4 @@ pnpm test
 pnpm build
 ```
 
-For the complete canonical English documentation and command wording, see [README.md](README.md).
+完整英文文档与命令措辞见 [README.md](README.md)。

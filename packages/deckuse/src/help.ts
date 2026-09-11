@@ -37,6 +37,7 @@ Commands:
   export        Pack workspace to .pptx
   monitor       Live HTML preview server
   render        Screenshot one slide to PNG (for visual review)
+  query         Back-compat selector query (prefer search / list)
 
 Run 'deckuse <command> --help' for details.
 `;
@@ -326,7 +327,7 @@ Chart targets also accept:
   fill | background, gridlineColor
 
 Options:
-  --scope <scope>           local (default) | placeholder | layout | master | theme
+  --scope <scope>           local only in Phase 1a (default); other scopes reject
   --value <text>            Required for set text
   ${WRITE_GLOBALS}
 

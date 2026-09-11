@@ -15,17 +15,19 @@ Deckuse é um mecanismo local-first e orientado por esquema para automatização
 
 PPTX é o formato atualmente implementado. Os adaptadores DOCX, XLSX, Keynote e Numbers retornam deliberadamente `FORMAT_NOT_IMPLEMENTED`; eles ainda não são destinos de edição suportados.
 
+Este repositório é a **edição community** (`edition=community`). Veja [docs/edition.md](docs/edition.md). A edição comercial fica no repositório separado `deckuse-commercial`.
+
 ## Por que usar o Deckuse
 
 O Deckuse permite modificar uma apresentação existente sem recriá-la do zero. O fluxo de trabalho prioriza deliberadamente a estrutura, e não o visual:
 
 ```text
-existing.pptx → init → inspect / query → apply JSON commands → validate → package.pptx
+existing.pptx → init → list / get → set / add → validate → export
 ```
 
 Cada gravação bem-sucedida confirma automaticamente uma revisão Git, atualiza `operations.jsonl` e reconstrói `package.pptx`. Use `undo` para reverter gravações e `history` para consultar o registro de operações.
 
-Ele preserva, sempre que possível, XML não modificado e partes desconhecidas do pacote. Não é um mecanismo de renderização e não consegue avaliar com confiança se um slide é atraente ou se o layout visual está correto.
+Ele preserva, sempre que possível, XML não modificado e partes desconhecidas do pacote. Não é um mecanismo completo de renderização do PowerPoint: use `monitor` para pré-visualização HTML ao vivo e `render` para capturar um slide em PNG. `diff` / `branch` semânticos permanecem adiados.
 
 ## Instalação
 
@@ -57,13 +59,13 @@ deckuse undo ./workspace --steps 1 --json
 
 ## Fluxo de trabalho da CLI
 
-`apply` accepts a single JSON object, a JSON array, or JSON Lines. One invocation can apply many write commands; multiple commands run as one atomic batch. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command.
+`apply` accepts a transaction file (`{ "operations": [...] }`), a single JSON mutation, a JSON array, or JSON Lines. One invocation can apply many write commands; multiple commands run as one atomic batch. Use `--input -` (the default) to read from standard input. Legacy ElementRef mutations remain supported. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them.
 
 Os resultados dos comandos são gravados em JSON na saída padrão; erros de argumentos ou entrada inválidos são gravados na saída de erro. O status `0` indica sucesso, `1` indica falha de comando e `2` indica falha de uso ou análise da CLI.
 
 ### Seletores
 
-`query` accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
+Prefer `search text` / `search shape` and `list` for Phase 1a inventory. `query` remains available for back-compat and accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
 
 | Syntax                                 | Meaning                                              |
 | -------------------------------------- | ---------------------------------------------------- |
@@ -146,7 +148,7 @@ deckuse query ./workspace 'text~=https?://' --limit 1000 --json
 deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
 ```
 
-Trata-se de QA de conteúdo e estrutura, e não de QA visual. O Deckuse não renderiza slides nem determina se o texto se sobrepõe a outro conteúdo.
+Trata-se de QA de conteúdo e estrutura, e não de QA visual. Use `render` / `monitor` apenas como ajuda de revisão; o Deckuse não detecta sobreposição nem avalia qualidade de layout.
 
 ### 5. Alterar exatamente um item em um slide
 
@@ -234,25 +236,27 @@ Espaços de trabalho separados impedem que as edições de um cliente vazem para
 
 **Solicitação:** “Gere variantes regionais e empresariais a partir da apresentação aprovada.”
 
-Inicialize um novo espaço de trabalho a partir do mesmo modelo mestre para cada variante. Cada variante recebe seu próprio arquivo de comandos e caminho de saída. Use `batch` quando as alterações de uma variante precisarem ser atômicas: se um comando falhar, nenhuma alteração do lote será persistida.
+Inicialize um novo espaço de trabalho a partir do mesmo modelo mestre para cada variante. Cada variante recebe seu próprio arquivo de comandos e caminho de saída.
+
+Prefer `apply` with a JSON array, JSONL, or `{ "operations": [...] }`: multiple write commands in one invocation run as one atomic batch (if one fails, none persist). The protocol `batch` command form remains supported.
 
 ```json
-{
-  "type": "batch",
-  "atomic": true,
-  "commands": [
-    {
-      "type": "replaceText",
-      "find": "Default Message",
-      "replace": "Regional Message"
-    },
-    {
-      "type": "replaceText",
-      "find": "Default Offer",
-      "replace": "Enterprise Offer"
-    }
-  ]
-}
+[
+  {
+    "type": "replaceText",
+    "find": "Default Message",
+    "replace": "Regional Message"
+  },
+  {
+    "type": "replaceText",
+    "find": "Default Offer",
+    "replace": "Enterprise Offer"
+  }
+]
+```
+
+```sh
+deckuse apply ./regional --input regional.json --json
 ```
 
 Isso preserva uma única apresentação-fonte aprovada e, ao mesmo tempo, torna cada variante reproduzível a partir de um conjunto explícito de alterações.
@@ -287,22 +291,24 @@ O Deckuse fornece ao agente referências estáveis, seletores, transações, val
 ## Recursos de PPTX
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
-- `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text.
+- `inspect`, `list`, `get`, `search`, and back-compat `query` / `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
-- `setProperties` for common shape and text properties.
+- `setProperties` for common shape and text properties, including `paragraph.align`, `paragraph.level`, `bullet`, `fill` transparency, and `hyperlink`.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes, connectors, groups, pictures (from a file path or base64), and tables; duplicate or remove elements.
-- `replacePicture` replaces embedded media in place while retaining the element reference and layer order.
-- Table-cell addressing; speaker-note reading and text editing.
-- Chart title, series-name, and cached-value edits. An embedded workbook causes `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than a claim that workbook data was updated.
-- Common text and `srgbClr` color edits in master, layout, and theme parts.
-- Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity refers to uncompressed data for untouched entries, not ZIP byte identity.
+- Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `ctrTitle`).
+- `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
+- Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing).
+- Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, combo, ChartEx) are preserve-only in the community edition.
+- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
+- `monitor` for live HTML preview and `render` for single-slide PNG screenshots (office2html + Playwright).
+- Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
 ## Limitações
 
 - Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
-- It does not render presentations. Do not rely on it to assess visual quality, detect overlap, or automatically improve slide design.
+- It is not a full PowerPoint rendering or layout engine. `monitor` and `render` provide HTML/PNG review aids only; do not rely on them to assess visual quality, detect overlap, or automatically improve slide design.
 - Chart edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
 - Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
 - `setText` and `replaceText` collapse multi-run text in the targeted node into one run while retaining the first run’s style.

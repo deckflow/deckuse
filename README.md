@@ -27,7 +27,7 @@ existing.pptx → init → list / get → set / add → validate → export
 
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
 
-It preserves untouched XML and unknown package parts where possible. It is not a rendering engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. `render` / semantic `diff` / `branch` are deferred past Phase 1a.
+It preserves untouched XML and unknown package parts where possible. It is not a full PowerPoint rendering or layout engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. Use `monitor` for live HTML preview and `render` to screenshot one slide to PNG for agent visual review. Semantic `diff` / `branch` remain deferred past Phase 1a.
 
 ## Installation
 
@@ -54,7 +54,7 @@ deckuse get slide:1/shape:2 --workspace ./workspace --resolve both --json
 # Mutate with semantic targets (one write = one revision).
 deckuse set text slide:1/shape:2 --workspace ./workspace --value 'Hello' --json
 deckuse set slide:1/shape:2 --workspace ./workspace --font.size 42 --fill.color '#0A2930' --json
-deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 100 --height 100 --json
+deckuse add shape --workspace ./workspace --slide 1 --type text --name Title --x 0 --y 0 --width 914400 --height 457200 --json
 
 # Validate, history, undo, export.
 deckuse validate --workspace ./workspace --json
@@ -62,11 +62,14 @@ deckuse history --workspace ./workspace --json
 deckuse undo --workspace ./workspace --steps 1 --json
 deckuse export ./out.pptx --workspace ./workspace --json
 
-# Live-preview edits; rendering starts when a browser subscribes.
+# Live HTML preview; conversion starts when a browser subscribes.
 deckuse monitor --workspace ./workspace --port 4173
+
+# Screenshot one slide to PNG for visual review (requires Chrome / Chromium / Edge).
+deckuse render --page 1 --workspace ./workspace --json
 ```
 
-Global options include `--workspace`, `--json`, `--dry-run`, `--expect-revision`, and `--reason`. See [DECKUSE-CLI-PHASE-1.md](DECKUSE-CLI-PHASE-1.md) for the full contract.
+Global options include `--workspace`, `--json`, `--dry-run`, `--expect-revision`, and `--reason`. Run `deckuse --help` or `deckuse <command> --help` for the full CLI contract.
 
 Workspace layout:
 
@@ -85,7 +88,7 @@ Command results use a JSON envelope (`ok`, `command`, `revision`, `data` / `erro
 
 ### Selectors
 
-`query` accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
+Prefer `search text` / `search shape` and `list` for Phase 1a inventory. `query` remains available for back-compat and accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
 
 | Syntax                                 | Meaning                                              |
 | -------------------------------------- | ---------------------------------------------------- |
@@ -168,7 +171,7 @@ deckuse query ./workspace 'text~=https?://' --limit 1000 --json
 deckuse query ./workspace 'text=Required disclaimer' --limit 1000 --json
 ```
 
-This is content and structural QA, not visual QA. Deckuse does not render slides or determine whether text overlaps other content.
+This is content and structural QA, not visual QA. Use `render` / `monitor` only as a human or agent review aid; Deckuse does not detect overlap or judge layout quality.
 
 ### 5. Change exactly one item on one slide
 
@@ -256,25 +259,25 @@ Separate workspaces prevent one customer’s edits from leaking into another out
 
 **Request:** “Generate regional and enterprise variants from the approved presentation.”
 
-Initialize a fresh workspace from the same master for every variant. Each variant receives its own command file and output path. Use `batch` when a variant’s changes must be atomic: if one command fails, none of the batch changes are persisted.
+Initialize a fresh workspace from the same master for every variant. Each variant receives its own command file and output path. Prefer `apply` with a JSON array, JSONL, or `{ "operations": [...] }`: multiple write commands in one invocation run as one atomic batch (if one fails, none persist). The protocol `batch` command form remains supported.
 
 ```json
-{
-  "type": "batch",
-  "atomic": true,
-  "commands": [
-    {
-      "type": "replaceText",
-      "find": "Default Message",
-      "replace": "Regional Message"
-    },
-    {
-      "type": "replaceText",
-      "find": "Default Offer",
-      "replace": "Enterprise Offer"
-    }
-  ]
-}
+[
+  {
+    "type": "replaceText",
+    "find": "Default Message",
+    "replace": "Regional Message"
+  },
+  {
+    "type": "replaceText",
+    "find": "Default Offer",
+    "replace": "Enterprise Offer"
+  }
+]
+```
+
+```sh
+deckuse apply ./regional --input regional.json --json
 ```
 
 This preserves a single approved source deck while making every variant reproducible from an explicit change set.
@@ -290,7 +293,7 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 ## PPTX capabilities
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
-- `inspect`, `query`, and `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
+- `inspect`, `list`, `get`, `search`, and back-compat `query` / `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
 - `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties, including `paragraph.align`, `paragraph.level`, `bullet`, `fill` transparency, and `hyperlink`.
@@ -301,6 +304,7 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing).
 - Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, combo, ChartEx) are preserve-only in the community edition.
 - List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
+- `monitor` for live HTML preview and `render` for single-slide PNG screenshots (office2html + Playwright).
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
 ### `setProperties` example
@@ -327,7 +331,7 @@ The complete command schema is at `packages/core/schema/command.schema.json`. Th
 ## Limitations
 
 - Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
-- It does not render presentations. Do not rely on it to assess visual quality, detect overlap, or automatically improve slide design.
+- It is not a full PowerPoint rendering or layout engine. `monitor` and `render` provide HTML/PNG review aids only; do not rely on them to assess visual quality, detect overlap, or automatically improve slide design.
 - Chart creation and edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
 - Embedded video/audio use a generated poster frame; playback timing and advanced media options are not edited.
 - Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
