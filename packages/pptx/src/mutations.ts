@@ -17,6 +17,7 @@ import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, ensureNotes, removeSlide } from './slides.js';
+import { normalizePlaceholderRole } from './placeholder-role.js';
 import { applyTableCellProperties, applyTableProperties } from './table.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import { REL, NS, attr, children, cNvPr, descendants, first, root, setNodeText } from './xml.js';
@@ -661,11 +662,17 @@ export async function mutate(
       return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
         target: `slide:${command.slide}`,
       });
+    let role: string | undefined;
+    if (command.role !== undefined) {
+      const normalized = normalizePlaceholderRole(command.role);
+      if (!normalized.ok) return err('INVALID_COMMAND', normalized.message);
+      role = normalized.type;
+    }
     const doc = archive.readXml(slide.partUri);
     const parent = first(doc, 'spTree') ?? root(doc);
     const element = shapeTypeToElement(command.shapeType, {
       ...(command.name !== undefined ? { name: command.name } : {}),
-      ...(command.role !== undefined ? { role: command.role } : {}),
+      ...(role !== undefined ? { role } : {}),
       ...(command.x !== undefined ? { x: command.x } : {}),
       ...(command.y !== undefined ? { y: command.y } : {}),
       ...(command.width !== undefined ? { width: command.width } : {}),

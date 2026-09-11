@@ -262,7 +262,8 @@ Run 'deckuse add <slide|shape> --help' for details.`,
 
 Common options:
   --name <name>             Shape name (should be unique on the slide)
-  --role <role>             Semantic role (title, body, card, image, ...)
+  --role <role>             OOXML placeholder type (title, body, subTitle, ctrTitle, …).
+                            Alias: subtitle→subTitle. Invalid types make PowerPoint repair.
   --x <emu>                 X position in EMU
   --y <emu>                 Y position in EMU
   --width <emu>             Width in EMU

@@ -1502,6 +1502,52 @@ describe('pptx adapter', () => {
     expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).toContain(
       '<p:ph type="body"/>',
     );
+
+    const withSubtitleAlias = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: (withRole.value as { revision: string }).revision,
+        slide: 1,
+        shapeType: 'text',
+        name: 'SubPh',
+        role: 'subtitle',
+        text: 'Summary',
+        x: 100,
+        y: 400,
+        width: 300,
+        height: 80,
+      },
+      {},
+    );
+    expect(withSubtitleAlias.ok).toBe(true);
+    if (!withSubtitleAlias.ok) return;
+    expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).toContain(
+      '<p:ph type="subTitle"/>',
+    );
+    expect(await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8')).not.toContain(
+      'type="subtitle"',
+    );
+
+    const withBadRole = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: (withSubtitleAlias.value as { revision: string }).revision,
+        slide: 1,
+        shapeType: 'text',
+        name: 'CardPh',
+        role: 'card',
+        text: 'Nope',
+      },
+      {},
+    );
+    expect(withBadRole.ok).toBe(false);
+    if (withBadRole.ok) return;
+    expect(withBadRole.error.code).toBe('INVALID_COMMAND');
+    expect(withBadRole.error.message).toMatch(/Invalid placeholder role/i);
   });
 
   it('creates local xfrm on placeholder that inherits layout transform', async () => {

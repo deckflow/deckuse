@@ -8,6 +8,7 @@ import {
 } from './chart.js';
 import { addMediaPart, mediaPicXml } from './media.js';
 import { addPicturePart } from './picture.js';
+import { normalizePlaceholderRole } from './placeholder-role.js';
 import {
   NS,
   REL,
@@ -36,9 +37,11 @@ const textBody = (text: string) => {
 const nvPrXml = (e: Record<string, unknown>) => {
   const role = typeof e['role'] === 'string' ? e['role'] : undefined;
   if (!role) return '<p:nvPr/>';
+  const normalized = normalizePlaceholderRole(role);
+  if (!normalized.ok) throw new Error(normalized.message);
   const idx = typeof e['placeholderIdx'] === 'string' ? e['placeholderIdx'] : undefined;
   const idxAttr = idx !== undefined ? ` idx="${esc(idx)}"` : '';
-  return `<p:nvPr><p:ph type="${esc(role)}"${idxAttr}/></p:nvPr>`;
+  return `<p:nvPr><p:ph type="${esc(normalized.type)}"${idxAttr}/></p:nvPr>`;
 };
 const shapeXml = (id: number, e: Record<string, unknown>) =>
   `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
