@@ -57,7 +57,7 @@ deckuse undo ./workspace --steps 1 --json
 
 ## Fluxo de trabalho da CLI
 
-`apply` accepts a single JSON object, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command.
+`apply` accepts a single JSON object, a JSON array, or JSON Lines. One invocation can apply many write commands; multiple commands run as one atomic batch. Use `--input -` (the default) to read from standard input. Commands passed to `apply` do not need `version`, `workspaceId`, or `transactionId`: the CLI supplies them and reads the current workspace revision before each command.
 
 Os resultados dos comandos são gravados em JSON na saída padrão; erros de argumentos ou entrada inválidos são gravados na saída de erro. O status `0` indica sucesso, `1` indica falha de comando e `2` indica falha de uso ou análise da CLI.
 

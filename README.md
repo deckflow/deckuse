@@ -79,7 +79,7 @@ workspace/
   .gitignore        # ignores package.* and other generated files
 ```
 
-`apply` accepts a transaction file (`{ "operations": [...] }`), a single JSON mutation, a JSON array, or JSON Lines. Use `--input -` (the default) to read from standard input. Legacy ElementRef mutations remain supported. When invoked without a subcommand, the CLI accepts one complete protocol `2.0` JSON command on standard input.
+`apply` accepts a transaction file (`{ "operations": [...] }`), a single JSON mutation, a JSON array, or JSON Lines. One invocation can apply many write commands; multiple commands run as one atomic batch. Use `--input -` (the default) to read from standard input. Legacy ElementRef mutations remain supported. When invoked without a subcommand, the CLI accepts one complete protocol `2.0` JSON command on standard input.
 
 Command results use a JSON envelope (`ok`, `command`, `revision`, `data` / `error`). Exit status `0` means success, `1` means that a command failed, and `2` means CLI usage or parsing failure.
 

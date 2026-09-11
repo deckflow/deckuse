@@ -30,7 +30,7 @@ Commands:
   replace-text  Find/replace text across the deck
   xfrm          Set geometry (x/y/width/height/rotation)
   z             Change z-order
-  apply         Apply JSON / JSONL write commands
+  apply         Apply one or many JSON / JSONL write commands
   validate      Validate package / relationships
   history       Show write history
   undo          Undo recent write revisions
@@ -441,8 +441,8 @@ Options:
   apply: {
     usage: 'deckuse apply [<workspace>] [--input <file|->]',
     summary:
-      'Apply write commands from JSON / JSONL / transaction { "operations": [...] }.',
-    example: 'deckuse apply --workspace ./workspace --input ops.json --json',
+      'Apply one or many write commands from JSON / JSONL / transaction { "operations": [...] }. Multiple commands run as one atomic batch.',
+    example: 'deckuse apply --workspace ./workspace --input ops.jsonl --json',
     details: `Arguments:
   <workspace>               Optional workspace path (or use --workspace)
 
@@ -450,13 +450,21 @@ Options:
   --input <file|->          Input path; "-" (default) reads stdin
   ${WRITE_GLOBALS}
 
-Accepted input shapes:
+Accepted input shapes (batch-capable):
   { "operations": [ ... ] } Transaction ops
   [ { "type": "setText", ... }, ... ]
   { "type": "setText", ... } Single command
   JSONL                     One command object per line
 
-Only write command types are accepted.`,
+Notes:
+  One invocation can apply many write commands (JSON array, JSONL, or
+  { "operations": [...] }); multiple commands run as one atomic batch.
+  Only write command types are accepted.
+
+Examples:
+  deckuse apply --input ops.json --json
+  deckuse apply --input ops.jsonl --json
+  printf '%s\\n' '{"type":"setText",...}' '{"type":"setProperties",...}' | deckuse apply --json`,
   },
 
   validate: {

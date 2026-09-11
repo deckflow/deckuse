@@ -79,7 +79,7 @@ workspace/
 
 ## CLI 工作流
 
-`apply` 可接受 transaction 文件（`{ "operations": [...] }`）、单个 JSON mutation、JSON 数组或 JSONL。使用 `--input -`（默认）从标准输入读取。仍支持旧版 ElementRef mutation。无子命令时，CLI 从标准输入读取一条完整的协议 `2.0` JSON 命令。
+`apply` 可接受 transaction 文件（`{ "operations": [...] }`）、单个 JSON mutation、JSON 数组或 JSONL。一次调用可应用多条写命令；多条命令作为一次原子 batch 执行。使用 `--input -`（默认）从标准输入读取。仍支持旧版 ElementRef mutation。无子命令时，CLI 从标准输入读取一条完整的协议 `2.0` JSON 命令。
 
 命令结果使用 JSON envelope（`ok`、`command`、`revision`、`data` / `error`）。退出状态 `0` 表示成功，`1` 表示命令失败，`2` 表示 CLI 用法或解析失败。
 
