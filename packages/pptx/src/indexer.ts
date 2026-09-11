@@ -64,6 +64,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
   const presentation = archive.readXml('/ppt/presentation.xml'),
     rels = archive.getRelationships('/ppt/presentation.xml');
   for (const sld of descendants(presentation, 'sldId')) {
+    if (sld.namespaceURI && sld.namespaceURI !== NS.p) continue;
     const rid = sld.getAttributeNS(NS.r, 'id') ?? attr(sld, 'r:id'),
       rel = rels.find((r) => r.id === rid);
     if (!rel?.resolvedTarget) continue;

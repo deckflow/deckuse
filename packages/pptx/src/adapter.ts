@@ -33,6 +33,7 @@ import {
   undoWrites,
   withWriteLock,
 } from './workspace.js';
+import { NS, descendants } from './xml.js';
 
 const VERSION = '0.5.0';
 const WRITE_TYPES = new Set([
@@ -176,6 +177,32 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
           message: `Missing target ${rel.resolvedTarget}`,
           details: { source, relationshipId: rel.id },
         });
+
+  // app.xml <Slides> must match p:sldIdLst only — not p14:sectionLst/p14:sldId.
+  const appPart = archive.getPart('/docProps/app.xml');
+  if (appPart && archive.getPart('/ppt/presentation.xml')) {
+    const presentation = archive.readXml('/ppt/presentation.xml');
+    const list = descendants(presentation, 'sldIdLst').find((el) => el.namespaceURI === NS.p);
+    const slideCount = list
+      ? descendants(list, 'sldId').filter((el) => el.namespaceURI === NS.p).length
+      : 0;
+    const app = archive.readXml('/docProps/app.xml');
+    const slidesEl = descendants(app, 'Slides').find(
+      (node) =>
+        !node.namespaceURI ||
+        node.namespaceURI ===
+          'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties',
+    );
+    const declared = slidesEl?.textContent?.trim();
+    if (declared !== undefined && declared !== '' && Number(declared) !== slideCount) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'SLIDE_COUNT_MISMATCH',
+        message: `docProps/app.xml <Slides> is ${declared} but presentation has ${String(slideCount)} p:sldId entries (PowerPoint will prompt to repair)`,
+        details: { declared: Number(declared), actual: slideCount },
+      });
+    }
+  }
   return diagnostics;
 };
 

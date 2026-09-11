@@ -308,6 +308,7 @@ const indexSlidePartForNotes = (archive: OpcArchive, item: IndexedElement): stri
   const presentation = archive.readXml('/ppt/presentation.xml');
   const rels = archive.getRelationships('/ppt/presentation.xml');
   for (const sld of descendants(presentation, 'sldId')) {
+    if (sld.namespaceURI && sld.namespaceURI !== NS.p) continue;
     const id = attr(sld, 'id');
     if (id !== item.slideId) continue;
     const rid = sld.getAttributeNS(NS.r, 'id') ?? attr(sld, 'r:id');

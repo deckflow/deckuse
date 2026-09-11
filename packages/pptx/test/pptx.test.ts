@@ -1081,6 +1081,158 @@ describe('pptx adapter', () => {
     expect(appXml).toMatch(/<Notes>1<\/Notes>/);
   });
 
+  it('addSlide ignores p14:sectionLst sldId when syncing app.xml Slides count', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-p14-sldid-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const a = new OpcArchive();
+    a.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      e.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:extLst><p:ext uri="{521415D9-36F7-43E2-AB2F-B90AF26B5E84}"><p14:sectionLst><p14:section name="Default" id="{11111111-1111-1111-1111-111111111111}"><p14:sldIdLst><p14:sldId id="256"/></p14:sldIdLst></p14:section></p14:sectionLst></p:ext></p:extLst></p:presentation>`,
+      ),
+      CT,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slides/slide1.xml',
+      },
+      {
+        id: 'rId2',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+        target: 'slideLayouts/slideLayout1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slideLayouts/slideLayout1.xml',
+      },
+    ]);
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    a.setRelationships('/ppt/slides/slide1.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+        target: '../slideLayouts/slideLayout1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slideLayouts/slideLayout1.xml',
+      },
+    ]);
+    a.setPart(
+      '/ppt/slideLayouts/slideLayout1.xml',
+      e.encode(
+        `<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" type="blank"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sldLayout>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
+    );
+    a.setPart(
+      '/docProps/app.xml',
+      e.encode(
+        `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides><Notes>0</Notes></Properties>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const inspected = await pptxAdapter.execute(
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const revision = (inspected.value as { document: { revision: string } }).document.revision;
+
+    const added = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addSlide',
+        workspaceId: workspace,
+        transactionId: revision,
+        layout: 'blank',
+      },
+      {},
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const appXml = await readFile(join(workspace, 'source/docProps/app.xml'), 'utf8');
+    // Must be 2 (real p:sldId count), not 3 (p:sldId + leftover p14:sldId).
+    expect(appXml).toMatch(/<Slides>2<\/Slides>/);
+    expect(appXml).not.toMatch(/<Slides>3<\/Slides>/);
+
+    const presentation = await readFile(
+      join(workspace, 'source/ppt/presentation.xml'),
+      'utf8',
+    );
+    const pSldIds = [...presentation.matchAll(/<p:sldId\b[^>]*>/g)].map((m) => m[0]);
+    expect(pSldIds).toHaveLength(2);
+    // New slide id must be > 256, not stuck at the empty-list fallback.
+    const ids = pSldIds.map((tag) => Number(/id="(\d+)"/.exec(tag)?.[1] ?? 0));
+    expect(ids[1]!).toBeGreaterThan(256);
+
+    const rev2 = (added.value as { revision: string }).revision;
+    const removed = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'remove',
+        workspaceId: workspace,
+        transactionId: rev2,
+        target: 'slide:2',
+      },
+      {},
+    );
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+
+    const afterRemove = await readFile(
+      join(workspace, 'source/ppt/presentation.xml'),
+      'utf8',
+    );
+    expect([...afterRemove.matchAll(/<p:sldId\b/g)]).toHaveLength(1);
+    const appAfter = await readFile(join(workspace, 'source/docProps/app.xml'), 'utf8');
+    expect(appAfter).toMatch(/<Slides>1<\/Slides>/);
+    // Relationship for the removed slide must be gone; remaining sldId must resolve.
+    const rels = await readFile(
+      join(workspace, 'source/ppt/_rels/presentation.xml.rels'),
+      'utf8',
+    );
+    const slideTargets = [
+      ...rels.matchAll(
+        /Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/slide"[^>]*Target="([^"]+)"/g,
+      ),
+    ];
+    // Target may appear before Type
+    const slideTargetsAlt = [
+      ...rels.matchAll(
+        /Target="(slides\/slide[^"]+)"[^>]*Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/slide"/g,
+      ),
+    ];
+    const targets = new Set([
+      ...slideTargets.map((m) => m[1]),
+      ...slideTargetsAlt.map((m) => m[1]),
+    ]);
+    expect(targets.size).toBe(1);
+  });
+
   it('addSlide layout=blank binds to a Blank layout by cSld name, not the first layout', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-blank-layout-'));
     const source = join(root, 'source.pptx'),
