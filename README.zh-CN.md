@@ -318,7 +318,8 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 - `setProperties` 用于常见形状与文本属性，包括 `paragraph.align`、`paragraph.level`、`bullet`、填充透明度与 `hyperlink`。
 - 可添加、复制与删除幻灯片；复制幻灯片时会克隆可变的备注与图表部件，版式与媒体可安全共享。
 - 可添加形状/文本框（可选 `role` 写出 `p:ph` 占位符）、连接线、组合、图片（文件路径或 base64）、表格、图表（仅缓存）以及嵌入的视频/音频；可复制或删除元素。
-- 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`ctrTitle`）。
+- `role` 须为 OOXML 占位符类型（`title`、`body`、`subTitle`、`ctrTitle` 等）。常见别名会规范化（如 `subtitle`→`subTitle`）；非 OOXML 标签（如 `card`）会被拒绝，以免 PowerPoint 提示修复。
+- 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`subTitle`、`ctrTitle`）。
 - `replacePicture` 就地替换图片嵌入媒体，并保留元素引用与图层顺序。
 - 表格单元格寻址；表格行列增删与单元格 `fill`；演讲者备注读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。
 - 可创建图表（`bar` / `column` / `line` / `pie`）并编辑标题、系列名与缓存值。存在嵌入工作簿时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED`，不会声称已更新工作簿。社区版对高级图表（其它 family、组合图、ChartEx）仅保留、不可编辑。
