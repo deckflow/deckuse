@@ -324,6 +324,44 @@ describe('deckuse CLI', () => {
     expect(manifest.revision).toBe('2');
   });
 
+  it('treats { operations: high-level writes } as batch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-ops-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+    const apply = await run(
+      ['apply', workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        operations: [
+          {
+            type: 'addShape',
+            slide: 1,
+            shapeType: 'rect',
+            name: 'OpsCard',
+            x: '5%',
+            y: '100px',
+            width: '30%',
+            height: '80px',
+            fill: { color: 'F3F4F6' },
+            blocks: [{ text: 'Ops', fontSize: 14, bold: true, textColor: '111827' }],
+          },
+          {
+            type: 'setProperties',
+            target: 'slide:1/shape:OpsCard',
+            properties: { stroke: { color: 'E5E7EB', width: 1 } },
+          },
+        ],
+      }),
+    );
+    expect(apply.code, apply.stderr || apply.stdout).toBe(0);
+    const packaged = await OpcArchive.openFile(join(workspace, 'package.pptx'));
+    const xml = new TextDecoder().decode(packaged.getPart('/ppt/slides/slide1.xml')!.data);
+    expect(xml).toContain('OpsCard');
+    expect(xml).toContain('F3F4F6');
+    expect(xml).toContain('Ops');
+  });
+
   it('rejects render without a single page', async () => {
     const missing = await run(['render', '--workspace', '/tmp']);
     expect(missing.code).toBe(2);

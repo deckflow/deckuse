@@ -238,6 +238,61 @@ const lengthArg = (raw: string | undefined): number | string | undefined => {
   return raw;
 };
 
+const APPLY_WRITE_TYPES = new Set([
+  'setText',
+  'replaceText',
+  'setTransform',
+  'setProperties',
+  'set',
+  'xfrmSet',
+  'zMove',
+  'add',
+  'addSlide',
+  'addShape',
+  'remove',
+  'replacePicture',
+  'duplicate',
+  'alignElements',
+  'batch',
+]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isTransactionOp = (value: unknown): boolean => isRecord(value) && 'op' in value;
+
+const isHighLevelWrite = (value: unknown): boolean =>
+  isRecord(value) && APPLY_WRITE_TYPES.has(String(value['type']));
+
+/** Classify apply payload items: high-level batch vs low-level transaction. */
+const classifyApplyOps = (
+  ops: unknown[],
+): { kind: 'batch' } | { kind: 'transaction' } | { kind: 'invalid'; message: string } => {
+  if (ops.length === 0) return { kind: 'invalid', message: 'apply input operations array is empty' };
+  if (ops.every(isTransactionOp)) return { kind: 'transaction' };
+  if (ops.every(isHighLevelWrite)) return { kind: 'batch' };
+  if (ops.some(isHighLevelWrite) && ops.some(isTransactionOp)) {
+    return {
+      kind: 'invalid',
+      message:
+        'apply input mixes high-level write commands (type) with transaction ops (op); use one format',
+    };
+  }
+  if (ops.some(isHighLevelWrite)) return { kind: 'batch' };
+  if (ops.some(isTransactionOp)) {
+    return {
+      kind: 'invalid',
+      message:
+        'apply transaction operations must all include "op"; high-level writes must use "type"',
+    };
+  }
+  return {
+    kind: 'invalid',
+    message:
+      'apply input must be high-level write commands ({ "type": "addShape"|... }) or transaction ops ({ "op": ... })',
+  };
+};
+
 const main = async (): Promise<void> => {
 try {
   if (clean.length === 0) {
@@ -595,7 +650,7 @@ try {
       const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
       const raw = input === '-' ? await readStdin() : await readFile(resolve(input), 'utf8');
       let values: unknown[] | undefined;
-      let transactionOps: Record<string, unknown>[] | undefined;
+      let wrappedOperations: unknown[] | undefined;
       try {
         const parsed = JSON.parse(raw) as unknown;
         if (
@@ -603,7 +658,7 @@ try {
           parsed !== null &&
           Array.isArray((parsed as { operations?: unknown }).operations)
         ) {
-          transactionOps = (parsed as { operations: Record<string, unknown>[] }).operations;
+          wrappedOperations = (parsed as { operations: unknown[] }).operations;
         } else {
           values = Array.isArray(parsed) ? parsed : [parsed];
         }
@@ -613,69 +668,56 @@ try {
           .filter(Boolean)
           .map((line) => JSON.parse(line) as unknown);
       }
-      if (transactionOps) {
-        ok = await execute('deckuse apply', {
-          ...(await mutationExtras(workspace)),
-          type: 'applyTransaction',
-          operations: transactionOps,
+
+      const extras = await mutationExtras(workspace);
+      const runHighLevelBatch = async (list: unknown[]): Promise<boolean> => {
+        const commands = list.map((value) => {
+          if (!isRecord(value)) throw new Error('apply input must contain command objects');
+          if (value['type'] === 'batch') return value;
+          if (!APPLY_WRITE_TYPES.has(String(value['type'])))
+            throw new Error(`apply input contains non-write command: ${String(value['type'])}`);
+          return { ...extras, ...value };
         });
+        const payload =
+          commands.length === 1 && commands[0]?.['type'] !== 'batch'
+            ? commands[0]
+            : {
+                ...extras,
+                type: 'batch',
+                atomic: true,
+                commands: commands.flatMap((command) =>
+                  command['type'] === 'batch'
+                    ? ((command as { commands: unknown[] }).commands ?? [])
+                    : [command],
+                ),
+              };
+        return execute('deckuse apply', payload);
+      };
+
+      if (wrappedOperations) {
+        const classified = classifyApplyOps(wrappedOperations);
+        if (classified.kind === 'invalid') throw new Error(classified.message);
+        if (classified.kind === 'transaction') {
+          ok = await execute('deckuse apply', {
+            ...extras,
+            type: 'applyTransaction',
+            operations: wrappedOperations as Record<string, unknown>[],
+          });
+        } else {
+          ok = await runHighLevelBatch(wrappedOperations);
+        }
       } else {
-        const extras = await mutationExtras(workspace);
-        const WRITE = new Set([
-          'setText',
-          'replaceText',
-          'setTransform',
-          'setProperties',
-          'set',
-          'xfrmSet',
-          'zMove',
-          'add',
-          'addSlide',
-          'addShape',
-          'remove',
-          'replacePicture',
-          'duplicate',
-          'batch',
-        ]);
         const list = values ?? [];
-        if (
-          list.length > 0 &&
-          list.every(
-            (value) =>
-              typeof value === 'object' &&
-              value !== null &&
-              'op' in value,
-          )
-        ) {
+        const classified = classifyApplyOps(list);
+        if (classified.kind === 'invalid') throw new Error(classified.message);
+        if (classified.kind === 'transaction') {
           ok = await execute('deckuse apply', {
             ...extras,
             type: 'applyTransaction',
             operations: list as Record<string, unknown>[],
           });
         } else {
-          const commands = list.map((value) => {
-            if (typeof value !== 'object' || value === null)
-              throw new Error('apply input must contain command objects');
-            const record = value as Record<string, unknown>;
-            if (record['type'] === 'batch') return record;
-            if (!WRITE.has(String(record['type'])))
-              throw new Error(`apply input contains non-write command: ${String(record['type'])}`);
-            return { ...extras, ...record };
-          });
-          const payload =
-            commands.length === 1 && commands[0]?.['type'] !== 'batch'
-              ? commands[0]
-              : {
-                  ...extras,
-                  type: 'batch',
-                  atomic: true,
-                  commands: commands.flatMap((command) =>
-                    command['type'] === 'batch'
-                      ? (command as { commands: unknown[] }).commands
-                      : [command],
-                  ),
-                };
-          ok = await execute('deckuse apply', payload);
+          ok = await runHighLevelBatch(list);
         }
       }
     } else if (action === 'validate') {

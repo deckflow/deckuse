@@ -692,7 +692,15 @@ export const pptxAdapter: FormatAdapter = {
         if (locked) return locked;
 
         const working = await openWorkspaceArchive(workspace);
-        const currentIndex = await loadIndex(workspace, working, currentManifest);
+        let currentIndex = await loadIndex(workspace, working, currentManifest);
+        const STRUCTURAL_TYPES = new Set([
+          'addShape',
+          'addSlide',
+          'remove',
+          'duplicate',
+          'add',
+          'replacePicture',
+        ]);
 
         const runBatch = async (
           nestedCommands: AtomicCommand[],
@@ -712,6 +720,13 @@ export const pptxAdapter: FormatAdapter = {
             slidePages.push(...slidesFromOutcome(result.value));
             if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
             if (result.value.changedParts) changedParts.push(...result.value.changedParts);
+            if (STRUCTURAL_TYPES.has(nested.type)) {
+              currentIndex = buildIndex(
+                working,
+                currentManifest.workspaceId,
+                currentManifest.revision,
+              );
+            }
           }
           // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
           syncAppSlideCounts(working);

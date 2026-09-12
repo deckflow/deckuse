@@ -279,7 +279,7 @@ Type-specific:
   --height auto             Table only: compute height from row count × font heuristic
   --theme <name>            Table theme: minimal | zebra
   --align-columns <list>    Table column aligns (JSON array or comma list: l,ctr,r)
-  --chart-type <kind>       bar | column | line | pie | combo (required for chart)
+  --chart-type <kind>       bar | column | line | pie | combo (required for chart; prefer bar/column/line/pie for community render)
   --data <json>             Chart data JSON (required for chart):
                             {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1],"color?":"#5B8DEF","chart?":"column","axis?":"primary"}]}
   --show-data-labels        Enable chart data labels on create
@@ -478,8 +478,8 @@ Options:
   apply: {
     usage: 'deckuse apply [<workspace>] [--input <file|->]',
     summary:
-      'Apply one or many write commands from JSON / JSONL / transaction { "operations": [...] }. Multiple commands run as one atomic batch.',
-    example: 'deckuse apply --workspace ./workspace --input ops.jsonl --json',
+      'Apply one or many write commands from JSON / JSONL. High-level arrays (and { "operations": [...] } of high-level types) run as one atomic batch; items with op run as applyTransaction.',
+    example: 'deckuse apply --workspace ./workspace --input ops.json --json',
     details: `Arguments:
   <workspace>               Optional workspace path (or use --workspace)
 
@@ -487,59 +487,48 @@ Options:
   --input <file|->          Input path; "-" (default) reads stdin
   ${WRITE_GLOBALS}
 
-Accepted input shapes (batch-capable):
-  { "operations": [ ... ] } Transaction ops
-  [ { "type": "setText", ... }, ... ]
-  { "type": "setText", ... } Single command
-  JSONL                     One command object per line
+Accepted input shapes:
+  [ { "type": "setText", ... }, ... ]   High-level batch (preferred)
+  { "operations": [ { "type": ... } ] } High-level batch (same as array)
+  { "type": "setText", ... }            Single command
+  JSONL                                 One command object per line
+  [ { "op": ... }, ... ]                Low-level applyTransaction
+  { "operations": [ { "op": ... } ] }   Low-level applyTransaction
 
 Notes:
   Prefer apply for agent workflows: one revision, one audit entry, atomic rollback.
   Only write command types are accepted (setText, setProperties, addShape,
   setTransform / xfrmSet, alignElements, …).
+  setProperties accepts camelCase/nested keys and dotted keys (font.size, fill.color).
+  Same-batch forward refs by shape name work after addShape.
 
-Template (ops.json) — add KPI card shapes then style them:
+Template (ops.json) — KPI card with inline style:
 
-  {
-    "operations": [
-      {
-        "type": "addShape",
-        "slide": 2,
-        "shapeType": "rect",
-        "name": "kpi-1",
-        "x": "5%",
-        "y": "120px",
-        "width": "20%",
-        "height": "150px"
-      },
-      {
-        "type": "addShape",
-        "slide": 2,
-        "shapeType": "text",
-        "name": "kpi-1-label",
-        "x": "5%",
-        "y": "130px",
-        "width": "20%",
-        "height": "130px",
-        "text": "Revenue"
-      },
-      {
-        "type": "setText",
-        "target": "slide:2/shape:3",
-        "blocks": [
-          { "text": "全年总收入", "fontSize": 12, "textColor": "6B7280" },
-          { "text": "598 百万元", "fontSize": 20, "textColor": "059669", "bold": true }
-        ]
-      },
-      {
-        "type": "alignElements",
-        "slide": 2,
-        "targets": ["slide:2/shape:3", "slide:2/shape:4", "slide:2/shape:5"],
-        "mode": "distribute-h",
-        "gap": "20px"
-      }
-    ]
-  }
+  [
+    {
+      "type": "addShape",
+      "slide": 2,
+      "shapeType": "rect",
+      "name": "kpi-1",
+      "x": "5%",
+      "y": "120px",
+      "width": "28%",
+      "height": "100px",
+      "fill": { "color": "F0FDF4" },
+      "stroke": { "color": "BBF7D0", "width": 1 },
+      "blocks": [
+        { "text": "全年总收入", "fontSize": 12, "textColor": "6B7280" },
+        { "text": "598 百万元", "fontSize": 20, "textColor": "059669", "bold": true }
+      ]
+    },
+    {
+      "type": "alignElements",
+      "slide": 2,
+      "targets": ["slide:2/shape:kpi-1", "slide:2/shape:kpi-2", "slide:2/shape:kpi-3"],
+      "mode": "distribute-h",
+      "gap": "20px"
+    }
+  ]
 
 Examples:
   deckuse apply --input ops.json --json

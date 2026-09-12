@@ -12,6 +12,7 @@ import {
   operationsPath,
   previewDir,
 } from '@deckflow/deckuse-workspace';
+import { ensureOffice2HtmlExecutable } from './office2html-exec.js';
 
 const KEEPALIVE_MS = 15_000;
 const DEBOUNCE_MS = 80;
@@ -487,6 +488,7 @@ export const startMonitor = async (
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
+  if (!options.dependencies?.convert) await ensureOffice2HtmlExecutable();
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const operationsWatchPath = dirname(operationsPath(absoluteWorkspace));
   const clients = new Set<ServerResponse>();

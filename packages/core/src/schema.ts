@@ -390,6 +390,32 @@ const addShapeCommandSchema = z
     height: lengthValueSchema.optional(),
     file: z.string().min(1).optional(),
     text: z.string().optional(),
+    /** Rich paragraphs; when set, preferred over `text`. */
+    blocks: z.array(textBlockSchema).min(1).optional(),
+    fill: z
+      .union([
+        z.string().min(1),
+        z
+          .object({
+            color: z.string().min(1),
+            transparency: z.number().optional(),
+            type: z.literal('solid').optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    stroke: z
+      .union([
+        z.string().min(1),
+        z
+          .object({
+            color: z.string().min(1).optional(),
+            width: z.number().optional(),
+            dash: z.string().min(1).optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
     rows: z.array(z.array(z.string())).optional(),
     /** Table visual preset. */
     theme: z.enum(['minimal', 'zebra']).optional(),

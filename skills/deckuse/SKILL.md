@@ -25,6 +25,7 @@ Deckuse is a local-first, schema-driven Office document automation engine specif
    - `slide:1/placeholder:title`, `slide:1/placeholder:body`, `slide:1/placeholder:subTitle`
    - `slide:1/notes` (speaker notes)
    - `slide:1/shape:2/paragraph:0` or `slide:1/shape:2/run:0`
+   - Same-batch forward refs work: after `addShape` with `"name": "HeaderTitle"`, later ops in the same `apply` may target `slide:N/shape:HeaderTitle`.
 4. **Intuitive Unit System**:
    Coordinates and sizes accept human-friendly unit strings: `px` (96 DPI, 1px = 9525 EMU), `pt`, `cm`, `mm`, `in`, and `%` (relative to slide size, default 16:9 is 12192000×6858000 EMU). Bare numbers default to raw EMU. Example: `"x": "5%"`, `"y": "120px"`, `"width": "90%"`.
 5. **Structural Engine, Not Visual Brain**:
@@ -68,47 +69,64 @@ deckuse get slide:1/shape:2 --resolve both --workspace ./workspace --json
 
 ### Step 3: Atomic Batch Mutation (`apply`)
 
-Create an `operations.json` file containing all changes for the slide or presentation:
+Create an `ops.json` file as a **top-level array** of write commands (preferred):
 
 ```json
-{
-  "operations": [
-    {
-      "type": "addShape",
-      "slide": 1,
-      "shapeType": "text",
-      "name": "HeaderTitle",
-      "x": "5%",
-      "y": "50px",
-      "width": "90%",
-      "height": "60px",
-      "text": "Quarterly Financial Overview"
-    },
-    {
-      "type": "setText",
-      "target": "slide:1/shape:HeaderTitle",
-      "blocks": [
-        { "text": "Q3 Revenue Report", "fontSize": 24, "bold": true, "textColor": "1F2937" },
-        { "text": "Confidential • Internal Only", "fontSize": 12, "textColor": "6B7280" }
-      ]
-    },
-    {
-      "type": "setProperties",
-      "target": "slide:1/shape:2",
-      "properties": {
-        "fill": { "color": "F3F4F6", "transparency": 0 },
-        "stroke": { "color": "E5E7EB", "width": 1 }
-      }
+[
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "text",
+    "name": "HeaderTitle",
+    "x": "5%",
+    "y": "50px",
+    "width": "90%",
+    "height": "60px",
+    "blocks": [
+      { "text": "Q3 Revenue Report", "fontSize": 24, "bold": true, "textColor": "1F2937" },
+      { "text": "Confidential • Internal Only", "fontSize": 12, "textColor": "6B7280" }
+    ]
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:2",
+    "properties": {
+      "fill": { "color": "F3F4F6", "transparency": 0 },
+      "stroke": { "color": "E5E7EB", "width": 1 }
     }
-  ]
-}
+  }
+]
 ```
+
+Also accepted:
+
+- Single command object `{ "type": "setText", ... }`
+- `{ "operations": [ ... ] }` when each item is a high-level write (`type: "addShape"` / `setText` / …) — treated as the same batch
+- JSONL (one command object per line)
+- Low-level transaction ops: items with `op` (or `{ "operations": [...] }` of those) → `applyTransaction`
 
 Apply in one shot:
 
 ```bash
-deckuse apply --workspace ./workspace --input operations.json --json
+deckuse apply --workspace ./workspace --input ops.json --json
 ```
+
+#### `setProperties` property keys (canonical)
+
+Prefer camelCase / nested objects. Dotted keys (`font.size`, `fill.color`, …) are also accepted and normalized.
+
+| Intent | Canonical form |
+| --- | --- |
+| Font size (pt) | `fontSize: number` |
+| Bold / italic / underline | `bold` / `italic` / `underline`: boolean |
+| Text color | `textColor: "RRGGBB"` |
+| Font family | `fontFamily: string` |
+| Shape fill | `fill: { "color": "RRGGBB", "transparency"?: number }` |
+| Shape border | `stroke: { "color": "RRGGBB", "width": number }` |
+
+Dotted equivalents (also OK): `font.size`, `font.color`, `font.weight: "bold"`, `fill.color`, `line.color`.
+
+CLI `deckuse set --font.size …` uses the same dotted vocabulary.
 
 ### Step 4: Validate and Visual QA
 
@@ -133,23 +151,66 @@ deckuse export ./output.pptx --workspace ./workspace --json
 
 ## 3. High-Value Operation Recipes
 
-### A. Rich Text & Metric (KPI) Cards
+### A. KPI Cards (inline create + style)
 
-When rendering a KPI block (e.g., small gray subtitle + large colored number):
+Prefer creating styled cards in one `addShape` (fill / stroke / blocks). Palette for a 3-column row: green `F0FDF4`/`059669`, blue `EFF6FF`/`2563EB`, amber `FFFBEB`/`D97706` (optional 4th: rose `FFF1F2`/`E11D48`).
 
 ```json
-{
-  "type": "setText",
-  "target": "slide:2/shape:5",
-  "blocks": [
-    { "text": "Total Net Revenue", "fontSize": 11, "textColor": "6B7280" },
-    { "text": "$1,280,000", "fontSize": 28, "bold": true, "textColor": "059669" },
-    { "text": "+18.4% YoY Growth", "fontSize": 10, "textColor": "10B981" }
-  ]
-}
+[
+  {
+    "type": "addShape",
+    "slide": 2,
+    "shapeType": "rect",
+    "name": "KpiRevenue",
+    "x": "5%",
+    "y": "120px",
+    "width": "28%",
+    "height": "100px",
+    "fill": { "color": "F0FDF4" },
+    "stroke": { "color": "BBF7D0", "width": 1 },
+    "blocks": [
+      { "text": "总营收", "fontSize": 12, "textColor": "065F46" },
+      { "text": "598 百万元", "fontSize": 24, "bold": true, "textColor": "059669" }
+    ]
+  },
+  {
+    "type": "addShape",
+    "slide": 2,
+    "shapeType": "rect",
+    "name": "KpiCost",
+    "x": "36%",
+    "y": "120px",
+    "width": "28%",
+    "height": "100px",
+    "fill": { "color": "EFF6FF" },
+    "stroke": { "color": "BFDBFE", "width": 1 },
+    "blocks": [
+      { "text": "总成本", "fontSize": 12, "textColor": "1E40AF" },
+      { "text": "312 百万元", "fontSize": 24, "bold": true, "textColor": "2563EB" }
+    ]
+  },
+  {
+    "type": "addShape",
+    "slide": 2,
+    "shapeType": "rect",
+    "name": "KpiProfit",
+    "x": "67%",
+    "y": "120px",
+    "width": "28%",
+    "height": "100px",
+    "fill": { "color": "FFFBEB" },
+    "stroke": { "color": "FDE68A", "width": 1 },
+    "blocks": [
+      { "text": "毛利", "fontSize": 12, "textColor": "92400E" },
+      { "text": "286 百万元", "fontSize": 24, "bold": true, "textColor": "D97706" }
+    ]
+  }
+]
 ```
 
-_Note_: Multiple lines with plain text can also use `\n` in `"text": "Line 1\nLine 2"`.
+For existing shapes, use `setText` with `blocks` and/or `setProperties`.
+
+_Note_: Multiple lines with plain text can also use `\n` in `"text": "Line 1\nLine 2"`. When both `text` and `blocks` are present on `addShape`, `blocks` wins.
 
 ### B. Auto-Sized Styled Tables
 
@@ -178,44 +239,32 @@ _Note_: Multiple lines with plain text can also use `\n` in `"text": "Line 1\nLi
 - `theme: "minimal" | "zebra"`.
 - `alignColumns`: array of `'left'` | `'center'` | `'right'` (or `'l'` | `'ctr'` | `'r'`).
 
-### C. Standard & Dual-Axis Combo Charts
+### C. Charts (prefer basic types for `render`)
+
+**Prefer** `"bar" | "column" | "line" | "pie"` for community `deckuse render` (these render fully).
 
 ```json
 {
   "type": "addShape",
   "slide": 3,
   "shapeType": "chart",
-  "chartType": "combo",
+  "chartType": "column",
   "x": "5%",
-  "y": "120px",
+  "y": "240px",
   "width": "90%",
-  "height": "400px",
+  "height": "360px",
   "showDataLabels": true,
   "data": {
-    "title": "Revenue vs Margin %",
-    "categories": ["Q1", "Q2", "Q3", "Q4"],
+    "title": "Monthly Revenue",
+    "categories": ["Jan", "Feb", "Mar", "Apr"],
     "series": [
-      {
-        "name": "Revenue ($M)",
-        "values": [12, 19, 15, 25],
-        "chart": "column",
-        "axis": "primary",
-        "color": "2563EB"
-      },
-      {
-        "name": "Margin %",
-        "values": [0.18, 0.22, 0.21, 0.28],
-        "chart": "line",
-        "axis": "secondary",
-        "color": "10B981"
-      }
+      { "name": "Revenue ($M)", "values": [12, 19, 15, 25], "color": "2563EB" }
     ]
   }
 }
 ```
 
-- Basic types: `"bar" | "column" | "line" | "pie"`.
-- Combo requires series to designate `"chart": "column"|"bar"|"line"` and at least one line and one bar/column.
+`chartType: "combo"` can be written into the PPTX (bar/column + line, optional secondary axis), but community `render` may show an Advanced Chart placeholder. Prefer basic charts when visual QA via `render` matters.
 
 ### D. Smart Multi-Element Alignment
 
@@ -254,18 +303,20 @@ Leave `selector` blank to target the entire presentation.
 2. **Revision Guard**:
    Pass `--expect-revision <N>` or use `expectRevision` in JSON mutations when working across asynchronous or multi-step agent tool calls to guarantee atomic updates without stale-state collisions.
 3. **Diagnostics & Errors**:
-   - `ELEMENT_NOT_FOUND`: Check `deckuse list shapes --slide N` to see valid shape IDs.
+   - `TARGET_NOT_FOUND` / `ELEMENT_NOT_FOUND`: Check `deckuse list shapes --slide N` to see valid shape IDs.
    - `INVALID_COMMAND`: Check schema requirements (e.g. `--type image` requires `--file`, `--type table` requires `--rows`).
    - `UNSUPPORTED_CAPABILITY`: Community edition restricts master/layout/theme writes.
+   - `COMBO_CHART_RENDER_LIMITED` (warning): combo charts may not fully render in community `render`.
 
 ---
 
 ## 5. Agent Workflow Checklist
 
 - [ ] Initialized workspace with `deckuse init <src> <ws> --json`?
-- [ ] Retrieved actual shape IDs via `list` or `search` before writing?
+- [ ] Retrieved actual shape IDs via `list` or `search` before writing (or used named shapes in the same batch)?
 - [ ] Used unit strings (`px`, `%`, `pt`) rather than computing large EMUs manually?
-- [ ] Grouped multiple mutations into a single `apply` batch?
+- [ ] Grouped multiple mutations into a single `apply` batch (top-level JSON array)?
+- [ ] Preferred `column`/`bar`/`line`/`pie` over `combo` when using `render`?
 - [ ] Ran `deckuse validate --workspace <ws> --json` after applying changes?
 - [ ] Rendered key slides via `deckuse render --page <N>` to inspect visual alignment?
 - [ ] Exported final document via `deckuse export <dest> --workspace <ws> --json`?

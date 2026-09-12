@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import office2html from '@deckflow/office2html';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { ensureGitignore, renderDir } from '@deckflow/deckuse-workspace';
+import { ensureOffice2HtmlExecutable } from './office2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
@@ -133,6 +134,8 @@ export const renderPage = async (
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const converter = options.dependencies?.convert ?? office2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
+
+  if (!options.dependencies?.convert) await ensureOffice2HtmlExecutable();
 
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-'));
   try {

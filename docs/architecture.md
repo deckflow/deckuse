@@ -17,7 +17,7 @@ An initialized workspace contains:
 
 ## Transactions
 
-Mutations require a transaction ID. Write operations acquire an exclusive workspace lock, apply changes against a temporary copy of `source/`, validate, atomically replace `source/`, update derived metadata, append one record to `operations.jsonl`, create a Git commit, and rebuild the package snapshot. Protocol `batch` is atomic by default. CLI `apply` with multiple write commands (JSON array, JSONL, or `{ "operations": [...] }`) also runs as one atomic batch. Failed validation or writes leave the workspace unchanged. Concurrent writes are serialized by the lock.
+Mutations require a transaction ID. Write operations acquire an exclusive workspace lock, apply changes against a temporary copy of `source/`, validate, atomically replace `source/`, update derived metadata, append one record to `operations.jsonl`, create a Git commit, and rebuild the package snapshot. Protocol `batch` is atomic by default. CLI `apply` with multiple high-level write commands (JSON array, JSONL, or `{ "operations": [...] }` of high-level `type` commands) runs as one atomic batch. `{ "operations": [...] }` (or a top-level array) of low-level items with `op` runs as `applyTransaction`. During a batch, the derived index is rebuilt after structural mutations so later commands can address shapes created earlier in the same batch. Failed validation or writes leave the workspace unchanged. Concurrent writes are serialized by the lock.
 
 `operations.jsonl` records one entry per successful write command (a `batch` counts as one entry). Each record stores the original command, revision, and affected slide page numbers (1-based, empty when unknown).
 

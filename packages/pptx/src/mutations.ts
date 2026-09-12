@@ -722,7 +722,9 @@ export async function mutate(
       ...(role !== undefined ? { role } : {}),
       ...geom,
       ...(command.file !== undefined ? { file: command.file } : {}),
-      ...(command.text !== undefined ? { text: command.text } : {}),
+      ...(command.blocks === undefined && command.text !== undefined
+        ? { text: command.text }
+        : {}),
       ...(command.rows !== undefined ? { rows: command.rows } : {}),
       ...(command.theme !== undefined ? { theme: command.theme } : {}),
       ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
@@ -733,14 +735,63 @@ export async function mutate(
         : {}),
     });
     const created = await addElement(archive, slide.partUri, doc, parent, element);
+    const diagnostics: Diagnostic[] = [];
+    if (command.chartType === 'combo') {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'COMBO_CHART_RENDER_LIMITED',
+        message:
+          'combo charts write into PPTX, but community deckuse render may show an Advanced Chart placeholder; prefer column/bar/line/pie for visual QA',
+      });
+    }
+    if (command.fill !== undefined || command.stroke !== undefined) {
+      const styleProps: Record<string, unknown> = {};
+      if (command.fill !== undefined) styleProps['fill'] = command.fill;
+      if (command.stroke !== undefined) styleProps['stroke'] = command.stroke;
+      const styled = applyShapeProperties(created, styleProps, {
+        archive,
+        partUri: slide.partUri,
+      });
+      if (!styled.ok) return styled;
+      diagnostics.push(...styled.diagnostics);
+    }
+    if (command.blocks !== undefined) {
+      setNodeTextBlocks(
+        created,
+        command.blocks.map((block) => {
+          const styled: {
+            text: string;
+            fontSize?: number;
+            fontFamily?: string;
+            textColor?: string;
+            bold?: boolean;
+            italic?: boolean;
+            underline?: boolean;
+            align?: string;
+          } = { text: block.text };
+          if (block.fontSize !== undefined) styled.fontSize = block.fontSize;
+          if (block.fontFamily !== undefined) styled.fontFamily = block.fontFamily;
+          if (block.textColor !== undefined) styled.textColor = block.textColor;
+          if (block.bold !== undefined) styled.bold = block.bold;
+          if (block.italic !== undefined) styled.italic = block.italic;
+          if (block.underline !== undefined) styled.underline = block.underline;
+          if (block.align !== undefined) styled.align = block.align;
+          return styled;
+        }),
+      );
+    }
     archive.writeXml(slide.partUri, doc);
     const id = attr(cNvPr(created), 'id') ?? '?';
-    return ok({
-      changed: true,
-      slides: [command.slide],
-      changedTargets: [`slide:${command.slide}/shape:${id}`],
-      changedParts: [slide.partUri],
-    });
+    return ok(
+      {
+        changed: true,
+        slides: [command.slide],
+        changedTargets: [`slide:${command.slide}/shape:${id}`],
+        changedParts: [slide.partUri],
+        diagnostics,
+      },
+      diagnostics,
+    );
   }
 
   if (command.type === 'alignElements') {
@@ -929,8 +980,7 @@ export async function mutate(
         [],
         target !== undefined ? { target } : {},
       );
-    const properties =
-      command.type === 'set' ? mapDottedProperties(command.properties) : command.properties;
+    const properties = mapDottedProperties(command.properties);
     if (chartPart) {
       const checked = assertChartProperties(properties);
       if (!checked.ok) return checked;
