@@ -16,7 +16,8 @@ const mediaType = (extension: string) =>
 
 const nextMedia = (archive: OpcArchive, ext: string) => {
   let n = 1;
-  while (archive.getPart(`/ppt/media/image${String(n)}${ext}`)) n++;
+  // Case-insensitive: existing `image1.PNG` must block `image1.png`.
+  while (archive.hasPartIgnoreCase(`/ppt/media/image${String(n)}${ext}`)) n++;
   return `/ppt/media/image${String(n)}${ext}`;
 };
 

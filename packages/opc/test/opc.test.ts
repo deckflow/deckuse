@@ -43,6 +43,14 @@ describe('OPC archive', () => {
     reopened.setPart('/custom/data.bin', enc.encode('changed'));
     expect(reopened.isUnmodified('/custom/data.bin')).toBe(false);
   });
+  it('hasPartIgnoreCase detects MP4/mp4 path collisions', () => {
+    const archive = new OpcArchive();
+    archive.setPart('/[Content_Types].xml', enc.encode(contentTypes), 'application/xml');
+    archive.setPart('/ppt/media/media1.MP4', enc.encode('video'), 'video/mp4');
+    expect(archive.getPart('/ppt/media/media1.mp4')).toBeUndefined();
+    expect(archive.hasPartIgnoreCase('/ppt/media/media1.mp4')).toBe(true);
+    expect(archive.hasPartIgnoreCase('/ppt/media/media2.mp4')).toBe(false);
+  });
   it('enforces entry count', async () => {
     const archive = new OpcArchive();
     archive.setPart('/[Content_Types].xml', enc.encode(contentTypes), 'application/xml');

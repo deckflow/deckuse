@@ -32,7 +32,8 @@ const relativeTarget = (source: string, target: string): string =>
 
 const nextMediaPart = (archive: OpcArchive, prefix: string, ext: string) => {
   let n = 1;
-  while (archive.getPart(`/ppt/media/${prefix}${String(n)}${ext}`)) n++;
+  // Case-insensitive: existing `media1.MP4` must block `media1.mp4`.
+  while (archive.hasPartIgnoreCase(`/ppt/media/${prefix}${String(n)}${ext}`)) n++;
   return `/ppt/media/${prefix}${String(n)}${ext}`;
 };
 

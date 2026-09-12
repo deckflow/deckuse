@@ -174,6 +174,23 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
           details: { source, relationshipId: rel.id },
         });
 
+  // ZIP entries that differ only by case collide on macOS/Windows extract.
+  const seenNames = new Map<string, string>();
+  for (const name of archive.parts.keys()) {
+    const key = name.toLowerCase();
+    const previous = seenNames.get(key);
+    if (previous) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'CASE_COLLIDING_PARTS',
+        message: `Parts ${previous} and ${name} differ only by case (PowerPoint will prompt to repair on case-insensitive systems)`,
+        details: { parts: [previous, name] },
+      });
+    } else {
+      seenNames.set(key, name);
+    }
+  }
+
   // app.xml <Slides> must match p:sldIdLst only — not p14:sectionLst/p14:sldId.
   const appPart = archive.getPart('/docProps/app.xml');
   if (appPart && archive.getPart('/ppt/presentation.xml')) {

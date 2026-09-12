@@ -1233,6 +1233,113 @@ describe('pptx adapter', () => {
     expect(targets.size).toBe(1);
   });
 
+  it('addShape video skips mediaN when mediaN.MP4 already exists (case-insensitive)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-media-case-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    const videoPath = join(root, 'clip.mp4');
+    await writeFile(videoPath, 'fake-mp4-bytes');
+
+    const a = new OpcArchive();
+    a.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="MP4" ContentType="video/mp4"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      e.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+      ),
+      CT,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slides/slide1.xml',
+      },
+    ]);
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    a.setRelationships('/ppt/slides/slide1.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout',
+        target: '../slideLayouts/slideLayout1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slideLayouts/slideLayout1.xml',
+      },
+    ]);
+    a.setPart(
+      '/ppt/slideLayouts/slideLayout1.xml',
+      e.encode(
+        `<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" type="blank"><p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sldLayout>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
+    );
+    // Existing uppercase extension — allocating media1.mp4 would collide on macOS.
+    a.setPart('/ppt/media/media1.MP4', e.encode('original-video'), 'video/mp4');
+    a.setPart(
+      '/docProps/app.xml',
+      e.encode(
+        `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides><Notes>0</Notes></Properties>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const inspected = await pptxAdapter.execute(
+      { version: '2.0', type: 'inspect', workspaceId: workspace, depth: 1 },
+      {},
+    );
+    expect(inspected.ok).toBe(true);
+    if (!inspected.ok) return;
+    const revision = (inspected.value as { document: { revision: string } }).document.revision;
+
+    const added = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: revision,
+        slide: 1,
+        shapeType: 'video',
+        name: 'Clip',
+        file: videoPath,
+      },
+      {},
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const archive = await OpcArchive.openDirectory(join(workspace, 'source'));
+    expect(archive.getPart('/ppt/media/media1.MP4')).toBeTruthy();
+    expect(archive.getPart('/ppt/media/media1.mp4')).toBeUndefined();
+    expect(archive.getPart('/ppt/media/media2.mp4')).toBeTruthy();
+    expect(archive.hasPartIgnoreCase('/ppt/media/media1.mp4')).toBe(true);
+
+    const validated = await pptxAdapter.execute(
+      { version: '2.0', type: 'validate', workspaceId: workspace },
+      {},
+    );
+    expect(validated.ok).toBe(true);
+  });
+
   it('init and setText heal stale app.xml Slides count (pre-existing mismatch)', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-stale-slides-'));
     const source = join(root, 'source.pptx'),

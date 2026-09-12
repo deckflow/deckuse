@@ -370,6 +370,19 @@ export class OpcArchive {
   getPart(name: string): OpcPart | undefined {
     return this.parts.get(normalizePartName(name));
   }
+  /**
+   * True if any part path matches `name` ignoring case.
+   * PPTX packages must stay portable to case-insensitive filesystems (macOS
+   * default); allocating `media1.mp4` beside `media1.MP4` makes PowerPoint
+   * prompt to repair when the ZIP entries collide on extract.
+   */
+  hasPartIgnoreCase(name: string): boolean {
+    const needle = normalizePartName(name).toLowerCase();
+    for (const key of this.parts.keys()) {
+      if (key.toLowerCase() === needle) return true;
+    }
+    return false;
+  }
   readXml(name: string): Document {
     const part = this.getPart(name);
     if (!part) throw new Error(`OPC part not found: ${name}`);
