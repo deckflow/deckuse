@@ -22,6 +22,10 @@
  *   --batch                merge consecutive writes into `apply` batch payloads;
  *                          skips undo/redo and other non-batchable steps
  *   --help
+ *
+ * Resume: if the sibling workspace already exists (has .deckuse/manifest.json),
+ * that case is skipped so a mid-run interrupt can continue. Delete the workspace
+ * (or pass --force) to re-run a case.
  */
 
 import { spawn } from 'node:child_process';
@@ -60,6 +64,8 @@ Run the full Deckuse write-operation sequence on:
   <file.pptx>   a single presentation (handy for re-debugging one case)
 
 Workspace for each file is created beside it as <basename>/ (e.g. demo.pptx → demo/).
+If that workspace already exists, the case is skipped (resume-friendly). Delete it
+manually, or pass --force, to re-run.
 
 Options:
   --bin <path>            deckuse bin.js (default: packages/deckuse/dist/bin.js)
@@ -1414,11 +1420,19 @@ const processOne = async (pptxPath, options) => {
   } else {
     try {
       await access(join(workspace, '.deckuse', 'manifest.json'));
-      throw new Error(
-        `workspace already exists: ${workspace} (pass --force to recreate)`,
+      process.stdout.write(
+        '  → SKIP  workspace already exists (delete it or pass --force to re-run)\n',
       );
-    } catch (cause) {
-      if (cause instanceof Error && cause.message.includes('workspace already exists')) throw cause;
+      return {
+        pptx: pptxPath,
+        workspace,
+        ok: true,
+        skipped: true,
+        steps: [],
+        failedSteps: [],
+      };
+    } catch {
+      // workspace does not exist yet — proceed
     }
   }
 
@@ -1586,17 +1600,21 @@ const main = async () => {
   }
 
   const summaryPath = join(summaryDir, 'integration-writes-summary.json');
+  const skipped = reports.filter((r) => r.skipped).length;
+  const ran = reports.filter((r) => !r.skipped);
   const summary = {
     ok: reports.every((r) => r.ok),
     input: options.input,
     batch: Boolean(options.batch),
     total: reports.length,
-    passed: reports.filter((r) => r.ok).length,
+    passed: ran.filter((r) => r.ok).length,
+    skipped,
     failed: reports.filter((r) => !r.ok).length,
     files: reports.map((r) => ({
       pptx: r.pptx,
       workspace: r.workspace,
       ok: r.ok,
+      skipped: r.skipped || undefined,
       unreadable: r.unreadable || undefined,
       failedSteps: (r.failedSteps ?? []).map((s) => s.name),
       error: r.error,
@@ -1604,7 +1622,9 @@ const main = async () => {
   };
   await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   process.stdout.write(
-    `\nSummary: ${String(summary.passed)}/${String(summary.total)} passed → ${summaryPath}\n`,
+    `\nSummary: ${String(summary.passed)}/${String(ran.length)} passed` +
+      (skipped > 0 ? `, ${String(skipped)} skipped` : '') +
+      ` → ${summaryPath}\n`,
   );
   if (!summary.ok) process.exitCode = 1;
 };
