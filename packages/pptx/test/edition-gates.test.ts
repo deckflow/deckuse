@@ -4,14 +4,17 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { OpcArchive } from '@deckflow/deckuse-opc';
 import { DOMParser } from '@xmldom/xmldom';
-import { classifyChartDocument, editionMetadata, pptxAdapter } from '../src/index.js';
+import {
+  classifyChartDocument,
+  editionCapabilities,
+  editionMetadata,
+  pptxAdapter,
+} from '../src/index.js';
 
 const e = new TextEncoder();
 const CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
-const layoutCt =
-  'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml';
-const masterCt =
-  'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml';
+const layoutCt = 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml';
+const masterCt = 'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml';
 const themeCt = 'application/vnd.openxmlformats-officedocument.theme+xml';
 const chartCt = 'application/vnd.openxmlformats-officedocument.drawingml.chart+xml';
 
@@ -108,6 +111,15 @@ async function packageWithMasters(path: string, chartFamily: 'barChart' | 'radar
 }
 
 describe('community edition write gates', () => {
+  it('binds community editionCapabilities', () => {
+    expect(editionCapabilities).toMatchObject({
+      mastersEdit: false,
+      layoutsEdit: false,
+      themeEdit: false,
+      chartBasicOnly: true,
+    });
+  });
+
   it('exposes community edition metadata on status', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-edition-status-'));
     const source = join(root, 'source.pptx'),
@@ -224,8 +236,9 @@ describe('community edition write gates', () => {
     );
     expect(basicList.ok).toBe(true);
     if (basicList.ok) {
-      const chart = (basicList.value as { items: Array<{ kind: string; chartVariant?: string }> })
-        .items.find((i) => i.kind === 'chart');
+      const chart = (
+        basicList.value as { items: Array<{ kind: string; chartVariant?: string }> }
+      ).items.find((i) => i.kind === 'chart');
       expect(chart?.chartVariant).toBe('basic');
     }
 
@@ -265,8 +278,9 @@ describe('community edition write gates', () => {
     );
     expect(advList.ok).toBe(true);
     if (advList.ok) {
-      const chart = (advList.value as { items: Array<{ kind: string; chartVariant?: string }> })
-        .items.find((i) => i.kind === 'chart');
+      const chart = (
+        advList.value as { items: Array<{ kind: string; chartVariant?: string }> }
+      ).items.find((i) => i.kind === 'chart');
       expect(chart?.chartVariant).toBe('advanced');
     }
   });

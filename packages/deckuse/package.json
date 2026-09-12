@@ -24,6 +24,7 @@
   "dependencies": {
     "@deckflow/deckuse-core": "workspace:*",
     "@deckflow/deckuse-docx": "workspace:*",
+    "@deckflow/deckuse-edition-config": "workspace:*",
     "@deckflow/deckuse-key": "workspace:*",
     "@deckflow/deckuse-numbers": "workspace:*",
     "@deckflow/deckuse-pptx": "workspace:*",

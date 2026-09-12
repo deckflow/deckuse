@@ -13,7 +13,7 @@
 
 Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office 文档自动化引擎。它将文档打开为带版本的工作区，让智能体用语义地址（如 `slide:1/shape:2`）检查并精确定位结构，执行显式变更、验证结果，再导出新文档。
 
-本仓库为**社区版**（`edition=community`），说明见 [docs/edition.md](docs/edition.md)。商业版在独立仓库 `deckuse-commercial`。
+本仓库为**社区版**（`edition=community`），说明见 [docs/edition.md](docs/edition.md)。共享包以此仓为唯一源；商业版是私有薄覆盖层仓库 `deckuse-commercial`（替换 `@deckflow/deckuse-edition-config`，并可增加专有包）。
 
 目前已实现 PPTX（**协议 2.0 / Phase 1a**）。DOCX、XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。
 

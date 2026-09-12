@@ -4,6 +4,7 @@ export {
   EDITION,
   EDITION_VARIANT,
   DISTRIBUTION_CHANNEL,
+  editionCapabilities,
   editionMetadata,
 } from './edition.js';
 export { classifyChartDocument, classifyChartPart } from './chart-classify.js';

@@ -11,6 +11,9 @@
       "path": "../core"
     },
     {
+      "path": "../edition-config"
+    },
+    {
       "path": "../workspace"
     },
     {

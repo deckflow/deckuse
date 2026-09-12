@@ -11,13 +11,8 @@ import {
 } from '@deckflow/deckuse-core';
 import { OpcArchive } from '@deckflow/deckuse-opc';
 import { isIntegerRevision, nextRevision } from '@deckflow/deckuse-workspace';
-import {
-  cNvPrIdOf,
-  resolveTarget,
-  targetPathForItem,
-  uidForItem,
-} from './addressing.js';
-import { editionMetadata } from './edition.js';
+import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addressing.js';
+import { editionCapabilities, editionMetadata } from './edition.js';
 import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
 import { loadIndex } from './index-sync.js';
 import { mutate } from './mutations.js';
@@ -59,10 +54,10 @@ export const pptxCapabilities = {
   protocol: '2.0',
   ...editionMetadata,
   slides: { add: true, duplicate: true, remove: true },
-  // Master/layout/theme: list + resolve only in community; writes gated in mutations.
-  masters: { list: true, edit: false },
-  layouts: { list: true, edit: false },
-  theme: { list: true, edit: false },
+  // Master/layout/theme: list always; writes gated via editionCapabilities + mutations.
+  masters: { list: true, edit: editionCapabilities.mastersEdit },
+  layouts: { list: true, edit: editionCapabilities.layoutsEdit },
+  theme: { list: true, edit: editionCapabilities.themeEdit },
   elements: [
     'shape',
     'textbox',
@@ -80,7 +75,7 @@ export const pptxCapabilities = {
   chart: {
     create: true,
     families: ['bar', 'column', 'line', 'pie', 'combo'],
-    basicOnly: true,
+    basicOnly: editionCapabilities.chartBasicOnly,
     title: true,
     seriesCache: true,
     seriesColor: true,
@@ -291,7 +286,10 @@ const listResource = (
       .map((item) => ({
         target: targetPathForItem(index, item),
         uid: uidForItem(item),
-        name: item.partUri.split('/').pop()?.replace(/\.xml$/, ''),
+        name: item.partUri
+          .split('/')
+          .pop()
+          ?.replace(/\.xml$/, ''),
         partUri: item.partUri,
       }));
   }
@@ -474,7 +472,10 @@ export const pptxAdapter: FormatAdapter = {
           command.slide !== undefined
             ? records.filter((record) => record.slides.includes(command.slide!))
             : records;
-        return ok({ records: filtered, total: command.slide !== undefined ? filtered.length : total });
+        return ok({
+          records: filtered,
+          total: command.slide !== undefined ? filtered.length : total,
+        });
       }
 
       const manifest = await readManifest(workspace);
@@ -745,7 +746,8 @@ export const pptxAdapter: FormatAdapter = {
         const result = await mutate(command as AtomicCommand, working, currentIndex);
         if (!result.ok) return result;
         const validation = validateArchive(working);
-        if (validation.length) return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
+        if (validation.length)
+          return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
         if (command.dryRun)
           return ok(
             {

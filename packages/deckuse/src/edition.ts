@@ -1,12 +1,9 @@
-/** Product edition metadata for the DeckUse CLI package. */
-export type Edition = 'community' | 'commercial';
-
-export const EDITION: Edition = 'community';
-export const EDITION_VARIANT = 'community';
-export const DISTRIBUTION_CHANNEL = 'oss';
-
-export const editionMetadata = {
-  edition: EDITION,
-  variant: EDITION_VARIANT,
-  'distribution-channel': DISTRIBUTION_CHANNEL,
-} as const;
+/** Product edition metadata for the DeckUse CLI package (re-export of edition-config). */
+export type { Edition, EditionCapabilities } from '@deckflow/deckuse-edition-config';
+export {
+  EDITION,
+  EDITION_VARIANT,
+  DISTRIBUTION_CHANNEL,
+  editionCapabilities,
+  editionMetadata,
+} from '@deckflow/deckuse-edition-config';

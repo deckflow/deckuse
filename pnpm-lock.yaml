@@ -47,10 +47,13 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@deckflow/deckuse-docx':
         specifier: workspace:*
         version: link:../docx
+      '@deckflow/deckuse-edition-config':
+        specifier: workspace:*
+        version: link:../edition-config
       '@deckflow/deckuse-key':
         specifier: workspace:*
         version: link:../key
@@ -62,7 +65,7 @@ importers:
         version: link:../pptx
       '@deckflow/deckuse-workspace':
         specifier: workspace:*
-        version: link:../workspace
+        version: file:packages/workspace
       '@deckflow/deckuse-xlsx':
         specifier: workspace:*
         version: link:../xlsx
@@ -81,19 +84,21 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
+
+  packages/edition-config: {}
 
   packages/key:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
   packages/numbers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
   packages/opc:
     dependencies:
@@ -108,13 +113,16 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
+      '@deckflow/deckuse-edition-config':
+        specifier: workspace:*
+        version: link:../edition-config
       '@deckflow/deckuse-opc':
         specifier: workspace:*
         version: file:packages/opc
       '@deckflow/deckuse-workspace':
         specifier: workspace:*
-        version: link:../workspace
+        version: file:packages/workspace
       '@xmldom/xmldom':
         specifier: latest
         version: 0.9.12
@@ -123,7 +131,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       isomorphic-git:
         specifier: latest
         version: 1.41.9
@@ -132,7 +140,7 @@ importers:
     dependencies:
       '@deckflow/deckuse-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
 
 packages:
 
@@ -205,27 +213,35 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
+  '@deckflow/deckuse-core@file:packages/core':
+    resolution: {directory: packages/core, type: directory}
+    engines: {node: '>=18.0.0'}
+
   '@deckflow/deckuse-opc@file:packages/opc':
     resolution: {directory: packages/opc, type: directory}
     engines: {node: '>=18.0.0'}
 
+  '@deckflow/deckuse-workspace@file:packages/workspace':
+    resolution: {directory: packages/workspace, type: directory}
+    engines: {node: '>=18.0.0'}
+
   '@deckflow/office2html-darwin-arm64@0.3.0':
-    resolution: {integrity: sha512-4SegNMGHR+K3UlmozDBPU0KOPzUiLeSmT3kaKXrYR3U9Jq5JRW2o4Hjh5gHNuJeb6bRsUk7byWU2goeTTBEZ1Q==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-darwin-arm64/0.3.0/9f000868a1e64a38f6169e0c1388078e1258be86}
+    resolution: {integrity: sha512-h8QVLGE5ESwiGb7yB3PSlH3uwCISytOK40ulvYmkYS9ZxfXrflPth5jSx4LeOTbEXWr6fDFoaFJzPAeUBWDbmw==}
     cpu: [arm64]
     os: [darwin]
 
   '@deckflow/office2html-darwin-x64@0.3.0':
-    resolution: {integrity: sha512-knxyZweyW/EKar/bPnennL0S/4dATHzpdMx+XADDZgkzJuYStl8YFygVZcgkPtOVPQGiO5/rsdPgHK279bk1Zw==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-darwin-x64/0.3.0/ac23f57be6319dad6eea1f44ae26d629688446ae}
+    resolution: {integrity: sha512-7OhfSuI2VJpzsNeMGLoPG8MUXpGL4c64XV0ZlaZ5Tvpk09Ur45re+HbRpyuL0yzu0m931f70dN6ufto8PB09og==}
     cpu: [x64]
     os: [darwin]
 
   '@deckflow/office2html-linux-x64@0.3.0':
-    resolution: {integrity: sha512-uYeBHb5I3vSJ1D3qJtYiFHBSuMZwpJZYFKnWS+Rur6h4p/WPFtF6SPpbmsqJzm+EkaNGmcm78z4GpDFQm439lQ==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-linux-x64/0.3.0/c14a960911e47edf9ec3c4761e262192000fa2c2}
+    resolution: {integrity: sha512-9iyQcdx8mnzoha4zw2G/94FeuQXjQoYo5MxbFN8MWaRVGNk569rLAiBUz3BwQ6AKQgt2rexnAyzUKQtSksTR+Q==}
     cpu: [x64]
     os: [linux]
 
   '@deckflow/office2html-win32-x64@0.3.0':
-    resolution: {integrity: sha512-InrePU+FoXp0A9G2CS1MFjRIQn9hiTJKgf09+OTfpYkynvJMOCski6rw3B+Fo4HwN7GsBJL8T/6QO/Zv7yi1fg==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html-win32-x64/0.3.0/12d77ce6ba5f4e55dbcb8cef695cfa814339e54a}
+    resolution: {integrity: sha512-d1UzD3SLPD7YOegvun8mUqsSsxF75q2ariuARJWNWlmzXgKRUq7OpASfaR5K3UKZI3zTeBhdeGiQlOH+5mFkfQ==}
     cpu: [x64]
     os: [win32]
 
@@ -836,6 +852,11 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  isomorphic-git@1.42.2:
+    resolution: {integrity: sha512-Rb7czWhLO4JYqmg4an01nNomuAgFbWWK2CVfkHGBOvK5t7hrGTKOXPx/csscJ1j9o3uXFzNcC6njgvCafSmIPw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   jju@1.4.0:
     resolution: {integrity: sha512-8wb9Yw966OSxApiCt0K3yNJL8pnNeIv+OEq2YMidz4FKP6nonSRoOXc80iXY4JaN2FC11B9qsNmDsm+ZOfMROA==}
 
@@ -1273,6 +1294,9 @@ packages:
   zod@4.5.4:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
+  zod@4.6.2:
+    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
+
 snapshots:
 
   '@changesets/apply-release-plan@8.1.0':
@@ -1391,10 +1415,19 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
+  '@deckflow/deckuse-core@file:packages/core':
+    dependencies:
+      zod: 4.6.2
+
   '@deckflow/deckuse-opc@file:packages/opc':
     dependencies:
       '@xmldom/xmldom': 0.9.12
       '@zip.js/zip.js': 2.8.34
+
+  '@deckflow/deckuse-workspace@file:packages/workspace':
+    dependencies:
+      '@deckflow/deckuse-core': file:packages/core
+      isomorphic-git: 1.42.2
 
   '@deckflow/office2html-darwin-arm64@0.3.0':
     optional: true
@@ -1974,6 +2007,20 @@ snapshots:
       sha.js: 2.4.12
       simple-get: 4.0.1
 
+  isomorphic-git@1.42.2:
+    dependencies:
+      async-lock: 1.4.1
+      clean-git-ref: 2.0.1
+      crc-32: 1.2.2
+      diff3: 0.0.3
+      ignore: 5.3.2
+      minimisted: 2.0.1
+      pako: 1.0.11
+      pify: 4.0.1
+      readable-stream: 4.7.0
+      sha.js: 2.4.12
+      simple-get: 4.0.1
+
   jju@1.4.0: {}
 
   json-buffer@3.0.1: {}
@@ -2318,3 +2365,5 @@ snapshots:
   yocto-queue@0.1.0: {}
 
   zod@4.5.4: {}
+
+  zod@4.6.2: {}

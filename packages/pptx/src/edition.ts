@@ -1,20 +1,17 @@
 import { err, ok, type Result } from '@deckflow/deckuse-core';
+import {
+  EDITION,
+  EDITION_VARIANT,
+  DISTRIBUTION_CHANNEL,
+  editionCapabilities,
+  editionMetadata,
+} from '@deckflow/deckuse-edition-config';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import { classifyChartPart, type ChartVariant } from './chart-classify.js';
 import type { IndexedElement } from './types.js';
 
-/** Product edition for this build. Community gates over-scope writes. */
-export type Edition = 'community' | 'commercial';
-
-export const EDITION: Edition = 'community';
-export const EDITION_VARIANT = 'community';
-export const DISTRIBUTION_CHANNEL = 'oss';
-
-export const editionMetadata = {
-  edition: EDITION,
-  variant: EDITION_VARIANT,
-  'distribution-channel': DISTRIBUTION_CHANNEL,
-} as const;
+export type { Edition } from '@deckflow/deckuse-edition-config';
+export { EDITION, EDITION_VARIANT, DISTRIBUTION_CHANNEL, editionCapabilities, editionMetadata };
 
 const isThemePart = (item: IndexedElement): boolean =>
   item.kind === 'theme' || item.partUri.startsWith('/ppt/theme/');
@@ -35,17 +32,22 @@ const chartVariantOf = (item: IndexedElement, archive: OpcArchive): ChartVariant
 
 /**
  * Returns a denial message when this edition forbids writing `item`.
- * Theme writes are forbidden in every edition.
+ * Theme writes are forbidden in every edition when themeEdit is false.
  */
-export const writeDenialReason = (item: IndexedElement, archive: OpcArchive): string | undefined => {
-  if (isThemePart(item))
+export const writeDenialReason = (
+  item: IndexedElement,
+  archive: OpcArchive,
+): string | undefined => {
+  if (!editionCapabilities.themeEdit && isThemePart(item))
     return `Theme editing is not available (edition=${EDITION}); theme parts are preserve-only`;
 
-  if (EDITION === 'community') {
-    if (isMasterPart(item))
-      return `Master slide editing requires the commercial edition (edition=${EDITION})`;
-    if (isLayoutPart(item))
-      return `Layout slide editing requires the commercial edition (edition=${EDITION})`;
+  if (!editionCapabilities.mastersEdit && isMasterPart(item))
+    return `Master slide editing requires the commercial edition (edition=${EDITION})`;
+
+  if (!editionCapabilities.layoutsEdit && isLayoutPart(item))
+    return `Layout slide editing requires the commercial edition (edition=${EDITION})`;
+
+  if (editionCapabilities.chartBasicOnly) {
     const variant = chartVariantOf(item, archive);
     if (variant === 'advanced')
       return `Advanced chart editing requires the commercial edition (edition=${EDITION})`;

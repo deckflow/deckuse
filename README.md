@@ -13,7 +13,7 @@
 
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
-This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). The commercial edition lives in a separate repository (`deckuse-commercial`).
+This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared packages here are the source of truth; the commercial edition is a private thin overlay (`deckuse-commercial`) that swaps `@deckflow/deckuse-edition-config` and may add proprietary packages.
 
 PPTX is the currently implemented format (**protocol 2.0 / Phase 1a**). DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 

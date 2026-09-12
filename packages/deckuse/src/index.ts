@@ -49,6 +49,8 @@ export {
   EDITION,
   EDITION_VARIANT,
   DISTRIBUTION_CHANNEL,
+  editionCapabilities,
   editionMetadata,
   type Edition,
+  type EditionCapabilities,
 } from './edition.js';

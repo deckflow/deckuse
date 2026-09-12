@@ -1,5 +1,5 @@
 {
-  "name": "@deckflow/deckuse-pptx",
+  "name": "@deckflow/deckuse-edition-config",
   "version": "1.1.0",
   "license": "AGPL-3.0",
   "type": "module",
@@ -17,20 +17,13 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false"
   },
-  "dependencies": {
-    "@deckflow/deckuse-core": "workspace:*",
-    "@deckflow/deckuse-edition-config": "workspace:*",
-    "@deckflow/deckuse-opc": "workspace:*",
-    "@deckflow/deckuse-workspace": "workspace:*",
-    "@xmldom/xmldom": "latest"
-  },
   "engines": {
     "node": ">=18.0.0"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/deckflow/deckuse.git",
-    "directory": "packages/pptx"
+    "directory": "packages/edition-config"
   },
   "homepage": "https://github.com/deckflow/deckuse#readme"
 }

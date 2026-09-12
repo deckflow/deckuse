@@ -16,11 +16,12 @@
     "test:integration-writes": "node scripts/integration-writes.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:no-commercial-leak": "node scripts/assert-no-commercial-leak.mjs",
     "install:global": "node scripts/install-global.mjs",
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && pnpm check:no-commercial-leak && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "latest",
