@@ -43,7 +43,7 @@ const presentationSlideIds = (node: Node): Element[] => {
 };
 
 /** Keep docProps/app.xml Slides/Notes in sync with the package (PowerPoint repairs on mismatch). */
-const syncAppSlideCounts = (archive: OpcArchive): void => {
+export const syncAppSlideCounts = (archive: OpcArchive): void => {
   const part = archive.getPart('/docProps/app.xml');
   if (!part) return;
   const slideCount = presentationSlideIds(archive.readXml('/ppt/presentation.xml')).length;

@@ -104,6 +104,11 @@ const toEnvelope = (
         message: result.error.message,
         ...(result.error.target ? { target: result.error.target } : {}),
         ...(result.error.hint ? { hint: result.error.hint } : {}),
+        ...(result.error.diagnostics?.length
+          ? { diagnostics: result.error.diagnostics }
+          : result.diagnostics.length
+            ? { diagnostics: result.diagnostics }
+            : {}),
       },
       ...extras,
     };

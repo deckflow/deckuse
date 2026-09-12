@@ -17,6 +17,7 @@ import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer
 import { loadIndex } from './index-sync.js';
 import { mutate } from './mutations.js';
 import { resolveProperties } from './resolve-properties.js';
+import { syncAppSlideCounts } from './slides.js';
 import {
   initializeWorkspace,
   packagePath,
@@ -426,6 +427,9 @@ export const pptxAdapter: FormatAdapter = {
       const archive = await OpcArchive.openFile(resolve(command.source));
       if (!archive.getPart('/ppt/presentation.xml'))
         return err('VALIDATION_FAILED', 'Not a PPTX presentation');
+      // Real-world decks (templates, iSlide, etc.) often ship stale app.xml <Slides>.
+      // Normalize on import so validate / first writes are not blocked by pre-existing drift.
+      syncAppSlideCounts(archive);
       const created = new Date().toISOString(),
         rev = revision();
       const manifest: WorkspaceManifest = {
@@ -692,6 +696,8 @@ export const pptxAdapter: FormatAdapter = {
             if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
             if (result.value.changedParts) changedParts.push(...result.value.changedParts);
           }
+          // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
+          syncAppSlideCounts(working);
           const validation = validateArchive(working);
           if (validation.length)
             return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
@@ -745,6 +751,8 @@ export const pptxAdapter: FormatAdapter = {
 
         const result = await mutate(command as AtomicCommand, working, currentIndex);
         if (!result.ok) return result;
+        // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
+        syncAppSlideCounts(working);
         const validation = validateArchive(working);
         if (validation.length)
           return err('VALIDATION_FAILED', 'PPTX validation failed', validation);

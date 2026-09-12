@@ -1233,6 +1233,96 @@ describe('pptx adapter', () => {
     expect(targets.size).toBe(1);
   });
 
+  it('init and setText heal stale app.xml Slides count (pre-existing mismatch)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-stale-slides-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const a = new OpcArchive();
+    a.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    a.setPart(
+      '/ppt/presentation.xml',
+      e.encode(
+        `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst></p:presentation>`,
+      ),
+      CT,
+    );
+    a.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+        resolvedTarget: '/ppt/slides/slide1.xml',
+      },
+      {
+        id: 'rId2',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide2.xml',
+        external: false,
+        resolvedTarget: '/ppt/slides/slide2.xml',
+      },
+    ]);
+    const slideXml =
+      `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Hi</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+    a.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(slideXml),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    a.setPart(
+      '/ppt/slides/slide2.xml',
+      e.encode(slideXml),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    // Stale template metadata: declares 1 slide while presentation has 2.
+    a.setPart(
+      '/docProps/app.xml',
+      e.encode(
+        `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides><Notes>0</Notes></Properties>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+    );
+    await a.writeFile(source);
+
+    const init = await pptxAdapter.init({
+      version: '2.0',
+      type: 'init',
+      workspaceId: workspace,
+      source,
+      transactionId: 'init',
+    });
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+
+    const appAfterInit = await readFile(join(workspace, 'source/docProps/app.xml'), 'utf8');
+    expect(appAfterInit).toMatch(/<Slides>2<\/Slides>/);
+
+    const validated = await pptxAdapter.execute(
+      { version: '2.0', type: 'validate', workspaceId: workspace, transactionId: 'v' },
+      {},
+    );
+    expect(validated.ok).toBe(true);
+
+    const set = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setText',
+        workspaceId: workspace,
+        transactionId: '1',
+        target: 'slide:1/shape:2',
+        text: 'healed',
+      },
+      {},
+    );
+    expect(set.ok).toBe(true);
+  });
+
   it('addSlide layout=blank binds to a Blank layout by cSld name, not the first layout', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-blank-layout-'));
     const source = join(root, 'source.pptx'),
