@@ -11,8 +11,8 @@ export interface OpcLimits {
 }
 export const DEFAULT_OPC_LIMITS: OpcLimits = {
   maxEntries: 10_000,
-  maxEntrySize: 256 * 1024 * 1024,
-  maxTotalSize: 1024 * 1024 * 1024,
+  maxEntrySize: 1024 * 1024 * 1024,
+  maxTotalSize: 4 * 1024 * 1024 * 1024,
 };
 export interface OpcPart {
   readonly name: string;
