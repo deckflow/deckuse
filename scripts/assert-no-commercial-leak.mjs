@@ -2,10 +2,11 @@
 /**
  * Fail community publish/CI if proprietary commercial packages appear in the
  * dependency tree or in package source paths. Public repo must never ship class-B code.
+ * Runtime license / certificate verification must live only in deckuse-commercial.
  */
 import { pathToFileURL } from 'node:url';
 import { readdirSync, readFileSync, statSync, existsSync, realpathSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 const root = process.cwd();
 
@@ -19,7 +20,46 @@ const FORBIDDEN_PACKAGE_NAMES = [
 ];
 
 /** Path substrings that must never exist under this repo. */
-const FORBIDDEN_PATH_MARKERS = ['office2html-plus', 'deckuse-commercial/packages'];
+const FORBIDDEN_PATH_MARKERS = [
+  'office2html-plus',
+  'deckuse-commercial/packages',
+  `${sep}licensing${sep}`,
+  `${sep}licensing`,
+];
+
+/**
+ * Source markers for commercial runtime license / certificate verification.
+ * package.json "license" SPDX fields are not scanned (only .ts/.js/.mjs).
+ */
+const FORBIDDEN_LICENSE_MARKERS = [
+  'ensureActivated',
+  'LicenseException',
+  'DECKUSE_LICENSE',
+  'OFFICE2HTML_LICENSE',
+  'verifyLicense',
+  'issueLicense',
+  'takeLicenseOption',
+  'peekLicenseOption',
+  '--license',
+  'deckuse.lic',
+];
+
+/** License APIs that must never be exported from community edition-config dist. */
+const FORBIDDEN_LICENSE_EXPORTS = [
+  'ensureActivated',
+  'ensureActivatedFromArgv',
+  'LicenseException',
+  'takeLicenseOption',
+  'peekLicenseOption',
+  'verifyLicenseText',
+  'issueLicense',
+  'isLicenseActivated',
+  'getLicensePayload',
+  'getLicenseCustomerName',
+  'LICENSE_ENV_VAR',
+];
+
+const LOCAL_EDITION_CONFIG = join(root, 'packages', 'edition-config');
 
 const errors = [];
 
@@ -39,18 +79,41 @@ const walk = (dir, out = []) => {
     } catch {
       continue; // broken symlink etc.
     }
-    if (st.isDirectory()) walk(full, out);
-    else out.push(full);
+    if (st.isDirectory()) {
+      // Catch a dedicated licensing/ tree even if it only contains ignored dirs later.
+      if (name === 'licensing') {
+        out.push(full);
+      }
+      walk(full, out);
+    } else {
+      out.push(full);
+    }
   }
   return out;
 };
 
+const allFiles = walk(root);
+
 for (const marker of FORBIDDEN_PATH_MARKERS) {
-  const hit = walk(root).find((p) => relative(root, p).includes(marker));
+  const hit = allFiles.find((p) => {
+    const rel = relative(root, p);
+    if (marker === `${sep}licensing` || marker === `${sep}licensing${sep}`) {
+      return (
+        rel === 'licensing' ||
+        rel.startsWith(`licensing${sep}`) ||
+        rel.includes(`${sep}licensing${sep}`) ||
+        rel.endsWith(`${sep}licensing`)
+      );
+    }
+    return rel.includes(marker);
+  });
   if (hit) errors.push(`Forbidden path marker "${marker}" found at ${relative(root, hit)}`);
 }
 
-const pkgPaths = walk(join(root, 'packages')).filter((p) => p.endsWith('package.json'));
+const packagesRoot = join(root, 'packages');
+const underPackages = (p) => p === packagesRoot || p.startsWith(`${packagesRoot}${sep}`);
+
+const pkgPaths = allFiles.filter((p) => p.endsWith('package.json') && underPackages(p));
 
 for (const pkgPath of pkgPaths) {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
@@ -63,6 +126,20 @@ for (const pkgPath of pkgPaths) {
   for (const name of FORBIDDEN_PACKAGE_NAMES) {
     if (deps[name]) {
       errors.push(`${relative(root, pkgPath)} depends on forbidden package ${name}`);
+    }
+  }
+}
+
+const sourceExt = /\.(ts|js|mjs)$/;
+const sourceFiles = allFiles.filter((p) => sourceExt.test(p) && underPackages(p));
+
+for (const file of sourceFiles) {
+  const text = readFileSync(file, 'utf8');
+  for (const marker of FORBIDDEN_LICENSE_MARKERS) {
+    if (text.includes(marker)) {
+      errors.push(
+        `Forbidden license/certificate marker "${marker}" in ${relative(root, file)}`,
+      );
     }
   }
 }
@@ -83,23 +160,35 @@ if (!existsSync(editionSrc)) {
   }
 }
 
-const linked = join(root, 'packages/pptx/node_modules/@deckflow/deckuse-edition-config');
-if (!existsSync(linked)) {
-  errors.push('pptx cannot resolve workspace @deckflow/deckuse-edition-config (run pnpm install)');
-} else {
+const assertEditionConfigLink = (pkgDir) => {
+  const linked = join(root, 'packages', pkgDir, 'node_modules/@deckflow/deckuse-edition-config');
+  if (!existsSync(linked)) {
+    errors.push(
+      `${pkgDir} cannot resolve workspace @deckflow/deckuse-edition-config (run pnpm install)`,
+    );
+    return;
+  }
   try {
     const real = realpathSync(linked);
-    if (!real.includes(`${join('packages', 'edition-config')}`)) {
+    if (real !== LOCAL_EDITION_CONFIG && !real.startsWith(`${LOCAL_EDITION_CONFIG}${sep}`)) {
       errors.push(
-        `@deckflow/deckuse-edition-config linked outside packages/edition-config: ${real}`,
+        `${pkgDir}: @deckflow/deckuse-edition-config must link to packages/edition-config (got ${real})`,
+      );
+    }
+    if (real.includes(`${sep}deckuse-commercial${sep}`)) {
+      errors.push(
+        `${pkgDir}: @deckflow/deckuse-edition-config must not resolve into deckuse-commercial (${real})`,
       );
     }
   } catch (err) {
     errors.push(
-      `Failed to realpath edition-config link: ${err instanceof Error ? err.message : err}`,
+      `Failed to realpath ${pkgDir} edition-config link: ${err instanceof Error ? err.message : err}`,
     );
   }
-}
+};
+
+assertEditionConfigLink('pptx');
+assertEditionConfigLink('deckuse');
 
 const distJs = join(root, 'packages/edition-config/dist/index.js');
 if (existsSync(distJs)) {
@@ -118,6 +207,11 @@ if (existsSync(distJs)) {
     }
     if (cfg.editionCapabilities?.chartBasicOnly === false) {
       errors.push('community edition-config must keep chartBasicOnly true');
+    }
+    for (const name of FORBIDDEN_LICENSE_EXPORTS) {
+      if (name in cfg && cfg[name] !== undefined) {
+        errors.push(`community edition-config must not export license API "${name}"`);
+      }
     }
   } catch (err) {
     errors.push(

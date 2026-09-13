@@ -28,6 +28,10 @@ Community edition:
 
 `editionCapabilities` is **status metadata** only. Proprietary write authorization lives in commercial packages via `registerPptxEditionExtension`.
 
+## License / certificate verification
+
+Runtime commercial license checks (issue, verify, activate, `--license` / `DECKUSE_LICENSE` / `deckuse.lic`, and any `licensing/` gate) **must live only** in the private `deckuse-commercial` repository. This community repo’s `@deckflow/deckuse-edition-config` is constants-only: it must not contain licensing source, stubs, or conditional activation logic. `pnpm check:no-commercial-leak` enforces that boundary.
+
 ## Observability
 
 Runtime/`status` reports:
