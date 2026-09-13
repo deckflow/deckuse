@@ -34,6 +34,35 @@ export interface ContentTypes {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const XML_DANGEROUS = /<!DOCTYPE|<!ENTITY/i;
+
+/**
+ * Decode OPC XML part bytes. OOXML allows UTF-8 or UTF-16; many real-world
+ * PPTX files ship almost every part as UTF-16 BE/LE with a BOM.
+ */
+export const decodeXmlBytes = (data: Uint8Array): string => {
+  if (data.length >= 2) {
+    const b0 = data[0]!;
+    const b1 = data[1]!;
+    // UTF-16 BE BOM
+    if (b0 === 0xfe && b1 === 0xff) return new TextDecoder('utf-16be').decode(data);
+    // UTF-16 LE BOM (UTF-32 LE also starts FF FE, but OOXML does not use it)
+    if (b0 === 0xff && b1 === 0xfe) return new TextDecoder('utf-16le').decode(data);
+  }
+  return decoder.decode(data);
+};
+
+/** After decoding to a JS string, drop a leading U+FEFF so parsers see the decl. */
+const stripBomChar = (xml: string): string => (xml.charCodeAt(0) === 0xfeff ? xml.slice(1) : xml);
+
+/**
+ * Bytes we emit are always UTF-8; rewrite a stale encoding= in the XML decl.
+ */
+const withUtf8EncodingDecl = (xml: string): string =>
+  xml.replace(
+    /^(\s*<\?xml\b[^?]*?)\bencoding\s*=\s*(['"])[^'"]*\2/i,
+    `$1encoding=$2UTF-8$2`,
+  );
+
 export const normalizePartName = (name: string): string => {
   if (name.includes('\0')) throw new Error('OPC part name contains NUL');
   const slash = name.replaceAll(/\\+/g, '/');
@@ -44,7 +73,7 @@ export const normalizePartName = (name: string): string => {
 };
 export type XmlDocument = Document & { documentElement: Element };
 export const parseXml = (input: string | Uint8Array): XmlDocument => {
-  const xml = typeof input === 'string' ? input : decoder.decode(input);
+  const xml = stripBomChar(typeof input === 'string' ? input : decodeXmlBytes(input));
   if (XML_DANGEROUS.test(xml)) throw new Error('XML DTD and entities are not allowed');
   let error = '';
   const document = new DOMParser({
@@ -229,7 +258,7 @@ export const prettyPrintXml = (source: string): string => {
 
 export const formatXmlBytes = (data: Uint8Array): Uint8Array => {
   try {
-    return encoder.encode(prettyPrintXml(decoder.decode(data)));
+    return encoder.encode(withUtf8EncodingDecl(prettyPrintXml(stripBomChar(decodeXmlBytes(data)))));
   } catch {
     return data;
   }

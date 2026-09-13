@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   OpcArchive,
+  decodeXmlBytes,
+  formatXmlBytes,
   normalizePartName,
   parseXml,
   prettyPrintXml,
@@ -14,6 +16,26 @@ import {
 const enc = new TextEncoder();
 const digest = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const contentTypes = `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>`;
+const encodeUtf16Be = (text: string): Uint8Array => {
+  const body = Buffer.from(text, 'utf16le');
+  // swap to BE and prepend BOM FE FF
+  const be = Buffer.alloc(2 + body.length);
+  be[0] = 0xfe;
+  be[1] = 0xff;
+  for (let i = 0; i < body.length; i += 2) {
+    be[2 + i] = body[i + 1]!;
+    be[2 + i + 1] = body[i]!;
+  }
+  return new Uint8Array(be);
+};
+const encodeUtf16Le = (text: string): Uint8Array => {
+  const body = Buffer.from(text, 'utf16le');
+  const out = Buffer.alloc(2 + body.length);
+  out[0] = 0xff;
+  out[1] = 0xfe;
+  body.copy(out, 2);
+  return new Uint8Array(out);
+};
 describe('OPC archive', () => {
   it('normalizes and blocks traversal/XML entities', () => {
     expect(normalizePartName('ppt\\slides//slide1.xml')).toBe('/ppt/slides/slide1.xml');
@@ -21,6 +43,51 @@ describe('OPC archive', () => {
     expect(() =>
       parseXml('<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>'),
     ).toThrow();
+  });
+
+  it('parses UTF-16 BE/LE XML parts with BOM', () => {
+    const xml = '<?xml version="1.0" encoding="UTF-16"?><root attr="值"><child/></root>';
+    const be = encodeUtf16Be(xml);
+    const le = encodeUtf16Le(xml);
+    expect(be[0]).toBe(0xfe);
+    expect(le[0]).toBe(0xff);
+    expect(parseXml(be).documentElement.tagName).toBe('root');
+    expect(parseXml(le).documentElement.getAttribute('attr')).toBe('值');
+    expect(decodeXmlBytes(be).startsWith('<?xml') || decodeXmlBytes(be).startsWith('\ufeff<?xml')).toBe(
+      true,
+    );
+  });
+
+  it('rewrites UTF-16 parts to UTF-8 when formatting', () => {
+    const xml = '<?xml version="1.0" encoding="UTF-16"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>';
+    const formatted = formatXmlBytes(encodeUtf16Be(xml));
+    expect(formatted[0]).toBe(0x3c); // '<' — UTF-8, no BOM
+    const text = new TextDecoder().decode(formatted);
+    expect(text).toMatch(/encoding="UTF-8"/i);
+    expect(text).not.toMatch(/encoding="UTF-16"/i);
+    expect(parseXml(formatted).documentElement.tagName).toBe('Relationships');
+  });
+
+  it('opens packages whose relationship parts are UTF-16', async () => {
+    const archive = new OpcArchive();
+    archive.setPart('/[Content_Types].xml', enc.encode(contentTypes), 'application/xml');
+    archive.setPart(
+      '/_rels/.rels',
+      encodeUtf16Be(
+        '<?xml version="1.0" encoding="UTF-16"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>',
+      ),
+      'application/vnd.openxmlformats-package.relationships+xml',
+    );
+    archive.setPart(
+      '/ppt/presentation.xml',
+      encodeUtf16Be(
+        '<?xml version="1.0" encoding="UTF-16"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+    );
+    const reopened = await OpcArchive.open(await archive.toUint8Array());
+    expect(reopened.getRelationships('/')[0]?.target).toBe('ppt/presentation.xml');
+    expect(reopened.readXml('/ppt/presentation.xml').documentElement.localName).toBe('presentation');
   });
   it('round trips content types, relationships and unchanged data', async () => {
     const archive = new OpcArchive();
