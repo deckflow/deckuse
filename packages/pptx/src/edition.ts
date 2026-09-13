@@ -8,10 +8,17 @@ import {
 } from '@deckflow/deckuse-edition-config';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import { classifyChartPart, type ChartVariant } from './chart-classify.js';
+import { getPptxEditionExtension } from './edition-extension.js';
 import type { IndexedElement } from './types.js';
 
 export type { Edition } from '@deckflow/deckuse-edition-config';
 export { EDITION, EDITION_VARIANT, DISTRIBUTION_CHANNEL, editionCapabilities, editionMetadata };
+export {
+  clearPptxEditionExtension,
+  getPptxEditionExtension,
+  registerPptxEditionExtension,
+  type PptxEditionExtension,
+} from './edition-extension.js';
 
 const isThemePart = (item: IndexedElement): boolean =>
   item.kind === 'theme' || item.partUri.startsWith('/ppt/theme/');
@@ -30,30 +37,57 @@ const chartVariantOf = (item: IndexedElement, archive: OpcArchive): ChartVariant
   return classifyChartPart(archive, chartPart);
 };
 
+/** Targets whose writes are never opened by `editionCapabilities` alone. */
+export type EditionGatedWriteKind = 'theme' | 'master' | 'layout' | 'advanced-chart';
+
+export const editionGatedWriteKind = (
+  item: IndexedElement,
+  archive: OpcArchive,
+): EditionGatedWriteKind | undefined => {
+  if (isThemePart(item)) return 'theme';
+  if (isMasterPart(item)) return 'master';
+  if (isLayoutPart(item)) return 'layout';
+  if (chartVariantOf(item, archive) === 'advanced') return 'advanced-chart';
+  return undefined;
+};
+
+const hardDenyMessage = (kind: EditionGatedWriteKind): string => {
+  switch (kind) {
+    case 'theme':
+      return `Theme editing is not available (edition=${EDITION}); theme parts are preserve-only`;
+    case 'master':
+      return `Master slide editing requires the commercial edition (edition=${EDITION})`;
+    case 'layout':
+      return `Layout slide editing requires the commercial edition (edition=${EDITION})`;
+    case 'advanced-chart':
+      return `Advanced chart editing requires the commercial edition (edition=${EDITION})`;
+  }
+};
+
 /**
- * Returns a denial message when this edition forbids writing `item`.
- * Theme writes are forbidden in every edition when themeEdit is false.
+ * Returns a denial message when writing `item` is forbidden.
+ *
+ * Master / layout / theme / advanced-chart writes are hard-denied in shared code.
+ * Only a registered `PptxEditionExtension.assertWritable` can allow them —
+ * flipping `editionCapabilities` alone never opens these paths.
  */
 export const writeDenialReason = (
   item: IndexedElement,
   archive: OpcArchive,
 ): string | undefined => {
-  if (!editionCapabilities.themeEdit && isThemePart(item))
-    return `Theme editing is not available (edition=${EDITION}); theme parts are preserve-only`;
+  const kind = editionGatedWriteKind(item, archive);
+  if (!kind) return undefined;
 
-  if (!editionCapabilities.mastersEdit && isMasterPart(item))
-    return `Master slide editing requires the commercial edition (edition=${EDITION})`;
-
-  if (!editionCapabilities.layoutsEdit && isLayoutPart(item))
-    return `Layout slide editing requires the commercial edition (edition=${EDITION})`;
-
-  if (editionCapabilities.chartBasicOnly) {
-    const variant = chartVariantOf(item, archive);
-    if (variant === 'advanced')
-      return `Advanced chart editing requires the commercial edition (edition=${EDITION})`;
+  const ext = getPptxEditionExtension();
+  if (ext?.assertWritable) {
+    const verdict = ext.assertWritable(item, archive);
+    if (verdict !== undefined) {
+      if (verdict.ok) return undefined;
+      return verdict.error.message;
+    }
   }
 
-  return undefined;
+  return hardDenyMessage(kind);
 };
 
 export const assertWritable = (item: IndexedElement, archive: OpcArchive): Result<void> => {

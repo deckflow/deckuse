@@ -4,11 +4,15 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { OpcArchive } from '@deckflow/deckuse-opc';
 import { DOMParser } from '@xmldom/xmldom';
+import { err, ok } from '@deckflow/deckuse-core';
 import {
   classifyChartDocument,
+  clearPptxEditionExtension,
   editionCapabilities,
+  editionGatedWriteKind,
   editionMetadata,
   pptxAdapter,
+  registerPptxEditionExtension,
 } from '../src/index.js';
 
 const e = new TextEncoder();
@@ -315,5 +319,133 @@ describe('community edition write gates', () => {
         ),
       ),
     ).toBe('advanced');
+  });
+
+  it('hard-denies gated writes without an extension even when metadata claims edit', async () => {
+    // editionCapabilities remain community (false); the important invariant is that
+    // gated targets stay denied until a PptxEditionExtension explicitly allows them.
+    expect(editionCapabilities.mastersEdit).toBe(false);
+
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-edition-no-ext-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await packageWithMasters(source, 'radarChart');
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const rev = (init.value as { revision: string }).revision;
+
+    for (const target of ['master:slideMaster1', 'layout:slideLayout1', 'slide:1/shape:4']) {
+      const denied = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target,
+          text: 'Nope',
+        },
+        {},
+      );
+      expect(denied.ok, target).toBe(false);
+      if (!denied.ok) expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
+    }
+  });
+
+  it('allows gated writes only while a permissive extension is registered', async () => {
+    registerPptxEditionExtension({
+      assertWritable(item, archive) {
+        const kind = editionGatedWriteKind(item, archive);
+        if (kind === 'theme')
+          return err('UNSUPPORTED_CAPABILITY', 'theme preserve-only (test extension)');
+        if (kind === 'master' || kind === 'layout' || kind === 'advanced-chart') return ok(undefined);
+        return undefined;
+      },
+    });
+    try {
+      const root = await mkdtemp(join(tmpdir(), 'deckuse-edition-ext-'));
+      const source = join(root, 'source.pptx'),
+        workspace = join(root, 'workspace');
+      await packageWithMasters(source, 'radarChart');
+      const init = await pptxAdapter.init(
+        { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+        {},
+      );
+      expect(init.ok).toBe(true);
+      if (!init.ok) return;
+      let rev = (init.value as { revision: string }).revision;
+
+      const masterWrite = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target: 'master:slideMaster1',
+          text: 'ExtMaster',
+        },
+        {},
+      );
+      expect(masterWrite.ok).toBe(true);
+      if (masterWrite.ok) rev = (masterWrite.value as { revision: string }).revision;
+
+      const chartWrite = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target: 'slide:1/shape:4',
+          text: 'ExtRadar',
+        },
+        {},
+      );
+      expect(chartWrite.ok).toBe(true);
+      if (chartWrite.ok) rev = (chartWrite.value as { revision: string }).revision;
+
+      const themeDenied = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target: 'theme',
+          text: 'Nope',
+        },
+        {},
+      );
+      expect(themeDenied.ok).toBe(false);
+      if (!themeDenied.ok) expect(themeDenied.error.code).toBe('UNSUPPORTED_CAPABILITY');
+    } finally {
+      clearPptxEditionExtension();
+    }
+
+    // After clear, gated writes are denied again.
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-edition-ext-cleared-'));
+    const source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await packageWithMasters(source, 'barChart');
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    if (!init.ok) return;
+    const denied = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setText',
+        workspaceId: workspace,
+        transactionId: (init.value as { revision: string }).revision,
+        target: 'master:slideMaster1',
+        text: 'Nope',
+      },
+      {},
+    );
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
   });
 });

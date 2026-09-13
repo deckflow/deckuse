@@ -7,9 +7,10 @@ export const EDITION_VARIANT = 'community';
 export const DISTRIBUTION_CHANNEL = 'oss';
 
 /**
- * Capability flags for this edition.
- * Type A (already in shared code): gated here.
- * Type B (proprietary): must live only in private commercial packages via hooks — never here as implementations.
+ * Status / documentation capability claims for this edition.
+ * Master / layout / theme / advanced-chart *writes* are hard-denied in shared
+ * `@deckflow/deckuse-pptx` unless a proprietary `PptxEditionExtension` is
+ * registered — flipping these flags alone never opens those write paths.
  */
 export const editionCapabilities = {
   mastersEdit: false,

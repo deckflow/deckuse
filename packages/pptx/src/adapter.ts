@@ -55,7 +55,8 @@ export const pptxCapabilities = {
   protocol: '2.0',
   ...editionMetadata,
   slides: { add: true, duplicate: true, remove: true },
-  // Master/layout/theme: list always; writes gated via editionCapabilities + mutations.
+  // Master/layout/theme: list always. `edit` flags are status metadata only —
+  // writes require a registered PptxEditionExtension (never opened by flags alone).
   masters: { list: true, edit: editionCapabilities.mastersEdit },
   layouts: { list: true, edit: editionCapabilities.layoutsEdit },
   theme: { list: true, edit: editionCapabilities.themeEdit },

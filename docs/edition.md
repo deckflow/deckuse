@@ -2,18 +2,19 @@
 
 This repository is the **community** product line (`edition=community`). It is the **sole source of truth** for shared packages (`core`, `opc`, `pptx`, `workspace`, …).
 
-The commercial product lives in the private `deckuse-commercial` repository as a **thin overlay**: it replaces `@deckflow/deckuse-edition-config` and may add proprietary packages. It must not maintain a second copy of shared source.
+The commercial product lives in the private `deckuse-commercial` repository as a **thin overlay**: it replaces `@deckflow/deckuse-edition-config`, registers a `PptxEditionExtension`, and may add proprietary packages. It must not maintain a second copy of shared source.
 
 ## Capability classes
 
-| Class                | Meaning                                                                                                                    | Where code lives                                                   |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| **A — gated shared** | Implementation is already (or intentionally) in this public repo; community builds refuse writes via `editionCapabilities` | Public packages + `@deckflow/deckuse-edition-config`               |
-| **B — proprietary**  | Must not appear in this public tree or in community npm tarballs                                                           | Only `deckuse-commercial` private packages, injected through hooks |
+| Class | Meaning | Where code lives |
+| --- | --- | --- |
+| **Shared primitives** | OOXML helpers used by community slide / basic-chart edits (`setNodeText`, `applyChartProperties`, …) | Public `@deckflow/deckuse-pptx` |
+| **Edition-gated writes** | Master / Layout / Theme / Advanced Chart writes are **hard-denied** in shared code regardless of `editionCapabilities` | Allowed only via a registered `PptxEditionExtension` from private commercial packages |
+| **B — proprietary** | Editors that must not appear in this public tree (SmartArt, office2html plus, …) | Only `deckuse-commercial` private packages, injected through the same extension / hooks |
 
-Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism. Anything committed here is visible under AGPL.
+Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism for shared primitives. Anything committed here is visible under AGPL. Commercial overlays own *authorization and product write paths* for gated targets; they must not rely on flipping `editionCapabilities` in a swapped config package.
 
-## Boundaries (community / class A)
+## Boundaries (community)
 
 Authorization rules come from the edition scope matrix (Master/Layout/Theme/Advanced Chart, etc.).
 
@@ -25,7 +26,7 @@ Community edition:
 - **Rejects** edits to **advanced** charts (other non-basic families, ChartEx, unclassifiable charts, combos other than bar+line).
 - Embeds the closed-source `office2html` engine (not `office2html plus`).
 
-Commercial overlay sets `editionCapabilities.mastersEdit` / `layoutsEdit` / `chartBasicOnly` accordingly. Proprietary engines and class-B editors stay out of this repository.
+`editionCapabilities` is **status metadata** only. Proprietary write authorization lives in commercial packages via `registerPptxEditionExtension`.
 
 ## Observability
 

@@ -14,6 +14,8 @@ const FORBIDDEN_PACKAGE_NAMES = [
   '@deckflow/deckuse-office2html-plus',
   '@deckflow/office2html-plus',
   '@deckflow/deckuse-commercial-smartart',
+  '@deckflow/deckuse-commercial-pptx',
+  '@deckflow/deckuse-commercial',
 ];
 
 /** Path substrings that must never exist under this repo. */
@@ -110,6 +112,12 @@ if (existsSync(distJs)) {
     }
     if (cfg.editionCapabilities?.mastersEdit === true) {
       errors.push('community edition-config must not enable mastersEdit');
+    }
+    if (cfg.editionCapabilities?.layoutsEdit === true) {
+      errors.push('community edition-config must not enable layoutsEdit');
+    }
+    if (cfg.editionCapabilities?.chartBasicOnly === false) {
+      errors.push('community edition-config must keep chartBasicOnly true');
     }
   } catch (err) {
     errors.push(

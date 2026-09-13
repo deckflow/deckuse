@@ -842,7 +842,8 @@ export async function mutate(
       `Expected revision ${item.ref.revision}, current ${index.revision}`,
     );
 
-  // Edition capability gate (master/layout/theme/advanced chart writes).
+  // Edition gate (master/layout/theme/advanced chart): hard-deny unless
+  // a registered PptxEditionExtension allows the target.
   // Slide add/remove/duplicate and addSlide layout binding are not gated here.
   if (item.kind !== 'slide') {
     const gated = assertWritable(item, archive);
