@@ -240,6 +240,33 @@ export function uidForItem(item: IndexedElement): string {
   });
 }
 
+/** Basename of an OPC part URI without the `.xml` suffix (e.g. `slideLayout1`). */
+const partBaseName = (partUri: string): string =>
+  partUri.split('/').pop()?.replace(/\.xml$/i, '') ?? '';
+
+/**
+ * Match layout/master parts by exact basename, display name, or full part URI.
+ * Avoid substring `includes` — `slideLayout1` must not match `slideLayout10`.
+ */
+const matchNamedParts = (
+  index: IndexFile,
+  kind: 'layout' | 'master',
+  needleRaw: string,
+): IndexedElement[] => {
+  const needle = needleRaw.toLowerCase();
+  return index.elements.filter((el) => {
+    if (el.kind !== kind) return false;
+    const base = partBaseName(el.partUri).toLowerCase();
+    const uri = el.partUri.toLowerCase();
+    return (
+      base === needle ||
+      (el.name?.toLowerCase() ?? '') === needle ||
+      uri === needle ||
+      uri.endsWith(`/${needle}.xml`)
+    );
+  });
+};
+
 export function resolveTarget(
   index: IndexFile,
   raw: string,
@@ -284,16 +311,7 @@ export function resolveTarget(
   }
 
   if (parsed.kind === 'layout' && parsed.layout) {
-    const needle = parsed.layout.toLowerCase();
-    const matches = index.elements.filter((el) => {
-      if (el.kind !== 'layout') return false;
-      const name = el.partUri.split('/').pop()?.replace(/\.xml$/, '') ?? '';
-      return (
-        name.toLowerCase() === needle ||
-        el.partUri.toLowerCase().includes(needle) ||
-        (el.name?.toLowerCase() ?? '') === needle
-      );
-    });
+    const matches = matchNamedParts(index, 'layout', parsed.layout);
     if (matches.length === 0)
       return err('TARGET_NOT_FOUND', `Layout not found: ${parsed.layout}`, [], { target: raw });
     if (matches.length > 1)
@@ -309,16 +327,7 @@ export function resolveTarget(
   }
 
   if (parsed.kind === 'master' && parsed.master) {
-    const needle = parsed.master.toLowerCase();
-    const matches = index.elements.filter((el) => {
-      if (el.kind !== 'master') return false;
-      const name = el.partUri.split('/').pop()?.replace(/\.xml$/, '') ?? '';
-      return (
-        name.toLowerCase() === needle ||
-        el.partUri.toLowerCase().includes(needle) ||
-        (el.name?.toLowerCase() ?? '') === needle
-      );
-    });
+    const matches = matchNamedParts(index, 'master', parsed.master);
     if (matches.length === 0)
       return err('TARGET_NOT_FOUND', `Master not found: ${parsed.master}`, [], { target: raw });
     if (matches.length > 1)

@@ -659,15 +659,16 @@ export async function mutate(
         }
       };
       const match = layouts.find((item) => {
-        const fileName = item.partUri.split('/').pop()?.replace(/\.xml$/, '') ?? '';
+        const fileName = (item.partUri.split('/').pop()?.replace(/\.xml$/i, '') ?? '').toLowerCase();
         const display = layoutDisplayName(item.partUri);
         // Match by cSld@name (e.g. "Blank") or part basename — never treat
         // needle==="blank" as matching every layout (that picked Title Slide).
+        // Prefer exact basename / display; substring display match only (not
+        // fileName.includes) so slideLayout1 does not hit slideLayout10.
         return (
           display === needle ||
-          fileName.toLowerCase() === needle ||
-          (needle !== 'blank' &&
-            (display.includes(needle) || fileName.toLowerCase().includes(needle)))
+          fileName === needle ||
+          (needle !== 'blank' && display.includes(needle))
         );
       });
       if (!match && needle !== 'blank')

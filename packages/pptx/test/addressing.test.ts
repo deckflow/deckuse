@@ -34,6 +34,42 @@ const sampleIndex = (): IndexFile => ({
       kind: 'layout',
       partUri: '/ppt/slideLayouts/slideLayout1.xml',
     },
+    {
+      ref: {
+        documentId: '/ws',
+        elementId: 'layout:/ppt/slideLayouts/slideLayout10.xml',
+        path: '/ppt/slideLayouts/slideLayout10.xml',
+      },
+      kind: 'layout',
+      partUri: '/ppt/slideLayouts/slideLayout10.xml',
+    },
+    {
+      ref: {
+        documentId: '/ws',
+        elementId: 'layout:/ppt/slideLayouts/slideLayout11.xml',
+        path: '/ppt/slideLayouts/slideLayout11.xml',
+      },
+      kind: 'layout',
+      partUri: '/ppt/slideLayouts/slideLayout11.xml',
+    },
+    {
+      ref: {
+        documentId: '/ws',
+        elementId: 'master:/ppt/slideMasters/slideMaster1.xml',
+        path: '/ppt/slideMasters/slideMaster1.xml',
+      },
+      kind: 'master',
+      partUri: '/ppt/slideMasters/slideMaster1.xml',
+    },
+    {
+      ref: {
+        documentId: '/ws',
+        elementId: 'master:/ppt/slideMasters/slideMaster10.xml',
+        path: '/ppt/slideMasters/slideMaster10.xml',
+      },
+      kind: 'master',
+      partUri: '/ppt/slideMasters/slideMaster10.xml',
+    },
   ],
 });
 
@@ -73,5 +109,31 @@ describe('addressing', () => {
     const shape = index.elements[1]!;
     expect(targetPathForItem(index, shape)).toBe('slide:1/shape:2');
     expect(uidForItem(shape)).toEqual(uidForItem(shape));
+  });
+
+  it('resolves layout:slideLayout1 without matching slideLayout10+', () => {
+    const index = sampleIndex();
+    const resolved = resolveTarget(index, 'layout:slideLayout1');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.target).toBe('layout:slideLayout1');
+    expect(resolved.value.item.partUri).toBe('/ppt/slideLayouts/slideLayout1.xml');
+  });
+
+  it('resolves layout:slideLayout10 uniquely among numbered layouts', () => {
+    const index = sampleIndex();
+    const resolved = resolveTarget(index, 'layout:slideLayout10');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.target).toBe('layout:slideLayout10');
+  });
+
+  it('resolves master:slideMaster1 without matching slideMaster10', () => {
+    const index = sampleIndex();
+    const resolved = resolveTarget(index, 'master:slideMaster1');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.target).toBe('master:slideMaster1');
+    expect(resolved.value.item.partUri).toBe('/ppt/slideMasters/slideMaster1.xml');
   });
 });
