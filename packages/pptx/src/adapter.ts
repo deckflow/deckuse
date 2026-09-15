@@ -149,15 +149,36 @@ export const pptxCapabilities = {
     },
   },
   query: { matchAll: ['*', 'all'], textRegex: true, hasText: true },
-  text: { setText: true, replaceText: true, multiParagraph: true, richRuns: true },
+  text: { setText: true, replaceText: true, multiParagraph: true, richRuns: true, paragraphBlocks: true },
   geometry: {
     units: ['emu', 'px', 'pt', 'cm', 'mm', 'in', '%'],
     alignElements: true,
+    cornerRadius: true,
+  },
+  textBox: { wrap: true, anchor: true },
+  measure: { heuristic: true },
+  shapes: {
+    lineIsStraightConnector: true,
+    elbowConnector: true,
+    curvedConnector: true,
+    arrows: ['rightArrow', 'leftArrow', 'upArrow', 'downArrow'],
   },
   history: { undo: true },
-  addressing: { targetPath: true, uid: true, placeholder: true, notes: true },
+  addressing: { targetPath: true, uid: true, placeholder: true, notes: true, runFocus: true },
   resolve: { effective: true, direct: true, both: true, provenance: true },
   preservation: 'unknown parts and untouched XML are preserved; ZIP entries are recompressed',
+  propertyVocabulary: {
+    note: 'Prefer deckuse schema --json for full command schemas. Capabilities flags are coarse.',
+    paragraphAlign: {
+      key: 'paragraph.align',
+      values: ['l', 'ctr', 'r', 'just'],
+      aliases: { left: 'l', center: 'ctr', right: 'r', justify: 'just' },
+    },
+    richText: {
+      blocks: 'one paragraph per block; optional runs[] for intra-paragraph styling',
+      runTarget: 'slide:N/shape:X/run:K for setProperties on a single run',
+    },
+  },
 } as const;
 
 const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>

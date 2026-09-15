@@ -66,10 +66,24 @@ const nvPrXml = (e: Record<string, unknown>) => {
   const idxAttr = idx !== undefined ? ` idx="${esc(idx)}"` : '';
   return `<p:nvPr><p:ph type="${esc(normalized.type)}"${idxAttr}/></p:nvPr>`;
 };
-const shapeXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) =>
-  `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr txBox="1"/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="${esc(value(e, 'preset', 'rect'))}"><a:avLst/></a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
-const connectorXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) =>
-  `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="line"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
+const avLstXml = (e: Record<string, unknown>): string => {
+  const preset = value(e, 'preset', 'rect');
+  if (preset === 'roundRect' && typeof e['cornerRadius'] === 'number') {
+    const adj = Math.round(Math.min(1, Math.max(0, e['cornerRadius'])) * 50_000);
+    return `<a:avLst><a:gd name="adj" fmla="val ${String(adj)}"/></a:avLst>`;
+  }
+  return '<a:avLst/>';
+};
+
+const shapeXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
+  const preset = value(e, 'preset', 'rect');
+  const txBox = e['txBox'] === false ? '' : ' txBox="1"';
+  return `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Shape ${String(id)}`))}"/><p:cNvSpPr${txBox}/>${nvPrXml(e)}</p:nvSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="${esc(preset)}">${avLstXml(e)}</a:prstGeom></p:spPr>${textBody(value(e, 'text', ''))}</p:sp>`;
+};
+const connectorXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
+  const preset = value(e, 'preset', 'line');
+  return `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="${esc(preset)}"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
+};
 const groupXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
   const w = resolveEmu(e['width'], 914400, 'x', archive);
   const h = resolveEmu(e['height'], 914400, 'y', archive);

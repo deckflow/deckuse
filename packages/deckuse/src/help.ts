@@ -32,6 +32,8 @@ Commands:
   align         Align or distribute shapes on a slide
   z             Change z-order
   apply         Apply one or many JSON / JSONL write commands
+  schema        Print command JSON Schema (self-describing CLI)
+  measure       Heuristic text size estimate (for layout)
   validate      Validate package / relationships
   history       Show write history
   undo          Undo recent write revisions
@@ -259,7 +261,10 @@ Run 'deckuse add <slide|shape> --help' for details.`,
       'deckuse add shape --slide 1 --type text --text "Hello\\nWorld" --name Title --x 5% --y 120px --width 90% --height 150px --json',
     details: `Required:
   --slide <n>               One-based slide index
-  --type <kind>             text | rect | rounded-rect | ellipse | line | image | group | table | chart | video | audio
+  --type <kind>             text | rect | rounded-rect | ellipse | line | connector |
+                            elbow | curved-connector | arrow | left-arrow | up-arrow | down-arrow |
+                            image | group | table | chart | video | audio
+                            (line/connector = straight cxnSp; elbow/curved = bent/curved connectors)
 
 Common options:
   --name <name>             Shape name (should be unique on the slide)
@@ -536,6 +541,36 @@ Examples:
   printf '%s\\n' '{"type":"setText",...}' '{"type":"setProperties",...}' | deckuse apply --json`,
   },
 
+  schema: {
+    usage: 'deckuse schema [--type <commandType>] [--json]',
+    summary: 'Print the command JSON Schema (Draft 2020-12) with CLI/protocol version.',
+    example: 'deckuse schema --type addShape --json',
+    details: `Options:
+  --type <commandType>      Slice to one command (e.g. addShape, setProperties, batch)
+  --json                    Compact JSON (default pretty-print)
+
+Notes:
+  Prefer this over guessing fields from docs. Includes cliVersion, protocolVersion, edition.`,
+  },
+
+  measure: {
+    usage: 'deckuse measure --text <string> --font-size <pt> [--max-width <len>] [--bold]',
+    summary: 'Heuristic text width/height estimate for layout (not a font rasterizer).',
+    example: 'deckuse measure --text "总营收" --font-size 24 --max-width 28% --json',
+    details: `Required:
+  --text <string>           Text to measure
+  --font-size <pt>          Font size in points
+
+Options:
+  --max-width <len>         Wrap width (EMU number or unit string / %)
+  --bold                    Assume bold glyphs
+  --font-family <name>      Recorded in output only (heuristic ignores metrics)
+  --json                    Machine-readable envelope
+
+Notes:
+  Returns EMU/px and line count. Expect ~10–20% error vs PowerPoint; verify with render.`,
+  },
+
   validate: {
     usage: 'deckuse validate [<workspace>] [options]',
     summary: 'Validate package integrity and optional relationship checks.',
@@ -610,31 +645,36 @@ Arguments:
 
 Options:
   --host <addr>             Bind address (default: 0.0.0.0)
-  --port <n>                Port 0–65535 (default: 4173)
+  --port <n>                Port 0–65535 (default: 4173). Use 0 for an ephemeral free port.
   --workspace <path>        Workspace root
+
+Notes:
+  Port conflicts (EADDRINUSE) return a clear error; daemon start fails if unreachable.
 
 Examples:
   deckuse monitor --port 4173
-  deckuse monitor start --port 4173
+  deckuse monitor start --port 0
   deckuse monitor status --json
   deckuse monitor stop`,
   },
 
   render: {
-    usage: 'deckuse render --page <n> [--output <file.png>]',
+    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
     summary:
       'Convert one slide to HTML (office2html), screenshot it with Playwright, then delete the HTML staging output.',
-    example: 'deckuse render --page 3 --workspace ./workspace --json',
+    example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',
     details: `Required:
   --page <n>                One-based slide index (exactly one page per call)
 
 Options:
   --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)
+  --scale <n>               Device scale factor (default: 1)
   --workspace <path>        Workspace root (default: nearest .deckuse)
   --json                    Machine-readable envelope
 
 Notes:
   Intended for AI agents to visually review whether an edit looks correct.
+  Community render may not show custom chart series colors faithfully — check ppt/charts/*.xml or PowerPoint.
   Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
   Temporary office2html output is always removed after the screenshot.`,
   },

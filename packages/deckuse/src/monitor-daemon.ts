@@ -102,7 +102,10 @@ export async function monitorStart(
   options: { host?: string; port?: number } = {},
 ): Promise<DaemonMeta> {
   const existing = await monitorStatus(workspace);
-  if (existing.running && existing.meta) return existing.meta;
+  if (existing.running && existing.meta) {
+    if (existing.reachable) return existing.meta;
+    await monitorStop(workspace);
+  }
 
   const host = options.host ?? '0.0.0.0';
   const port = options.port ?? 4173;
@@ -132,7 +135,8 @@ export async function monitorStart(
   if (child.pid == null) throw new Error('Failed to spawn monitor daemon');
 
   // Wait briefly for the worker to bind and write meta (worker also writes; parent seeds pid).
-  const urlGuess = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}/`;
+  const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
+  const urlGuess = `http://${displayHost}:${port}/`;
   let meta: DaemonMeta = {
     pid: child.pid,
     host,
@@ -143,11 +147,28 @@ export async function monitorStart(
   };
   await writeDaemonMeta(workspace, meta);
 
+  let reachable = false;
   for (let i = 0; i < 40; i++) {
     const disk = await readDaemonMeta(workspace);
     if (disk?.url) meta = disk;
-    if (await probeMonitor(meta.url)) break;
+    if (await probeMonitor(meta.url)) {
+      reachable = true;
+      break;
+    }
+    if (!isAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!reachable) {
+    try {
+      if (isAlive(child.pid)) process.kill(child.pid, 'SIGTERM');
+    } catch {
+      // ignore
+    }
+    await clearDaemonMeta(workspace);
+    throw new Error(
+      `Monitor failed to start on ${host}:${String(port)} (EADDRINUSE or bind failure). ` +
+        `Try --port 0 for an ephemeral port, or run deckuse monitor status --workspace <path>.`,
+    );
   }
   return meta;
 }

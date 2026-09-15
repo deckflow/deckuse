@@ -313,22 +313,22 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 
 - 持久工作区、修订冲突检测、dry-run、原子 batch 与操作日志。
 - `inspect`、`list`、`get`、`search`，以及兼容用的 `query` / `getText`；稳定引用在可用时包含幻灯片 ID、部件 URI、cNvPr ID 与祖先路径。
-- `setText` 与 `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。`setText` 中的换行会拆成多个段落。CLI `--value` 会解析 `\n`/`\t`（可用 `--text-raw` 关闭）；多行多样式可用 `--blocks` / 协议 `blocks`。
-- 几何支持 **EMU 数字或单位字符串**（`px`@96DPI、`pt`、`cm`、`mm`、`in`、相对幻灯片的 `%`）。`alignElements` / `deckuse align` 将对齐结果写回绝对 EMU。
+- `setText` 与 `replaceText`，包括可选 selector 范围内的字面量或正则替换。无 selector 时，`replaceText` 优先更新最具体的文本节点，而非聚合了子节点文本的祖先容器。`setText` 中的换行会拆成多个段落。CLI `--value` 会解析 `\n`/`\t`（可用 `--text-raw` 关闭）；多行多样式可用 `--blocks` / 协议 `blocks`（块内可选 `runs[]` 做段内多 run）。`addShape` 支持一次写入内联 `blocks` / `fill` / `stroke`。
+- 几何支持 **EMU 数字或单位字符串**（`px`@96DPI、`pt`、`cm`、`mm`、`in`、相对幻灯片的 `%`）。`alignElements` / `deckuse align` 将对齐结果写回绝对 EMU。同一次 `apply` 内可按形状 `name` 前向引用刚 `addShape` 的对象。
 - `setTransform` 用于显式设置对象位置、尺寸、旋转与翻转。
-- `setProperties` 用于常见形状与文本属性，包括 `paragraph.align`、`paragraph.level`、`bullet`、填充透明度与 `hyperlink`。
+- `setProperties` 用于常见形状与文本属性，包括 `paragraph.align`（可用 `center`/`left` 等别名）、`paragraph.level`、`bullet`、填充透明度、`hyperlink`、`wrap`、`anchor`/`valign`、`cornerRadius`。
 - 可添加、复制与删除幻灯片；复制幻灯片时会克隆可变的备注与图表部件，版式与媒体可安全共享。
-- 可添加形状/文本框（可选 `role` 写出 `p:ph` 占位符）、连接线、组合、图片（文件路径或 base64）、表格、图表（仅缓存）以及嵌入的视频/音频；可复制或删除元素。
+- 可添加形状/文本框（可选 `role` 写出 `p:ph` 占位符）、直线连接线（`line`/`connector`）、折线/曲线连接线、箭头预设、组合、图片（文件路径或 base64）、表格、图表（仅缓存）以及嵌入的视频/音频；可复制或删除元素。
 - `role` 须为 OOXML 占位符类型（`title`、`body`、`subTitle`、`ctrTitle` 等）。常见别名会规范化（如 `subtitle`→`subTitle`）；非 OOXML 标签（如 `card`）会被拒绝，以免 PowerPoint 提示修复。
-- 可用 `slide:N/placeholder:<type>` 寻址占位符（如 `title`、`body`、`subTitle`、`ctrTitle`）。
+- 可用 `slide:N/placeholder:<type>` 寻址占位符；可用 `slide:N/shape:X/run:K` 对单个 run 做 `setProperties`。
 - `replacePicture` 就地替换图片嵌入媒体，并保留元素引用与图层顺序。
 - 表格单元格寻址；表格行列增删与单元格 `fill`；演讲者备注读写（对 `slide:N/notes` 写入时若无备注页会自动创建）。表格支持 `height: "auto"`、主题 `minimal`/`zebra` 与 `alignColumns`。
-- 可创建图表（`bar` / `column` / `line` / `pie` / 受限 `combo` 双轴）并编辑标题、系列名、缓存值、数据标签与数值格式。存在嵌入工作簿时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED`，不会声称已更新工作簿。社区版对高级图表（其它 family、ChartEx）仅保留、不可编辑。
+- 可创建图表（`bar` / `column` / `line` / `pie` / 受限 `combo` 双轴）并编辑标题、系列名、缓存值、数据标签、系列颜色与数值格式。存在嵌入工作簿时返回 `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED`，不会声称已更新工作簿。社区版对高级图表（其它 family、ChartEx）仅保留、不可编辑。社区版 `render` **可能无法忠实显示**自定义系列色——请核对 chart XML 或用 PowerPoint 打开。
 - 可 list / resolve master、layout、theme；社区版拒绝写入这些部件（`UNSUPPORTED_CAPABILITY`）。Master/Layout 编辑见商业版仓库。
-- `monitor` 提供实时 HTML 预览（`monitor start|status|stop` 守护进程），`render` 可将单页截成 PNG（office2html + Playwright）。
+- `monitor` 提供实时 HTML 预览（`monitor start|status|stop`；可用 `--port 0` 自动选端口），`render` 可将单页截成 PNG（支持 `--scale`）。`deckuse schema` 输出命令 JSON Schema；`deckuse measure` 启发式估算文本尺寸。
 - 尽可能保留未知部件与未改动节点。ZIP 会重新压缩，保真度针对未改动条目的未压缩数据，而非 ZIP 字节级一致。
 
-Agent 速查：[docs/agent-cookbook.md](docs/agent-cookbook.md)。
+Agent 速查：[docs/agent-cookbook.md](docs/agent-cookbook.md)。需要 **CLI >= 1.2.0**。
 
 ## 限制
 

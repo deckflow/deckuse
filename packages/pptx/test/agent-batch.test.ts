@@ -208,4 +208,104 @@ describe('agent batch UX', () => {
     expect(combo.ok).toBe(true);
     expect(combo.diagnostics.some((d) => d.code === 'COMBO_CHART_RENDER_LIMITED')).toBe(true);
   });
+
+  it('dry-run same-batch forward refs and multi-run blocks', async () => {
+    const { workspace, revision } = await initWs();
+    const dry = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'batch',
+        workspaceId: workspace,
+        transactionId: revision,
+        atomic: true,
+        dryRun: true,
+        commands: [
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'rounded-rect',
+            name: 'RunCard',
+            x: '5%',
+            y: '100px',
+            width: '40%',
+            height: '80px',
+            cornerRadius: 0.2,
+            wrap: 'none',
+            blocks: [
+              {
+                align: 'center',
+                runs: [
+                  { text: 'C', textColor: 'DC2626', bold: true, fontSize: 20 },
+                  { text: 'ustomer', textColor: '111827', fontSize: 20 },
+                ],
+              },
+            ],
+          },
+          {
+            version: '2.0',
+            type: 'setProperties',
+            workspaceId: workspace,
+            transactionId: revision,
+            target: 'slide:1/shape:RunCard',
+            properties: { 'paragraph.align': 'center', fill: { color: 'F8FAFC' } },
+          },
+        ],
+      },
+      {},
+    );
+    expect(dry, JSON.stringify(dry)).toMatchObject({ ok: true });
+    if (dry.ok) expect((dry.value as { dryRun?: boolean }).dryRun).toBe(true);
+  });
+
+  it('addShape arrow and elbow connectors', async () => {
+    const { workspace, revision } = await initWs();
+    const result = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'batch',
+        workspaceId: workspace,
+        transactionId: revision,
+        atomic: true,
+        commands: [
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'arrow',
+            name: 'Arrow1',
+            x: 100,
+            y: 100,
+            width: 200000,
+            height: 100000,
+            fill: { color: '2563EB' },
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'elbow',
+            name: 'Elbow1',
+            x: 100,
+            y: 300000,
+            width: 400000,
+            height: 200000,
+            stroke: { color: '111827', width: 1.5, headEnd: 'triangle' },
+          },
+        ],
+      },
+      {},
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const xml = await readFile(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'), 'utf8');
+    expect(xml).toContain('prst="rightArrow"');
+    expect(xml).toContain('prst="bentConnector3"');
+    expect(xml).toContain('headEnd');
+  });
 });

@@ -145,8 +145,19 @@ export const setNodeText = (node: Node, text: string): void => {
   }
 };
 
-export interface TextBlockStyle {
+export interface TextRunStyle {
   readonly text: string;
+  readonly fontSize?: number;
+  readonly fontFamily?: string;
+  readonly textColor?: string;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+}
+
+export interface TextBlockStyle {
+  readonly text?: string;
+  readonly runs?: readonly TextRunStyle[];
   readonly fontSize?: number;
   readonly fontFamily?: string;
   readonly textColor?: string;
@@ -156,7 +167,7 @@ export interface TextBlockStyle {
   readonly align?: string;
 }
 
-const normalizeAlign = (align: string | undefined): string | undefined => {
+export const normalizeAlign = (align: string | undefined): string | undefined => {
   if (!align) return undefined;
   const map: Record<string, string> = {
     left: 'l',
@@ -171,7 +182,7 @@ const normalizeAlign = (align: string | undefined): string | undefined => {
   return map[align] ?? align;
 };
 
-const buildRunPr = (doc: Document, block: TextBlockStyle): Element => {
+const buildRunPr = (doc: Document, block: TextRunStyle): Element => {
   const rPr = doc.createElementNS(NS.a, 'a:rPr');
   rPr.setAttribute('lang', 'en-US');
   if (block.fontSize !== undefined)
@@ -199,6 +210,15 @@ const buildRunPr = (doc: Document, block: TextBlockStyle): Element => {
   return rPr;
 };
 
+const appendRun = (doc: Document, paragraph: Element, style: TextRunStyle): void => {
+  const run = doc.createElementNS(NS.a, 'a:r');
+  run.appendChild(buildRunPr(doc, style));
+  const t = doc.createElementNS(NS.a, 'a:t');
+  t.appendChild(doc.createTextNode(style.text));
+  run.appendChild(t);
+  paragraph.appendChild(run);
+};
+
 /** Write styled paragraph blocks (one `a:p` per block) into a shape/notes txBody. */
 export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[]): void => {
   const doc = node.ownerDocument;
@@ -222,13 +242,69 @@ export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[])
       pPr.setAttribute('algn', align);
       paragraph.appendChild(pPr);
     }
-    const run = doc.createElementNS(NS.a, 'a:r');
-    run.appendChild(buildRunPr(doc, block));
-    const t = doc.createElementNS(NS.a, 'a:t');
-    t.appendChild(doc.createTextNode(block.text));
-    run.appendChild(t);
-    paragraph.appendChild(run);
+    if (block.runs && block.runs.length > 0) {
+      for (const run of block.runs) appendRun(doc, paragraph, run);
+    } else {
+      appendRun(doc, paragraph, {
+        text: block.text ?? '',
+        ...(block.fontSize !== undefined ? { fontSize: block.fontSize } : {}),
+        ...(block.fontFamily !== undefined ? { fontFamily: block.fontFamily } : {}),
+        ...(block.textColor !== undefined ? { textColor: block.textColor } : {}),
+        ...(block.bold !== undefined ? { bold: block.bold } : {}),
+        ...(block.italic !== undefined ? { italic: block.italic } : {}),
+        ...(block.underline !== undefined ? { underline: block.underline } : {}),
+      });
+    }
     container.appendChild(paragraph);
+  }
+};
+
+const ensureBodyPr = (shape: Element): Element => {
+  const doc = shape.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  let txBody = paragraphContainer(shape);
+  if (!txBody) {
+    txBody = doc.createElementNS(NS.a, 'a:txBody');
+    txBody.appendChild(doc.createElementNS(NS.a, 'a:bodyPr'));
+    txBody.appendChild(doc.createElementNS(NS.a, 'a:lstStyle'));
+    shape.appendChild(txBody);
+  }
+  let bodyPr = children(txBody).find((c) => c.localName === 'bodyPr');
+  if (!bodyPr) {
+    bodyPr = doc.createElementNS(NS.a, 'a:bodyPr');
+    if (txBody.firstChild) txBody.insertBefore(bodyPr, txBody.firstChild);
+    else txBody.appendChild(bodyPr);
+  }
+  return bodyPr;
+};
+
+export const normalizeTextAnchor = (value: string): string => {
+  const map: Record<string, string> = {
+    t: 't',
+    top: 't',
+    ctr: 'ctr',
+    middle: 'ctr',
+    center: 'ctr',
+    b: 'b',
+    bottom: 'b',
+  };
+  const normalized = map[value];
+  if (!normalized) throw new Error(`anchor must be one of t, ctr, b (or top, middle, bottom)`);
+  return normalized;
+};
+
+/** Set a:bodyPr vertical anchor and/or wrap. */
+export const setBodyPrOptions = (
+  shape: Element,
+  options: { anchor?: string; wrap?: string },
+): void => {
+  const bodyPr = ensureBodyPr(shape);
+  if (options.anchor !== undefined)
+    bodyPr.setAttribute('anchor', normalizeTextAnchor(options.anchor));
+  if (options.wrap !== undefined) {
+    if (options.wrap !== 'none' && options.wrap !== 'square')
+      throw new Error('wrap must be "none" or "square"');
+    bodyPr.setAttribute('wrap', options.wrap);
   }
 };
 export const cNvPr = (node: Element): Element | undefined => first(node, 'cNvPr');

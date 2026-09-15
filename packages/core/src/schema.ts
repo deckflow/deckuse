@@ -67,7 +67,7 @@ export const transformSchema = z
   .strict();
 export type Transform = z.infer<typeof transformSchema>;
 
-export const textBlockSchema = z
+export const textRunSchema = z
   .object({
     text: z.string(),
     fontSize: z.number().positive().optional(),
@@ -76,9 +76,34 @@ export const textBlockSchema = z
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
     underline: z.boolean().optional(),
-    align: z.enum(['l', 'ctr', 'r', 'just', 'left', 'center', 'right', 'justify']).optional(),
   })
   .strict();
+export type TextRun = z.infer<typeof textRunSchema>;
+
+export const textBlockSchema = z
+  .object({
+    /** Plain paragraph text (single run). Ignored when `runs` is set. */
+    text: z.string().optional(),
+    /** Intra-paragraph runs with per-run styling. When set, preferred over `text`. */
+    runs: z.array(textRunSchema).min(1).optional(),
+    fontSize: z.number().positive().optional(),
+    fontFamily: z.string().min(1).optional(),
+    textColor: z.string().min(1).optional(),
+    bold: z.boolean().optional(),
+    italic: z.boolean().optional(),
+    underline: z.boolean().optional(),
+    align: z.enum(['l', 'ctr', 'r', 'just', 'left', 'center', 'right', 'justify']).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.runs === undefined && value.text === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'blocks[] entry requires text or runs',
+        path: ['text'],
+      });
+    }
+  });
 export type TextBlock = z.infer<typeof textBlockSchema>;
 
 export const resolveModeSchema = z.enum(['effective', 'direct', 'both']);
@@ -375,6 +400,15 @@ const addShapeCommandSchema = z
       'rounded-rect',
       'ellipse',
       'line',
+      'connector',
+      'elbow',
+      'elbow-connector',
+      'curved-connector',
+      'arrow',
+      'right-arrow',
+      'left-arrow',
+      'up-arrow',
+      'down-arrow',
       'image',
       'group',
       'table',
@@ -388,10 +422,16 @@ const addShapeCommandSchema = z
     y: lengthValueSchema.optional(),
     width: lengthValueSchema.optional(),
     height: lengthValueSchema.optional(),
+    /** Rounded-rect corner radius: 0–1 fraction of half the shorter side (OOXML adj). */
+    cornerRadius: z.number().min(0).max(1).optional(),
     file: z.string().min(1).optional(),
     text: z.string().optional(),
     /** Rich paragraphs; when set, preferred over `text`. */
     blocks: z.array(textBlockSchema).min(1).optional(),
+    /** Vertical text anchor: t|ctr|b (or top|middle|bottom). */
+    anchor: z.enum(['t', 'ctr', 'b', 'top', 'middle', 'bottom']).optional(),
+    /** Text wrapping: square (default) or none. */
+    wrap: z.enum(['square', 'none']).optional(),
     fill: z
       .union([
         z.string().min(1),
@@ -412,6 +452,8 @@ const addShapeCommandSchema = z
             color: z.string().min(1).optional(),
             width: z.number().optional(),
             dash: z.string().min(1).optional(),
+            headEnd: z.string().min(1).optional(),
+            tailEnd: z.string().min(1).optional(),
           })
           .strict(),
       ])

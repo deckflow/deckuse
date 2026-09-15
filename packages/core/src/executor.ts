@@ -32,19 +32,25 @@ export class Executor {
       );
     }
     const parsed = commandSchema.safeParse(input);
-    if (!parsed.success)
-      return err(
-        'INVALID_COMMAND',
-        'Command failed schema validation',
-        parsed.error.issues.map((issue) => ({
-          severity: 'error',
-          code: 'SCHEMA_VALIDATION',
-          message: issue.message,
-          path: issue.path.map((segment) =>
-            typeof segment === 'symbol' ? (segment.description ?? segment.toString()) : segment,
-          ),
-        })),
-      );
+    if (!parsed.success) {
+      const diagnostics = parsed.error.issues.map((issue) => ({
+        severity: 'error' as const,
+        code: 'SCHEMA_VALIDATION',
+        message: issue.message,
+        path: issue.path.map((segment) =>
+          typeof segment === 'symbol' ? (segment.description ?? segment.toString()) : segment,
+        ),
+      }));
+      const first = diagnostics[0];
+      const pathLabel =
+        first?.path && first.path.length > 0
+          ? `${first.path.map(String).join('.')}: `
+          : '';
+      const detail = first ? `${pathLabel}${first.message}` : 'invalid input';
+      const extra =
+        diagnostics.length > 1 ? ` (+${String(diagnostics.length - 1)} more issue(s))` : '';
+      return err('INVALID_COMMAND', `Command failed schema validation: ${detail}${extra}`, diagnostics);
+    }
     const command = parsed.data;
     if (command.type === 'init') {
       const adapter = this.registry.get(command.format);

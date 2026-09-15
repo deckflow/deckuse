@@ -932,7 +932,18 @@ export const startMonitor = async (
   const host = options.host ?? '0.0.0.0';
   const port = options.port ?? 4173;
   await new Promise<void>((done, reject) => {
-    server.once('error', reject);
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        reject(
+          new Error(
+            `Port ${String(port)} is already in use (EADDRINUSE). ` +
+              `Pass --port 0 to pick a free port, or stop the other process / run deckuse monitor status.`,
+          ),
+        );
+        return;
+      }
+      reject(error);
+    });
     server.listen(port, host, () => {
       server.off('error', reject);
       done();

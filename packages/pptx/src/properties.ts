@@ -3,7 +3,7 @@ import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
 import { setColor } from './elements.js';
 import { setHyperlink } from './hyperlink.js';
-import { NS, children, descendants, first, setNodeText } from './xml.js';
+import { NS, children, descendants, first, normalizeAlign, setBodyPrOptions, setNodeText } from './xml.js';
 
 const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
 const FONT_FAMILY_ALIASES = ['fontFamily', 'font', 'typeface'] as const;
@@ -26,6 +26,10 @@ const SHAPE_KEYS = new Set([
   'paragraph.align',
   'paragraph.level',
   'bullet',
+  'wrap',
+  'anchor',
+  'valign',
+  'cornerRadius',
   ...STROKE_ALIASES,
   ...FONT_FAMILY_ALIASES,
   ...FONT_SIZE_ALIASES,
@@ -199,6 +203,18 @@ const setStroke = (spPr: Element, value: unknown): void => {
     prstDash.setAttribute('val', dash);
     ln.appendChild(prstDash);
   }
+  const headEnd = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)['headEnd'] : undefined;
+  const tailEnd = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)['tailEnd'] : undefined;
+  if (typeof headEnd === 'string' && headEnd) {
+    const end = doc.createElementNS(NS.a, 'a:headEnd');
+    end.setAttribute('type', headEnd);
+    ln.appendChild(end);
+  }
+  if (typeof tailEnd === 'string' && tailEnd) {
+    const end = doc.createElementNS(NS.a, 'a:tailEnd');
+    end.setAttribute('type', tailEnd);
+    ln.appendChild(end);
+  }
   insertAfter(spPr, ln, ['xfrm', 'prstGeom', 'custGeom', ...FILL_LOCAL_NAMES]);
 };
 
@@ -206,7 +222,9 @@ const runPropertyTargets = (node: Element): Element[] => {
   const doc = node.ownerDocument;
   if (!doc) throw new Error('Element has no document');
   const targets: Element[] = [];
-  for (const run of descendants(node, 'r')) {
+  const runs =
+    node.localName === 'r' ? [node] : descendants(node, 'r');
+  for (const run of runs) {
     let rPr = directChild(run, 'rPr');
     if (!rPr) {
       rPr = doc.createElementNS(NS.a, 'a:rPr');
@@ -270,6 +288,29 @@ const setHidden = (node: Element, hidden: boolean): void => {
   else nvPr.removeAttribute('hidden');
 };
 
+/** Set roundRect adj (0–1 → OOXML 0–50000). */
+const setCornerRadius = (node: Element, radius: number): void => {
+  if (!(radius >= 0 && radius <= 1)) throw new Error('cornerRadius must be between 0 and 1');
+  const doc = node.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const spPr = ensureSpPr(node);
+  let prstGeom = directChild(spPr, 'prstGeom');
+  if (!prstGeom) {
+    prstGeom = doc.createElementNS(NS.a, 'a:prstGeom');
+    prstGeom.setAttribute('prst', 'roundRect');
+    insertAfter(spPr, prstGeom, ['xfrm']);
+  } else {
+    prstGeom.setAttribute('prst', 'roundRect');
+  }
+  removeDirectChildren(prstGeom, ['avLst']);
+  const avLst = doc.createElementNS(NS.a, 'a:avLst');
+  const gd = doc.createElementNS(NS.a, 'a:gd');
+  gd.setAttribute('name', 'adj');
+  gd.setAttribute('fmla', `val ${String(Math.round(radius * 50_000))}`);
+  avLst.appendChild(gd);
+  prstGeom.appendChild(avLst);
+};
+
 const paragraphNodes = (node: Element): Element[] => {
   const txBodies = descendants(node, 'txBody');
   if (txBodies.length > 0)
@@ -298,11 +339,17 @@ const BULLET_LOCAL_NAMES = [
 ] as const;
 
 const setParagraphAlign = (node: Element, align: string): void => {
-  if (!ALIGN_VALUES.has(align))
-    throw new Error(`paragraph.align must be one of ${[...ALIGN_VALUES].join(', ')}`);
-  const paragraphs = paragraphNodes(node);
+  const normalized = normalizeAlign(align) ?? align;
+  if (!ALIGN_VALUES.has(normalized))
+    throw new Error(
+      `paragraph.align must be one of ${[...ALIGN_VALUES].join(', ')} (aliases: left, center, right, justify)`,
+    );
+  const paragraphs =
+    node.localName === 'p'
+      ? [node]
+      : paragraphNodes(node);
   if (paragraphs.length === 0) throw new Error('Element has no paragraphs to align');
-  for (const p of paragraphs) ensurePPr(p).setAttribute('algn', align);
+  for (const p of paragraphs) ensurePPr(p).setAttribute('algn', normalized);
 };
 
 const setParagraphLevel = (node: Element, level: number): void => {
@@ -489,6 +536,28 @@ export function applyShapeProperties(
         throw new Error('hyperlink must be a string URL or null');
       setHyperlink(context.archive, context.partUri, node, value);
       applied.push('hyperlink');
+    }
+
+    const anchorRaw = properties['anchor'] ?? properties['valign'];
+    if (anchorRaw !== undefined || properties['wrap'] !== undefined) {
+      if (anchorRaw !== undefined && typeof anchorRaw !== 'string')
+        throw new Error('anchor/valign must be a string');
+      if (properties['wrap'] !== undefined && typeof properties['wrap'] !== 'string')
+        throw new Error('wrap must be a string');
+      setBodyPrOptions(node, {
+        ...(typeof anchorRaw === 'string' ? { anchor: anchorRaw } : {}),
+        ...(typeof properties['wrap'] === 'string' ? { wrap: properties['wrap'] } : {}),
+      });
+      if (typeof anchorRaw === 'string')
+        applied.push(properties['anchor'] !== undefined ? 'anchor' : 'valign');
+      if (typeof properties['wrap'] === 'string') applied.push('wrap');
+    }
+
+    if ('cornerRadius' in properties) {
+      if (typeof properties['cornerRadius'] !== 'number')
+        throw new Error('cornerRadius must be a number between 0 and 1');
+      setCornerRadius(node, properties['cornerRadius']);
+      applied.push('cornerRadius');
     }
   } catch (cause) {
     return err('INVALID_COMMAND', cause instanceof Error ? cause.message : 'Invalid properties');

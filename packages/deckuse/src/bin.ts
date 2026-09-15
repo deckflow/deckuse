@@ -3,8 +3,12 @@ import { access, readFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   PROTOCOL_VERSION,
+  commandJsonSchema,
+  measureText,
+  parseLength,
   revisionAsNumber,
   type CommandEnvelope,
+  type Diagnostic,
   type Result,
 } from '@deckflow/deckuse-core';
 import { resolveCliText } from './cli-text.js';
@@ -151,6 +155,14 @@ const outputEnvelope = (envelope: CommandEnvelope): void => {
       `deckuse: ${envelope.error?.code ?? 'ERROR'}: ${envelope.error?.message ?? 'failed'}\n`,
     );
     if (envelope.error?.hint) process.stderr.write(`hint: ${envelope.error.hint}\n`);
+    const diagnostics = (envelope.error as { diagnostics?: Diagnostic[] } | undefined)?.diagnostics;
+    if (Array.isArray(diagnostics)) {
+      for (const d of diagnostics) {
+        const path =
+          Array.isArray(d.path) && d.path.length > 0 ? `${d.path.map(String).join('.')}: ` : '';
+        process.stderr.write(`  - ${path}${d.message}\n`);
+      }
+    }
     return;
   }
   process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
@@ -311,6 +323,94 @@ try {
 
     const action = clean[0]!;
     let ok = true;
+
+    if (action === 'schema') {
+      const typeOpt =
+        optionFrom(clean, '--type') ??
+        (clean[1] && !clean[1].startsWith('--') ? clean[1] : undefined);
+      const full = commandJsonSchema as {
+        oneOf?: unknown[];
+        anyOf?: unknown[];
+        $defs?: Record<string, unknown>;
+      };
+      const defs = full.$defs ?? {};
+      const resolveRef = (entry: unknown): Record<string, unknown> | undefined => {
+        if (!entry || typeof entry !== 'object') return undefined;
+        const record = entry as Record<string, unknown>;
+        if (typeof record['$ref'] === 'string') {
+          const ref = record['$ref'];
+          const name = ref.replace(/^#\/\$defs\//, '');
+          const resolved = defs[name];
+          return resolved && typeof resolved === 'object'
+            ? (resolved as Record<string, unknown>)
+            : undefined;
+        }
+        return record;
+      };
+      const typeOf = (entry: unknown): string | undefined => {
+        const resolved = resolveRef(entry);
+        const typeProp = resolved?.['properties']
+          ? (resolved['properties'] as Record<string, unknown>)['type']
+          : undefined;
+        if (!typeProp || typeof typeProp !== 'object') return undefined;
+        const typeRecord = typeProp as Record<string, unknown>;
+        if (typeof typeRecord['const'] === 'string') return typeRecord['const'];
+        const nested = resolveRef(typeProp);
+        return typeof nested?.['const'] === 'string' ? nested['const'] : undefined;
+      };
+      let schema: unknown = full;
+      if (typeOpt) {
+        const variants = full.oneOf ?? full.anyOf ?? [];
+        const match = variants.find((entry) => typeOf(entry) === typeOpt);
+        if (!match) {
+          const known = variants.map(typeOf).filter(Boolean).join(', ');
+          throw new Error(
+            `Unknown command type for schema: ${typeOpt}. Known: ${known || '(none)'}`,
+          );
+        }
+        schema = { ...(resolveRef(match) ?? match), $defs: defs };
+      }
+      const payload = {
+        ok: true,
+        command: 'deckuse schema',
+        data: {
+          cliVersion: version,
+          protocolVersion: PROTOCOL_VERSION,
+          edition: EDITION,
+          ...(typeOpt ? { type: typeOpt } : {}),
+          schema,
+        },
+      };
+      process.stdout.write(`${JSON.stringify(payload, null, json ? undefined : 2)}\n`);
+      return;
+    }
+
+    if (action === 'measure') {
+      const text = optionFrom(clean, '--text');
+      if (text === undefined) throw new Error('Usage: deckuse measure --text <string> --font-size <pt>');
+      const fontSize = Number(optionFrom(clean, '--font-size') ?? optionFrom(clean, '--fontSize') ?? 12);
+      if (!(fontSize > 0)) throw new Error('--font-size must be a positive number (pt)');
+      const bold = clean.includes('--bold');
+      const fontFamily = optionFrom(clean, '--font-family') ?? optionFrom(clean, '--fontFamily');
+      const maxWidthRaw = optionFrom(clean, '--max-width') ?? optionFrom(clean, '--maxWidth');
+      const maxWidthEmu =
+        maxWidthRaw !== undefined
+          ? parseLength(lengthArg(maxWidthRaw) ?? maxWidthRaw, { axis: 'x' })
+          : undefined;
+      const measured = measureText({
+        text,
+        fontSize,
+        ...(bold ? { bold: true } : {}),
+        ...(fontFamily ? { fontFamily } : {}),
+        ...(maxWidthEmu !== undefined ? { maxWidthEmu } : {}),
+      });
+      outputEnvelope({
+        ok: true,
+        command: 'deckuse measure',
+        data: measured,
+      });
+      return;
+    }
 
     if (action === 'init') {
       const source = clean[1];
@@ -778,12 +878,24 @@ try {
       const host = optionFrom(clean, '--host') ?? '0.0.0.0';
 
       if (sub === 'start') {
-        const meta = await monitorStart(workspace, { host, port });
-        outputEnvelope({
-          ok: true,
-          command: 'deckuse monitor start',
-          data: meta,
-        });
+        try {
+          const meta = await monitorStart(workspace, { host, port });
+          outputEnvelope({
+            ok: true,
+            command: 'deckuse monitor start',
+            data: meta,
+          });
+        } catch (error) {
+          outputEnvelope({
+            ok: false,
+            command: 'deckuse monitor start',
+            error: {
+              code: 'IO_ERROR',
+              message: error instanceof Error ? error.message : 'Monitor start failed',
+            },
+          });
+          process.exitCode = 1;
+        }
         return;
       }
       if (sub === 'stop') {
@@ -821,23 +933,29 @@ try {
       return;
     } else if (action === 'render') {
       const pageRaw = optionFrom(clean, '--page');
-      if (!pageRaw) throw new Error('Usage: deckuse render --page <n> [--output <file.png>]');
+      if (!pageRaw)
+        throw new Error('Usage: deckuse render --page <n> [--output <file.png>] [--scale <n>]');
       if (/\s|,|-/.test(pageRaw))
         throw new Error('--page accepts exactly one positive integer (not a range or list)');
       const page = Number(pageRaw);
       if (!Number.isInteger(page) || page < 1)
         throw new Error('--page must be a positive integer');
+      const scaleRaw = optionFrom(clean, '--scale');
+      const scale = scaleRaw !== undefined ? Number(scaleRaw) : undefined;
+      if (scale !== undefined && !(scale > 0)) throw new Error('--scale must be a positive number');
       const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
       const outputOpt = optionFrom(clean, '--output');
       try {
         const rendered = await renderPage(workspace, {
           page,
           ...(outputOpt ? { output: resolve(outputOpt) } : {}),
+          ...(scale !== undefined ? { scale } : {}),
         });
         outputEnvelope({
           ok: true,
           command: 'deckuse render',
-          data: { page: rendered.page, output: rendered.output },
+          warnings: [...rendered.warnings],
+          data: { page: rendered.page, output: rendered.output, warnings: rendered.warnings },
         });
       } catch (error) {
         outputEnvelope({

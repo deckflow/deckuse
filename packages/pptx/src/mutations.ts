@@ -10,7 +10,7 @@ import {
 } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
-import { resolveTarget, resolveToRef, cNvPrIdOf } from './addressing.js';
+import { resolveTarget, resolveToRef, cNvPrIdOf, type ParsedTarget } from './addressing.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { assertWritable } from './edition.js';
 import { addElement, duplicateElement, updateChart } from './elements.js';
@@ -35,7 +35,51 @@ import {
   root,
   setNodeText,
   setNodeTextBlocks,
+  type TextBlockStyle,
+  type TextRunStyle,
 } from './xml.js';
+
+const mapTextRun = (run: {
+  text: string;
+  fontSize?: number;
+  fontFamily?: string;
+  textColor?: string;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+}): TextRunStyle => {
+  const styled: TextRunStyle = { text: run.text };
+  if (run.fontSize !== undefined) (styled as { fontSize?: number }).fontSize = run.fontSize;
+  if (run.fontFamily !== undefined) (styled as { fontFamily?: string }).fontFamily = run.fontFamily;
+  if (run.textColor !== undefined) (styled as { textColor?: string }).textColor = run.textColor;
+  if (run.bold !== undefined) (styled as { bold?: boolean }).bold = run.bold;
+  if (run.italic !== undefined) (styled as { italic?: boolean }).italic = run.italic;
+  if (run.underline !== undefined) (styled as { underline?: boolean }).underline = run.underline;
+  return styled;
+};
+
+const mapTextBlock = (block: Record<string, unknown>): TextBlockStyle => {
+  const styled: TextBlockStyle = {};
+  const runs = block['runs'];
+  if (Array.isArray(runs)) {
+    (styled as { runs?: TextRunStyle[] }).runs = runs.map((run) =>
+      mapTextRun(run as Parameters<typeof mapTextRun>[0]),
+    );
+  } else if (typeof block['text'] === 'string') {
+    (styled as { text?: string }).text = block['text'];
+  }
+  if (typeof block['fontSize'] === 'number') (styled as { fontSize?: number }).fontSize = block['fontSize'];
+  if (typeof block['fontFamily'] === 'string')
+    (styled as { fontFamily?: string }).fontFamily = block['fontFamily'];
+  if (typeof block['textColor'] === 'string')
+    (styled as { textColor?: string }).textColor = block['textColor'];
+  if (typeof block['bold'] === 'boolean') (styled as { bold?: boolean }).bold = block['bold'];
+  if (typeof block['italic'] === 'boolean') (styled as { italic?: boolean }).italic = block['italic'];
+  if (typeof block['underline'] === 'boolean')
+    (styled as { underline?: boolean }).underline = block['underline'];
+  if (typeof block['align'] === 'string') (styled as { align?: string }).align = block['align'];
+  return styled;
+};
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 const directChild = (node: Element, localName: string): Element | undefined =>
@@ -444,7 +488,7 @@ const applyReplaceText = (
 const resolveCommandRef = (
   command: AtomicCommand,
   index: IndexFile,
-): Result<{ ref: ElementRef; item: IndexedElement; target?: string }> => {
+): Result<{ ref: ElementRef; item: IndexedElement; target?: string; parsed?: ParsedTarget }> => {
   if (command.type === 'replaceText')
     return err('INVALID_COMMAND', 'replaceText does not resolve a single ref');
   if (command.type === 'addSlide' || command.type === 'addShape')
@@ -464,6 +508,7 @@ const resolveCommandRef = (
         ref: resolved.value.item.ref,
         item: resolved.value.item,
         target: resolved.value.target,
+        parsed: resolved.value.parsed,
       },
       diagnostics: [],
     };
@@ -477,6 +522,7 @@ const resolveCommandRef = (
         ref: resolved.value.item.ref,
         item: resolved.value.item,
         target: resolved.value.target,
+        parsed: resolved.value.parsed,
       },
       diagnostics: [],
     };
@@ -497,6 +543,7 @@ const resolveCommandRef = (
         ...(got.value.resolved?.target !== undefined
           ? { target: got.value.resolved.target }
           : {}),
+        ...(got.value.resolved?.parsed !== undefined ? { parsed: got.value.resolved.parsed } : {}),
       },
       diagnostics: [],
     };
@@ -515,9 +562,40 @@ const resolveCommandRef = (
       ref: item.ref,
       item,
       ...(got.value.resolved?.target !== undefined ? { target: got.value.resolved.target } : {}),
+      ...(got.value.resolved?.parsed !== undefined ? { parsed: got.value.resolved.parsed } : {}),
     },
     diagnostics: [],
   };
+};
+
+/** Narrow a shape node to paragraph or run when the target path includes those segments. */
+const focusMutationNode = (
+  shape: Element,
+  parsed: ParsedTarget | undefined,
+): Result<Element> => {
+  if (!parsed?.focus) return ok(shape);
+  if (parsed.focus === 'paragraph' && parsed.paragraph !== undefined) {
+    const paragraphs = descendants(shape, 'p');
+    const p = paragraphs[parsed.paragraph];
+    if (!p)
+      return err(
+        'TARGET_NOT_FOUND',
+        `paragraph:${parsed.paragraph} not found on ${parsed.raw}`,
+        [],
+        { target: parsed.raw },
+      );
+    return ok(p);
+  }
+  if (parsed.focus === 'run' && parsed.run !== undefined) {
+    const runs = descendants(shape, 'r');
+    const run = runs[parsed.run];
+    if (!run)
+      return err('TARGET_NOT_FOUND', `run:${parsed.run} not found on ${parsed.raw}`, [], {
+        target: parsed.raw,
+      });
+    return ok(run);
+  }
+  return ok(shape);
 };
 
 const shapeTypeToElement = (
@@ -537,11 +615,34 @@ const shapeTypeToElement = (
     case 'rect':
       return { ...base, kind: 'shape', type: 'shape', preset: 'rect' };
     case 'rounded-rect':
-      return { ...base, kind: 'shape', type: 'shape', preset: 'roundRect' };
+      return {
+        ...base,
+        kind: 'shape',
+        type: 'shape',
+        preset: 'roundRect',
+        ...(typeof fields['cornerRadius'] === 'number'
+          ? { cornerRadius: fields['cornerRadius'] }
+          : {}),
+      };
     case 'ellipse':
       return { ...base, kind: 'shape', type: 'shape', preset: 'ellipse' };
     case 'line':
-      return { ...base, kind: 'connector', type: 'connector' };
+    case 'connector':
+      return { ...base, kind: 'connector', type: 'connector', preset: 'line' };
+    case 'elbow':
+    case 'elbow-connector':
+      return { ...base, kind: 'connector', type: 'connector', preset: 'bentConnector3' };
+    case 'curved-connector':
+      return { ...base, kind: 'connector', type: 'connector', preset: 'curvedConnector3' };
+    case 'arrow':
+    case 'right-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'rightArrow', txBox: false };
+    case 'left-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'leftArrow', txBox: false };
+    case 'up-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'upArrow', txBox: false };
+    case 'down-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'downArrow', txBox: false };
     case 'image':
       return {
         ...base,
@@ -726,6 +827,7 @@ export async function mutate(
       ...(command.blocks === undefined && command.text !== undefined
         ? { text: command.text }
         : {}),
+      ...(command.cornerRadius !== undefined ? { cornerRadius: command.cornerRadius } : {}),
       ...(command.rows !== undefined ? { rows: command.rows } : {}),
       ...(command.theme !== undefined ? { theme: command.theme } : {}),
       ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
@@ -756,29 +858,22 @@ export async function mutate(
       if (!styled.ok) return styled;
       diagnostics.push(...styled.diagnostics);
     }
+    if (command.anchor !== undefined || command.wrap !== undefined) {
+      const body = applyShapeProperties(
+        created,
+        {
+          ...(command.anchor !== undefined ? { anchor: command.anchor } : {}),
+          ...(command.wrap !== undefined ? { wrap: command.wrap } : {}),
+        },
+        { archive, partUri: slide.partUri },
+      );
+      if (!body.ok) return body;
+      diagnostics.push(...body.diagnostics);
+    }
     if (command.blocks !== undefined) {
       setNodeTextBlocks(
         created,
-        command.blocks.map((block) => {
-          const styled: {
-            text: string;
-            fontSize?: number;
-            fontFamily?: string;
-            textColor?: string;
-            bold?: boolean;
-            italic?: boolean;
-            underline?: boolean;
-            align?: string;
-          } = { text: block.text };
-          if (block.fontSize !== undefined) styled.fontSize = block.fontSize;
-          if (block.fontFamily !== undefined) styled.fontFamily = block.fontFamily;
-          if (block.textColor !== undefined) styled.textColor = block.textColor;
-          if (block.bold !== undefined) styled.bold = block.bold;
-          if (block.italic !== undefined) styled.italic = block.italic;
-          if (block.underline !== undefined) styled.underline = block.underline;
-          if (block.align !== undefined) styled.align = block.align;
-          return styled;
-        }),
+        command.blocks.map((block) => mapTextBlock(block as Record<string, unknown>)),
       );
     }
     archive.writeXml(slide.partUri, doc);
@@ -835,7 +930,7 @@ export async function mutate(
 
   const resolved = resolveCommandRef(command, index);
   if (!resolved.ok) return resolved;
-  const { item, target } = resolved.value;
+  const { item, target, parsed } = resolved.value;
   if (item.ref.revision && item.ref.revision !== index.revision)
     return err(
       'TRANSACTION_CONFLICT',
@@ -898,12 +993,15 @@ export async function mutate(
   const liveItem = notesReady.value;
 
   const doc = archive.readXml(liveItem.partUri),
-    node = nodeFor(doc, liveItem);
-  if (!node)
+    shapeNode = nodeFor(doc, liveItem);
+  if (!shapeNode)
     return err(
       'ELEMENT_NOT_FOUND',
       `Element XML node was not found: ${liveItem.ref.elementId ?? liveItem.ref.path ?? ''}`,
     );
+  const focused = focusMutationNode(shapeNode, parsed);
+  if (!focused.ok) return focused;
+  const node = focused.value;
 
   const chartPart =
     liveItem.kind === 'chart' && typeof liveItem.payload?.['chartPart'] === 'string'
@@ -917,26 +1015,7 @@ export async function mutate(
         return err('INVALID_COMMAND', 'Chart titles do not support rich text blocks');
       setNodeTextBlocks(
         node,
-        command.blocks.map((block) => {
-          const styled: {
-            text: string;
-            fontSize?: number;
-            fontFamily?: string;
-            textColor?: string;
-            bold?: boolean;
-            italic?: boolean;
-            underline?: boolean;
-            align?: string;
-          } = { text: block.text };
-          if (block.fontSize !== undefined) styled.fontSize = block.fontSize;
-          if (block.fontFamily !== undefined) styled.fontFamily = block.fontFamily;
-          if (block.textColor !== undefined) styled.textColor = block.textColor;
-          if (block.bold !== undefined) styled.bold = block.bold;
-          if (block.italic !== undefined) styled.italic = block.italic;
-          if (block.underline !== undefined) styled.underline = block.underline;
-          if (block.align !== undefined) styled.align = block.align;
-          return styled;
-        }),
+        command.blocks.map((block) => mapTextBlock(block as Record<string, unknown>)),
       );
     } else {
       const text = command.text ?? command.value;
@@ -953,7 +1032,7 @@ export async function mutate(
       } else setNodeText(node, text);
     }
   } else if (command.type === 'setTransform') {
-    transform(node, normalizeTransformFields(archive, command.transform as Record<string, unknown>), {
+    transform(shapeNode, normalizeTransformFields(archive, command.transform as Record<string, unknown>), {
       archive,
       partUri: liveItem.partUri,
     });
@@ -965,7 +1044,7 @@ export async function mutate(
       ...(command.height !== undefined ? { height: command.height } : {}),
     });
     transform(
-      node,
+      shapeNode,
       {
         ...geom,
         ...(command.rotation !== undefined ? { rotation: command.rotation } : {}),
@@ -998,7 +1077,7 @@ export async function mutate(
           message: 'Chart cache changed; embedded workbook was not modified',
         });
     } else if (liveItem.kind === 'table') {
-      const applied = applyTableProperties(node, properties, {
+      const applied = applyTableProperties(shapeNode, properties, {
         archive,
         partUri: liveItem.partUri,
       });
@@ -1020,7 +1099,7 @@ export async function mutate(
         return err('INVALID_COMMAND', 'set requires at least one supported property');
     }
   } else if (command.type === 'zMove') {
-    const moved = applyZMove(doc, node, command, index);
+    const moved = applyZMove(doc, shapeNode, command, index);
     if (!moved.ok) return moved;
   } else if (command.type === 'replacePicture') {
     if (liveItem.kind !== 'picture')
@@ -1033,19 +1112,19 @@ export async function mutate(
     const replaced = replacePictureMedia(
       archive,
       liveItem.partUri,
-      node,
+      shapeNode,
       loaded.value.data,
       loaded.value.ext,
     );
     if (!replaced.ok) return replaced;
   } else if (command.type === 'remove') {
-    if (liveItem.kind === 'picture') detachPictureAndCleanup(archive, liveItem.partUri, doc, node);
+    if (liveItem.kind === 'picture') detachPictureAndCleanup(archive, liveItem.partUri, doc, shapeNode);
     else if (liveItem.kind === 'video' || liveItem.kind === 'audio')
-      detachMediaAndCleanup(archive, liveItem.partUri, doc, node);
-    else node.parentNode?.removeChild(node);
-  } else if (command.type === 'duplicate') duplicateElement(doc, node);
+      detachMediaAndCleanup(archive, liveItem.partUri, doc, shapeNode);
+    else shapeNode.parentNode?.removeChild(shapeNode);
+  } else if (command.type === 'duplicate') duplicateElement(doc, shapeNode);
   else if (command.type === 'add') {
-    const parent = liveItem.kind === 'slide' ? (first(doc, 'spTree') ?? node) : node;
+    const parent = liveItem.kind === 'slide' ? (first(doc, 'spTree') ?? shapeNode) : shapeNode;
     await addElement(archive, liveItem.partUri, doc, parent, command.element);
   } else {
     return err('INVALID_COMMAND', `Unhandled mutation type`);

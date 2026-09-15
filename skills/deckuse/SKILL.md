@@ -5,155 +5,72 @@ description: Use when inspecting, creating, modifying, automating, or verifying 
 
 # Deckuse Agent Skill
 
-Deckuse is a local-first, schema-driven Office document automation engine specifically designed for coding agents. It treats PPTX files as versioned workspaces, provides stable semantic addresses (`slide:N/shape:ID`), applies surgical atomic mutations, and automatically tracks history via Git revisions.
+**Requires CLI `deckuse >= 1.2.0` (edition=community).** Check with `deckuse --version`. If older, upgrade before following recipes below (1.1.0 npm lacked units / inline `blocks`/`fill` / same-batch forward refs).
+
+Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It treats PPTX files as versioned workspaces, provides stable semantic addresses (`slide:N/shape:ID`), applies surgical atomic mutations, and tracks history via Git revisions.
+
+Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --json`) over guessing fields from memory.
 
 ---
 
 ## 1. Core Operating Principles for AI Agents
 
 1. **Workspace-First Architecture**:
-   Never attempt to edit `.pptx` files in-place. Always initialize a workspace with `deckuse init input.pptx ./ws --json`. Every mutation updates the workspace `source/`, creates a Git commit, appends to `.deckuse/operations.jsonl`, and rebuilds `./ws/package.pptx`.
-2. **Batch Mutations via `apply` (Crucial Performance Rule)**:
-   Do **NOT** execute multiple individual `deckuse set` / `add` CLI commands sequentially if you have multiple changes. Each write command creates a Git revision and recompresses the archive. Instead, prepare a JSON payload of operations and run a single atomic batch:
+   Never edit `.pptx` in-place. Always `deckuse init input.pptx ./ws --json`. Mutations update `source/`, commit via Git, append `.deckuse/operations.jsonl`, and rebuild `./ws/package.pptx`.
+2. **Batch Mutations via `apply`**:
+   Do **NOT** run many individual write CLIs. Each write = one revision + recompress. Prefer one JSON batch:
    ```bash
    deckuse apply --workspace ./ws --input ops.json --json
    ```
+   Geometry tweaks (`xfrmSet` / `setTransform`) belong in the **same** `apply` batch — do not loop `deckuse xfrm`.
 3. **Derived Index & Stable Addressing**:
-   Do not guess array indexes or raw XML nodes. Target elements by semantic paths:
-   - `slide:1/shape:2` (by shape cNvPr ID)
-   - `slide:1/shape:Title 1` (by shape name)
-   - `slide:1/placeholder:title`, `slide:1/placeholder:body`, `slide:1/placeholder:subTitle`
-   - `slide:1/notes` (speaker notes)
-   - `slide:1/shape:2/paragraph:0` or `slide:1/shape:2/run:0`
-   - Same-batch forward refs work: after `addShape` with `"name": "HeaderTitle"`, later ops in the same `apply` may target `slide:N/shape:HeaderTitle`.
+   - `slide:1/shape:2`, `slide:1/shape:Title 1`, `slide:1/placeholder:title`
+   - `slide:1/shape:2/run:0` for single-run `setProperties` (intra-paragraph styling)
+   - **Same-batch forward refs**: after `addShape` with `"name": "HeaderTitle"`, later ops in the **same** `apply` may target `slide:N/shape:HeaderTitle`. Cross-apply dry-runs cannot see uncommitted shapes — that is expected.
 4. **Intuitive Unit System**:
-   Coordinates and sizes accept human-friendly unit strings: `px` (96 DPI, 1px = 9525 EMU), `pt`, `cm`, `mm`, `in`, and `%` (relative to slide size, default 16:9 is 12192000×6858000 EMU). Bare numbers default to raw EMU. Example: `"x": "5%"`, `"y": "120px"`, `"width": "90%"`.
+   `px` (96 DPI), `pt`, `cm`, `mm`, `in`, `%` (of slide). Bare numbers = EMU. Example: `"x": "5%"`, `"y": "120px"`.
 5. **Structural Engine, Not Visual Brain**:
-   Deckuse performs strict OOXML manipulations and guarantees file integrity. It cannot autonomously judge whether text is overlapping or aesthetically pleasing. Use `deckuse render --page N` to screenshot slides for agent multimodal visual verification.
+   Use `deckuse render --page N` for visual QA. Community render may **not** show custom chart series colors; confirm via `ppt/charts/chart*.xml` or PowerPoint. Response includes `RENDER_FIDELITY` warnings.
 6. **Community Edition Boundaries**:
-   Writing to `master:*`, `layout:*`, or `theme` parts is protected and returns `UNSUPPORTED_CAPABILITY`. DOCX, XLSX, Keynote, and Numbers are currently reserved stubs (`FORMAT_NOT_IMPLEMENTED`).
+   `master:*` / `layout:*` / `theme` writes → `UNSUPPORTED_CAPABILITY`.
 
 ---
 
 ## 2. Standard Agent Interaction Loop
 
-Always follow the 5-phase loop:
-
 ```text
 [1. Init] ➔ [2. Inspect & Search] ➔ [3. Prepare & Apply Batch] ➔ [4. Validate & Render] ➔ [5. Export]
 ```
 
-### Step 1: Initialize Workspace
+### Freeform layout (from-scratch / 1:1 recreate)
+
+1. Estimate a grid (margins, columns) using `%` / `px` or `deckuse measure --text … --font-size N --json`.
+2. Create shapes + styles in **one** `apply` (inline `fill`/`stroke`/`blocks`/`runs`).
+3. `deckuse validate` then `deckuse render --page N`.
+4. Adjust geometry with **another** `apply` containing multiple `xfrmSet` / `setTransform` ops (one revision).
+5. Prefer `wrap: "none"` and generous widths to avoid mid-word wraps; use `anchor` for valign.
+
+### Step 1–5 (commands)
 
 ```bash
 deckuse init master.pptx ./workspace --json
-```
-
-### Step 2: Query and Inspect
-
-Find target elements and collect IDs before modifying:
-
-```bash
-# Check overall structure and slide count
 deckuse status --workspace ./workspace --json
-deckuse list slides --workspace ./workspace --json
-
-# Search text or shapes
-deckuse search text "Target Text" --workspace ./workspace --json
-deckuse search shape --name "Card" --workspace ./workspace --json
 deckuse list shapes --slide 1 --workspace ./workspace --json
-
-# Deep inspect shape properties and geometry
-deckuse get slide:1/shape:2 --resolve both --workspace ./workspace --json
-```
-
-### Step 3: Atomic Batch Mutation (`apply`)
-
-Create an `ops.json` file as a **top-level array** of write commands (preferred):
-
-```json
-[
-  {
-    "type": "addShape",
-    "slide": 1,
-    "shapeType": "text",
-    "name": "HeaderTitle",
-    "x": "5%",
-    "y": "50px",
-    "width": "90%",
-    "height": "60px",
-    "blocks": [
-      { "text": "Q3 Revenue Report", "fontSize": 24, "bold": true, "textColor": "1F2937" },
-      { "text": "Confidential • Internal Only", "fontSize": 12, "textColor": "6B7280" }
-    ]
-  },
-  {
-    "type": "setProperties",
-    "target": "slide:1/shape:2",
-    "properties": {
-      "fill": { "color": "F3F4F6", "transparency": 0 },
-      "stroke": { "color": "E5E7EB", "width": 1 }
-    }
-  }
-]
-```
-
-Also accepted:
-
-- Single command object `{ "type": "setText", ... }`
-- `{ "operations": [ ... ] }` when each item is a high-level write (`type: "addShape"` / `setText` / …) — treated as the same batch
-- JSONL (one command object per line)
-- Low-level transaction ops: items with `op` (or `{ "operations": [...] }` of those) → `applyTransaction`
-
-Apply in one shot:
-
-```bash
 deckuse apply --workspace ./workspace --input ops.json --json
-```
-
-#### `setProperties` property keys (canonical)
-
-Prefer camelCase / nested objects. Dotted keys (`font.size`, `fill.color`, …) are also accepted and normalized.
-
-| Intent | Canonical form |
-| --- | --- |
-| Font size (pt) | `fontSize: number` |
-| Bold / italic / underline | `bold` / `italic` / `underline`: boolean |
-| Text color | `textColor: "RRGGBB"` |
-| Font family | `fontFamily: string` |
-| Shape fill | `fill: { "color": "RRGGBB", "transparency"?: number }` |
-| Shape border | `stroke: { "color": "RRGGBB", "width": number }` |
-
-Dotted equivalents (also OK): `font.size`, `font.color`, `font.weight: "bold"`, `fill.color`, `line.color`.
-
-CLI `deckuse set --font.size …` uses the same dotted vocabulary.
-
-### Step 4: Validate and Visual QA
-
-```bash
-# Verify OOXML structure and package relationships
 deckuse validate --workspace ./workspace --json
-
-# Render specific slide to PNG for visual inspection (requires Chrome/Chromium)
 deckuse render --page 1 --workspace ./workspace --output ./slide-1.png --json
-
-# (Optional) Run monitor daemon for user live browser preview
-deckuse monitor start --workspace ./workspace --port 4173
-```
-
-### Step 5: Export Final Artifact
-
-```bash
 deckuse export ./output.pptx --workspace ./workspace --json
 ```
+
+### `setProperties` keys
+
+Canonical: `fontSize`, `bold`, `textColor`, `fill`, `stroke`, `paragraph.align` (accepts `center`/`ctr`), `wrap` (`none`|`square`), `anchor`/`valign` (`t`|`ctr`|`b`), `cornerRadius` (0–1 on roundRect).
 
 ---
 
 ## 3. High-Value Operation Recipes
 
-### A. KPI Cards (inline create + style)
-
-Prefer creating styled cards in one `addShape` (fill / stroke / blocks). Palette for a 3-column row: green `F0FDF4`/`059669`, blue `EFF6FF`/`2563EB`, amber `FFFBEB`/`D97706` (optional 4th: rose `FFF1F2`/`E11D48`).
+### A. KPI Cards (inline create + style) — requires >= 1.2.0
 
 ```json
 [
@@ -172,151 +89,67 @@ Prefer creating styled cards in one `addShape` (fill / stroke / blocks). Palette
       { "text": "总营收", "fontSize": 12, "textColor": "065F46" },
       { "text": "598 百万元", "fontSize": 24, "bold": true, "textColor": "059669" }
     ]
-  },
-  {
-    "type": "addShape",
-    "slide": 2,
-    "shapeType": "rect",
-    "name": "KpiCost",
-    "x": "36%",
-    "y": "120px",
-    "width": "28%",
-    "height": "100px",
-    "fill": { "color": "EFF6FF" },
-    "stroke": { "color": "BFDBFE", "width": 1 },
-    "blocks": [
-      { "text": "总成本", "fontSize": 12, "textColor": "1E40AF" },
-      { "text": "312 百万元", "fontSize": 24, "bold": true, "textColor": "2563EB" }
-    ]
-  },
-  {
-    "type": "addShape",
-    "slide": 2,
-    "shapeType": "rect",
-    "name": "KpiProfit",
-    "x": "67%",
-    "y": "120px",
-    "width": "28%",
-    "height": "100px",
-    "fill": { "color": "FFFBEB" },
-    "stroke": { "color": "FDE68A", "width": 1 },
-    "blocks": [
-      { "text": "毛利", "fontSize": 12, "textColor": "92400E" },
-      { "text": "286 百万元", "fontSize": 24, "bold": true, "textColor": "D97706" }
-    ]
   }
 ]
 ```
 
-For existing shapes, use `setText` with `blocks` and/or `setProperties`.
-
-_Note_: Multiple lines with plain text can also use `\n` in `"text": "Line 1\nLine 2"`. When both `text` and `blocks` are present on `addShape`, `blocks` wins.
-
-### B. Auto-Sized Styled Tables
-
-```json
-{
-  "type": "addShape",
-  "slide": 2,
-  "shapeType": "table",
-  "name": "FinancialTable",
-  "x": "5%",
-  "y": "180px",
-  "width": "90%",
-  "height": "auto",
-  "theme": "zebra",
-  "alignColumns": ["left", "right", "right", "right"],
-  "rows": [
-    ["Metric", "2024 Actual", "2025 Plan", "Variance"],
-    ["Gross Margin", "$450K", "$520K", "+15.5%"],
-    ["Operating Cost", "$180K", "$210K", "+16.7%"],
-    ["EBITDA", "$270K", "$310K", "+14.8%"]
-  ]
-}
-```
-
-- `height: "auto"` uses font heuristics (~11pt × 1.65 per row) to prevent row clipping.
-- `theme: "minimal" | "zebra"`.
-- `alignColumns`: array of `'left'` | `'center'` | `'right'` (or `'l'` | `'ctr'` | `'r'`).
-
-### C. Charts (prefer basic types for `render`)
-
-**Prefer** `"bar" | "column" | "line" | "pie"` for community `deckuse render` (these render fully).
+Intra-paragraph color (e.g. red first letter):
 
 ```json
 {
   "type": "addShape",
   "slide": 3,
-  "shapeType": "chart",
-  "chartType": "column",
+  "shapeType": "text",
+  "name": "BrandC",
   "x": "5%",
-  "y": "240px",
-  "width": "90%",
-  "height": "360px",
-  "showDataLabels": true,
-  "data": {
-    "title": "Monthly Revenue",
-    "categories": ["Jan", "Feb", "Mar", "Apr"],
-    "series": [
-      { "name": "Revenue ($M)", "values": [12, 19, 15, 25], "color": "2563EB" }
-    ]
-  }
+  "y": "80px",
+  "width": "40%",
+  "height": "60px",
+  "wrap": "none",
+  "blocks": [
+    {
+      "align": "left",
+      "runs": [
+        { "text": "C", "fontSize": 28, "bold": true, "textColor": "DC2626" },
+        { "text": "ustomer", "fontSize": 28, "bold": true, "textColor": "111827" }
+      ]
+    }
+  ]
 }
 ```
 
-`chartType: "combo"` can be written into the PPTX (bar/column + line, optional secondary axis), but community `render` may show an Advanced Chart placeholder. Prefer basic charts when visual QA via `render` matters.
+### B. Tables / C. Charts / D. Align / E. replaceText
 
-### D. Smart Multi-Element Alignment
+Unchanged patterns from prior skill: `height: "auto"` tables, prefer `column|bar|line|pie` for render, `deckuse align …`, `replaceText`.
 
-To evenly distribute cards or badges horizontally without manual EMU calculations:
+Shape vocabulary: `line`/`connector` = straight connector; `elbow` / `curved-connector`; `arrow` / `left-arrow` / …; `rounded-rect` + `cornerRadius` (0–1).
 
-```bash
-deckuse align --workspace ./ws --slide 1 --targets "slide:1/shape:10,slide:1/shape:11,slide:1/shape:12" --mode distribute-h --gap 20px --json
-```
+### Charts
 
-Available modes: `left`, `right`, `top`, `bottom`, `center-h`, `center-v`, `distribute-h`, `distribute-v`.
-
-### E. Global Text Replacement (Find & Replace)
-
-For project renames or year bumps:
-
-```json
-{
-  "type": "replaceText",
-  "find": "FY2025",
-  "replace": "FY2026",
-  "selector": "slide=2"
-}
-```
-
-Leave `selector` blank to target the entire presentation.
+Series `color` is written into chart XML. **Community `render` may still show theme defaults** — verify XML or PowerPoint.
 
 ---
 
-## 4. Rollback and Conflict Handling
+## 4. Rollback and Error Handling
 
-1. **Undo**:
-   If an operation broke slide layout or failed validation:
-   ```bash
-   deckuse undo --workspace ./workspace --steps 1 --json
-   ```
-2. **Revision Guard**:
-   Pass `--expect-revision <N>` or use `expectRevision` in JSON mutations when working across asynchronous or multi-step agent tool calls to guarantee atomic updates without stale-state collisions.
-3. **Diagnostics & Errors**:
-   - `TARGET_NOT_FOUND` / `ELEMENT_NOT_FOUND`: Check `deckuse list shapes --slide N` to see valid shape IDs.
-   - `INVALID_COMMAND`: Check schema requirements (e.g. `--type image` requires `--file`, `--type table` requires `--rows`).
-   - `UNSUPPORTED_CAPABILITY`: Community edition restricts master/layout/theme writes.
-   - `COMBO_CHART_RENDER_LIMITED` (warning): combo charts may not fully render in community `render`.
+```bash
+deckuse undo --workspace ./workspace --steps 1 --json
+```
+
+- Always use `--json` for agents. On `INVALID_COMMAND`, read **`error.message`** (includes first field path) and **`error.diagnostics[]`** (`path` + `message`).
+- `TARGET_NOT_FOUND`: list shapes; for dry-run, ensure the name was added in the **same** apply batch.
+- `UNSUPPORTED_CAPABILITY`: community master/layout/theme gate.
+- `COMBO_CHART_RENDER_LIMITED` / `RENDER_FIDELITY`: visual preview limits, not write failures.
+- Schema discovery: `deckuse schema --type addShape --json`.
 
 ---
 
 ## 5. Agent Workflow Checklist
 
-- [ ] Initialized workspace with `deckuse init <src> <ws> --json`?
-- [ ] Retrieved actual shape IDs via `list` or `search` before writing (or used named shapes in the same batch)?
-- [ ] Used unit strings (`px`, `%`, `pt`) rather than computing large EMUs manually?
-- [ ] Grouped multiple mutations into a single `apply` batch (top-level JSON array)?
-- [ ] Preferred `column`/`bar`/`line`/`pie` over `combo` when using `render`?
-- [ ] Ran `deckuse validate --workspace <ws> --json` after applying changes?
-- [ ] Rendered key slides via `deckuse render --page <N>` to inspect visual alignment?
-- [ ] Exported final document via `deckuse export <dest> --workspace <ws> --json`?
+- [ ] CLI >= 1.2.0 (`deckuse --version`)?
+- [ ] Initialized workspace?
+- [ ] Used unit strings / named shapes / single `apply` batch?
+- [ ] Prefer `column`/`bar`/`line`/`pie` when using `render`?
+- [ ] Checked `error.diagnostics` on failure (not only top-level message)?
+- [ ] Validated + rendered key slides; chart colors verified in XML if needed?
+- [ ] Exported final PPTX?

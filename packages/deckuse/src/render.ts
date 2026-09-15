@@ -16,6 +16,7 @@ export type ConvertFn = typeof office2html.convert;
 export type ScreenshotFn = (options: {
   readonly indexHtmlPath: string;
   readonly outputPath: string;
+  readonly scale?: number;
 }) => Promise<void>;
 
 export interface RenderDependencies {
@@ -28,12 +29,15 @@ export interface RenderOptions {
   readonly page: number;
   /** PNG path; default: `<workspace>/.deckuse/render/page-<n>.png`. */
   readonly output?: string;
+  /** Device scale factor for screenshot (default 1). */
+  readonly scale?: number;
   readonly dependencies?: RenderDependencies;
 }
 
 export interface RenderResult {
   readonly page: number;
   readonly output: string;
+  readonly warnings: readonly string[];
 }
 
 const sleep = (milliseconds: number): Promise<void> =>
@@ -84,12 +88,12 @@ const launchChromium = async (): Promise<Browser> => {
   );
 };
 
-const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath }) => {
+const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath, scale }) => {
   const browser = await launchChromium();
   try {
     const context = await browser.newContext({
       viewport: DEFAULT_VIEWPORT,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: scale && scale > 0 ? scale : 1,
     });
     const page = await context.newPage();
     const url = pathToFileURL(indexHtmlPath).href;
@@ -134,6 +138,9 @@ export const renderPage = async (
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const converter = options.dependencies?.convert ?? office2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
+  const warnings = [
+    'RENDER_FIDELITY: community render uses office2html; chart series custom colors and some advanced charts may not match PowerPoint. Verify chart XML or open in PowerPoint when color accuracy matters.',
+  ];
 
   if (!options.dependencies?.convert) await ensureOffice2HtmlExecutable();
 
@@ -158,8 +165,12 @@ export const renderPage = async (
     }
 
     await mkdir(dirname(output), { recursive: true });
-    await screenshot({ indexHtmlPath, outputPath: output });
-    return { page, output };
+    await screenshot({
+      indexHtmlPath,
+      outputPath: output,
+      ...(options.scale !== undefined ? { scale: options.scale } : {}),
+    });
+    return { page, output, warnings };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
   }

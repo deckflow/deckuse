@@ -10,7 +10,12 @@ describe('executor', () => {
   it('validates input before dispatch', async () => {
     const result = await new Executor(new AdapterRegistry()).execute({ type: 'validate' });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('INVALID_COMMAND');
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_COMMAND');
+      expect(result.error.message).toMatch(/schema validation/i);
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.diagnostics[0]?.path?.length).toBeGreaterThan(0);
+    }
   });
   it('binds initialized workspaces to adapters', async () => {
     const execute = vi.fn(async () => ok({ valid: true }));

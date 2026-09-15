@@ -294,22 +294,22 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 
 - Persistent workspaces, revision-conflict detection, dry runs, atomic batches, and an operation log.
 - `inspect`, `list`, `get`, `search`, and back-compat `query` / `getText`; stable references include slide ID, part URI, cNvPr ID, and ancestor path when available.
-- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs. CLI `--value` unescapes `\n`/`\t` unless `--text-raw`; use `--blocks` / protocol `blocks` for multi-style KPI paragraphs.
-- Geometry accepts **EMU numbers or unit strings** (`px` @ 96 DPI, `pt`, `cm`, `mm`, `in`, `%` of slide). `alignElements` / `deckuse align` distributes or aligns targets into absolute EMU writes.
+- `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs. CLI `--value` unescapes `\n`/`\t` unless `--text-raw`; use `--blocks` / protocol `blocks` (optional per-block `runs[]` for intra-paragraph styling) for multi-style KPI paragraphs. `addShape` accepts inline `blocks`, `fill`, and `stroke` in one command.
+- Geometry accepts **EMU numbers or unit strings** (`px` @ 96 DPI, `pt`, `cm`, `mm`, `in`, `%` of slide). `alignElements` / `deckuse align` distributes or aligns targets into absolute EMU writes. Same-batch forward refs by shape `name` work after `addShape` inside one `apply`.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
-- `setProperties` for common shape and text properties, including `paragraph.align`, `paragraph.level`, `bullet`, `fill` transparency, and `hyperlink`.
+- `setProperties` for common shape and text properties, including `paragraph.align` (aliases `center`/`left`/…), `paragraph.level`, `bullet`, `fill` transparency, `hyperlink`, `wrap`, `anchor`/`valign`, and `cornerRadius`.
 - Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), straight connectors (`line`/`connector`), elbow/curved connectors, arrow presets, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
 - `role` must be an OOXML placeholder type (`title`, `body`, `subTitle`, `ctrTitle`, …). Common aliases like `subtitle`→`subTitle` are normalized; non-OOXML labels (for example `card`) are rejected so PowerPoint does not prompt to repair.
-- Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `subTitle`, `ctrTitle`).
+- Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `subTitle`, `ctrTitle`). Target `slide:N/shape:X/run:K` to style a single run.
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing). Tables support `height: "auto"`, themes `minimal`/`zebra`, and `alignColumns`.
-- Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, and value format codes. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, ChartEx) are preserve-only in the community edition.
+- Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, series colors, and value format codes. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, ChartEx) are preserve-only in the community edition. Community `render` may not show custom series colors faithfully — verify chart XML or PowerPoint.
 - List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
-- `monitor` for live HTML preview (`monitor start|status|stop` for a background daemon) and `render` for single-slide PNG screenshots (office2html + Playwright).
+- `monitor` for live HTML preview (`monitor start|status|stop`; use `--port 0` for an ephemeral port) and `render` for single-slide PNG screenshots (`--scale` supported; office2html + Playwright). `deckuse schema` prints command JSON Schema; `deckuse measure` estimates text box size heuristically.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
-Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
 
 ### `setProperties` example
 
