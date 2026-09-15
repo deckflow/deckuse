@@ -489,6 +489,9 @@
               "maximum": 9007199254740991
             }
           ]
+        },
+        "fromPackage": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1627,6 +1630,14 @@
         "left-arrow",
         "up-arrow",
         "down-arrow",
+        "chevron",
+        "pentagon",
+        "trapezoid",
+        "triangle",
+        "rt-triangle",
+        "circular-arrow",
+        "curved-right-arrow",
+        "curved-left-arrow",
         "image",
         "group",
         "table",
@@ -2038,6 +2049,52 @@
           "$ref": "#/$defs/__schema37"
         },
         {
+          "type": "object",
+          "properties": {
+            "version": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "requestId": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "workspaceId": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "transactionId": {
+              "$ref": "#/$defs/__schema10"
+            },
+            "dryRun": {
+              "$ref": "#/$defs/__schema11"
+            },
+            "expectRevision": {
+              "$ref": "#/$defs/__schema12"
+            },
+            "reason": {
+              "$ref": "#/$defs/__schema13"
+            },
+            "type": {
+              "$ref": "#/$defs/__schema73"
+            },
+            "target": {
+              "$ref": "#/$defs/__schema74"
+            },
+            "height": {
+              "$ref": "#/$defs/__schema75"
+            },
+            "redistribute": {
+              "$ref": "#/$defs/__schema76"
+            }
+          },
+          "required": [
+            "version",
+            "workspaceId",
+            "transactionId",
+            "type",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
           "$ref": "#/$defs/__schema38"
         },
         {
@@ -2061,6 +2118,32 @@
         {
           "$ref": "#/$defs/__schema70"
         }
+      ]
+    },
+    "__schema73": {
+      "type": "string",
+      "const": "setTableLayout"
+    },
+    "__schema74": {
+      "type": "string",
+      "minLength": 1
+    },
+    "__schema75": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "$ref": "#/$defs/__schema33"
+        }
+      ]
+    },
+    "__schema76": {
+      "type": "string",
+      "enum": [
+        "equal",
+        "content"
       ]
     }
   }

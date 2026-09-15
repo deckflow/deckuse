@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeAlignUpdates, type ShapeBBox } from '../src/align.js';
 import { classifyChartDocument } from '../src/chart-classify.js';
 import { buildChartXml } from '../src/chart.js';
-import { estimateTableHeightEmu } from '../src/elements.js';
+import { estimateTableHeightEmu, measureTableLayout } from '../src/elements.js';
 import { parseXml } from '@deckflow/deckuse-opc';
 
 const box = (x: number, y: number, width: number, height: number): ShapeBBox =>
@@ -25,6 +25,23 @@ describe('align helpers', () => {
 describe('table height heuristic', () => {
   it('scales with row count', () => {
     expect(estimateTableHeightEmu(13)).toBeGreaterThan(estimateTableHeightEmu(2));
+  });
+
+  it('grows when cells wrap within narrow width', () => {
+    const long =
+      '很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的中文指标名称需要折行';
+    const narrow = measureTableLayout({
+      rows: [['季度', long]],
+      widthEmu: 914_400,
+      fontPt: 11,
+    });
+    const wide = measureTableLayout({
+      rows: [['季度', long]],
+      widthEmu: 914_400 * 12,
+      fontPt: 11,
+    });
+    expect(narrow.totalHeightEmu).toBeGreaterThan(wide.totalHeightEmu);
+    expect(narrow.rowHeightsEmu[0]).toBeGreaterThan(wide.rowHeightsEmu[0]!);
   });
 });
 

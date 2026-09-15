@@ -219,6 +219,60 @@ const appendRun = (doc: Document, paragraph: Element, style: TextRunStyle): void
   paragraph.appendChild(run);
 };
 
+const splitLines = (text: string): string[] =>
+  text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+/**
+ * Expand blocks so no `a:t` contains raw newlines: `\n` becomes additional paragraphs
+ * (same semantics as `setNodeText`).
+ */
+export const normalizeTextBlocksNewlines = (
+  blocks: readonly TextBlockStyle[],
+): TextBlockStyle[] => {
+  const out: TextBlockStyle[] = [];
+  for (const block of blocks) {
+    const blockStyle = {
+      ...(block.fontSize !== undefined ? { fontSize: block.fontSize } : {}),
+      ...(block.fontFamily !== undefined ? { fontFamily: block.fontFamily } : {}),
+      ...(block.textColor !== undefined ? { textColor: block.textColor } : {}),
+      ...(block.bold !== undefined ? { bold: block.bold } : {}),
+      ...(block.italic !== undefined ? { italic: block.italic } : {}),
+      ...(block.underline !== undefined ? { underline: block.underline } : {}),
+      ...(block.align !== undefined ? { align: block.align } : {}),
+    };
+    if (block.runs && block.runs.length > 0) {
+      let currentRuns: TextRunStyle[] = [];
+      const flush = (): void => {
+        out.push({
+          ...blockStyle,
+          runs: currentRuns.length > 0 ? currentRuns : [{ text: '' }],
+        });
+        currentRuns = [];
+      };
+      for (const run of block.runs) {
+        const lines = splitLines(run.text);
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0) flush();
+          currentRuns.push({
+            ...run,
+            text: lines[i]!,
+          });
+        }
+      }
+      flush();
+      continue;
+    }
+    const lines = splitLines(block.text ?? '');
+    for (const line of lines) {
+      out.push({
+        ...blockStyle,
+        text: line,
+      });
+    }
+  }
+  return out;
+};
+
 /** Write styled paragraph blocks (one `a:p` per block) into a shape/notes txBody. */
 export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[]): void => {
   const doc = node.ownerDocument;
@@ -234,7 +288,8 @@ export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[])
   }
   for (const child of [...children(container)])
     if (child.localName === 'p') container.removeChild(child);
-  for (const block of blocks) {
+  const normalized = normalizeTextBlocksNewlines(blocks);
+  for (const block of normalized) {
     const paragraph = doc.createElementNS(NS.a, 'a:p');
     const align = normalizeAlign(block.align);
     if (align) {

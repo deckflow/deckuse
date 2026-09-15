@@ -310,6 +310,28 @@ const xfrmSetCommandSchema = z
   })
   .strict();
 
+const setTableLayoutCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('setTableLayout'),
+    target: targetPathSchema,
+    /** Frame height: `"auto"` uses content heuristics, or an absolute length. */
+    height: z.union([z.literal('auto'), lengthValueSchema]).optional(),
+    /** `content` = measure cells; `equal` = split frame height evenly across rows. */
+    redistribute: z.enum(['equal', 'content']).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.height === undefined && value.redistribute === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'setTableLayout requires height and/or redistribute',
+        path: ['height'],
+      });
+    }
+  });
+
 const zMoveCommandSchema = z
   .object({
     ...commandBase,
@@ -409,6 +431,14 @@ const addShapeCommandSchema = z
       'left-arrow',
       'up-arrow',
       'down-arrow',
+      'chevron',
+      'pentagon',
+      'trapezoid',
+      'triangle',
+      'rt-triangle',
+      'circular-arrow',
+      'curved-right-arrow',
+      'curved-left-arrow',
       'image',
       'group',
       'table',
@@ -572,6 +602,8 @@ const exportCommandSchema = z
     workspaceId: z.string().min(1),
     output: z.string().min(1),
     revision: z.union([z.string().min(1), z.number().int().positive()]).optional(),
+    /** When true, copy existing package.pptx without rebuilding from source/. */
+    fromPackage: z.boolean().optional(),
   })
   .strict();
 
@@ -616,6 +648,7 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   setPropertiesCommandSchema,
   setCommandSchema,
   xfrmSetCommandSchema,
+  setTableLayoutCommandSchema,
   zMoveCommandSchema,
   alignElementsCommandSchema,
   addCommandSchema,

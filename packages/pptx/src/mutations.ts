@@ -13,7 +13,7 @@ import type { Document, Element } from '@xmldom/xmldom';
 import { resolveTarget, resolveToRef, cNvPrIdOf, type ParsedTarget } from './addressing.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { assertWritable } from './edition.js';
-import { addElement, duplicateElement, updateChart } from './elements.js';
+import { addElement, duplicateElement, normalizeTableRows, updateChart } from './elements.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
@@ -22,7 +22,11 @@ import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, ensureNotes, removeSlide } from './slides.js';
 import { lengthContextFor } from './slide-size.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
-import { applyTableCellProperties, applyTableProperties } from './table.js';
+import { applyTableCellProperties, applyTableLayout, applyTableProperties } from './table.js';
+import {
+  measureTableLayout,
+  tableHeightMayClipDiagnostic,
+} from './table-measure.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import {
   REL,
@@ -513,7 +517,7 @@ const resolveCommandRef = (
       diagnostics: [],
     };
   }
-  if (command.type === 'zMove' || command.type === 'set') {
+  if (command.type === 'zMove' || command.type === 'set' || command.type === 'setTableLayout') {
     const resolved = resolveTarget(index, command.target);
     if (!resolved.ok) return resolved;
     return {
@@ -643,6 +647,22 @@ const shapeTypeToElement = (
       return { ...base, kind: 'shape', type: 'shape', preset: 'upArrow', txBox: false };
     case 'down-arrow':
       return { ...base, kind: 'shape', type: 'shape', preset: 'downArrow', txBox: false };
+    case 'chevron':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'chevron', txBox: false };
+    case 'pentagon':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'homePlate', txBox: false };
+    case 'trapezoid':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'trapezoid', txBox: false };
+    case 'triangle':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'triangle', txBox: false };
+    case 'rt-triangle':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'rtTriangle', txBox: false };
+    case 'circular-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'circularArrow', txBox: false };
+    case 'curved-right-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'curvedRightArrow', txBox: false };
+    case 'curved-left-arrow':
+      return { ...base, kind: 'shape', type: 'shape', preset: 'curvedLeftArrow', txBox: false };
     case 'image':
       return {
         ...base,
@@ -839,6 +859,32 @@ export async function mutate(
     });
     const created = await addElement(archive, slide.partUri, doc, parent, element);
     const diagnostics: Diagnostic[] = [];
+    if (command.shapeType === 'table' && command.rows) {
+      const rows = normalizeTableRows(command.rows);
+      const cols = Math.max(1, ...rows.map((r) => r.length));
+      const widthEmu =
+        typeof geom['width'] === 'number'
+          ? geom['width']
+          : parseLength(String(geom['width'] ?? 914400 * cols), {
+              ...lengthContextFor(archive, 'x'),
+              axis: 'x',
+            });
+      const layout = measureTableLayout({ rows, widthEmu, fontPt: 11 });
+      if (
+        command.height !== undefined &&
+        command.height !== 'auto' &&
+        typeof geom['height'] === 'number' &&
+        geom['height'] < layout.totalHeightEmu
+      ) {
+        diagnostics.push(
+          tableHeightMayClipDiagnostic({
+            estimatedEmu: layout.totalHeightEmu,
+            givenEmu: geom['height'],
+            target: `slide:${command.slide}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
+          }),
+        );
+      }
+    }
     if (command.chartType === 'combo') {
       diagnostics.push({
         severity: 'warning',
@@ -1053,6 +1099,35 @@ export async function mutate(
       },
       { archive, partUri: liveItem.partUri },
     );
+  } else if (command.type === 'setTableLayout') {
+    if (liveItem.kind !== 'table')
+      return err('INVALID_COMMAND', 'setTableLayout requires a table target', [], {
+        target: command.target,
+      });
+    const heightOpt =
+      command.height === undefined
+        ? undefined
+        : command.height === 'auto'
+          ? ('auto' as const)
+          : resolveLengthField(archive, command.height as LengthInput, 'y');
+    const laid = applyTableLayout(shapeNode, {
+      ...(heightOpt !== undefined ? { height: heightOpt } : {}),
+      ...(command.redistribute !== undefined ? { redistribute: command.redistribute } : {}),
+    });
+    if (!laid.ok) return laid;
+    if (
+      laid.value.estimatedEmu !== undefined &&
+      typeof heightOpt === 'number' &&
+      heightOpt < laid.value.estimatedEmu
+    ) {
+      diagnostics.push(
+        tableHeightMayClipDiagnostic({
+          estimatedEmu: laid.value.estimatedEmu,
+          givenEmu: heightOpt,
+          target: command.target,
+        }),
+      );
+    }
   } else if (command.type === 'set' || command.type === 'setProperties') {
     if (command.type === 'set' && command.scope && command.scope !== 'local')
       return err(

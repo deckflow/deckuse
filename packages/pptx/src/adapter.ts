@@ -20,10 +20,12 @@ import { resolveProperties } from './resolve-properties.js';
 import { syncAppSlideCounts } from './slides.js';
 import {
   initializeWorkspace,
+  isPackageStale,
   packagePath,
   persistWrite,
   readHistory,
   readManifest,
+  repackWorkspace,
   revision,
   sourceDir,
   undoWrites,
@@ -39,6 +41,7 @@ const WRITE_TYPES = new Set([
   'setProperties',
   'set',
   'xfrmSet',
+  'setTableLayout',
   'zMove',
   'alignElements',
   'add',
@@ -162,6 +165,16 @@ export const pptxCapabilities = {
     elbowConnector: true,
     curvedConnector: true,
     arrows: ['rightArrow', 'leftArrow', 'upArrow', 'downArrow'],
+    flow: [
+      'chevron',
+      'homePlate',
+      'trapezoid',
+      'triangle',
+      'rtTriangle',
+      'circularArrow',
+      'curvedRightArrow',
+      'curvedLeftArrow',
+    ],
   },
   history: { undo: true },
   addressing: { targetPath: true, uid: true, placeholder: true, notes: true, runFocus: true },
@@ -364,6 +377,23 @@ const transactionOpsToAtomic = (
         'rounded-rect',
         'ellipse',
         'line',
+        'connector',
+        'elbow',
+        'elbow-connector',
+        'curved-connector',
+        'arrow',
+        'right-arrow',
+        'left-arrow',
+        'up-arrow',
+        'down-arrow',
+        'chevron',
+        'pentagon',
+        'trapezoid',
+        'triangle',
+        'rt-triangle',
+        'circular-arrow',
+        'curved-right-arrow',
+        'curved-left-arrow',
         'image',
         'group',
         'table',
@@ -377,18 +407,7 @@ const transactionOpsToAtomic = (
         ...base,
         type: 'addShape',
         slide: Number(op['slide']),
-        shapeType: shapeType as
-          | 'text'
-          | 'rect'
-          | 'rounded-rect'
-          | 'ellipse'
-          | 'line'
-          | 'image'
-          | 'group'
-          | 'table'
-          | 'chart'
-          | 'video'
-          | 'audio',
+        shapeType: shapeType as Extract<AtomicCommand, { type: 'addShape' }>['shapeType'],
         ...(typeof op['name'] === 'string' ? { name: op['name'] } : {}),
         ...(typeof op['role'] === 'string' ? { role: op['role'] } : {}),
         ...(typeof op['x'] === 'number' ? { x: op['x'] } : {}),
@@ -399,7 +418,7 @@ const transactionOpsToAtomic = (
         ...(typeof op['text'] === 'string' ? { text: op['text'] } : {}),
         ...(Array.isArray(op['rows']) ? { rows: op['rows'] as string[][] } : {}),
         ...(typeof op['chartType'] === 'string'
-          ? { chartType: op['chartType'] as 'bar' | 'column' | 'line' | 'pie' }
+          ? { chartType: op['chartType'] as 'bar' | 'column' | 'line' | 'pie' | 'combo' }
           : {}),
         ...(op['data'] !== undefined && typeof op['data'] === 'object' && op['data'] !== null
           ? {
@@ -549,6 +568,7 @@ export const pptxAdapter: FormatAdapter = {
           adapterVersion: manifest.adapterVersion,
           source: manifest.source,
           package: packagePath(workspace),
+          packageStale: await isPackageStale(workspace, manifest),
           elementCount: index.elements.length,
           capabilities: pptxCapabilities,
           ...editionMetadata,
@@ -695,10 +715,20 @@ export const pptxAdapter: FormatAdapter = {
             { hint: 'Omit --revision to export the current workspace package.' },
           );
         const output = resolve(command.output);
+        const fromPackage = command.fromPackage === true;
+        let repacked = false;
+        let exportRevision = manifest.revision;
+        if (!fromPackage) {
+          const packed = await repackWorkspace(workspace);
+          exportRevision = packed.manifest.revision;
+          repacked = true;
+        }
         await copyFile(packagePath(workspace), output);
         return ok({
           output,
-          revision: manifest.revision,
+          revision: exportRevision,
+          repacked,
+          fromPackage,
         });
       }
 

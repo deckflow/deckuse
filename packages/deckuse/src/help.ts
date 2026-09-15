@@ -37,7 +37,7 @@ Commands:
   validate      Validate package / relationships
   history       Show write history
   undo          Undo recent write revisions
-  export        Pack workspace to .pptx
+  export        Pack source/ to .pptx (default; --from-package copies snapshot)
   monitor       Live HTML preview server (foreground or start/status/stop)
   render        Screenshot one slide to PNG (for visual review)
   query         Back-compat selector query (prefer search / list)
@@ -263,6 +263,8 @@ Run 'deckuse add <slide|shape> --help' for details.`,
   --slide <n>               One-based slide index
   --type <kind>             text | rect | rounded-rect | ellipse | line | connector |
                             elbow | curved-connector | arrow | left-arrow | up-arrow | down-arrow |
+                            chevron | pentagon | trapezoid | triangle | rt-triangle |
+                            circular-arrow | curved-right-arrow | curved-left-arrow |
                             image | group | table | chart | video | audio
                             (line/connector = straight cxnSp; elbow/curved = bent/curved connectors)
 
@@ -281,7 +283,7 @@ Type-specific:
   --text-raw                Disable escape processing for --text
   --file <path>             Media path (required for image | video | audio)
   --rows <json>             string[][] JSON (required for table)
-  --height auto             Table only: compute height from row count × font heuristic
+  --height auto             Table only: heuristic height from cell wrap + padding (may still clip; check TABLE_HEIGHT_MAY_CLIP / render)
   --theme <name>            Table theme: minimal | zebra
   --align-columns <list>    Table column aligns (JSON array or comma list: l,ctr,r)
   --chart-type <kind>       bar | column | line | pie | combo (required for chart; prefer bar/column/line/pie for community render)
@@ -617,15 +619,19 @@ Options:
 
   export: {
     usage: 'deckuse export <output.pptx> [options]',
-    summary: 'Pack the workspace (or a historical revision) into a .pptx file.',
+    summary: 'Pack workspace source/ to .pptx (default) or copy package.pptx.',
     example: 'deckuse export ./out.pptx --workspace ./workspace --json',
     details: `Arguments:
   <output.pptx>             Destination path
 
 Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Export a historical revision
-  --json                    Machine-readable envelope`,
+  --from-package            Copy existing package.pptx without rebuilding from source/
+  --revision <rev>          Export a historical revision (not available in Phase 1a)
+  --json                    Machine-readable envelope
+
+Notes:
+  Default export rebuilds package.pptx from source/ so hand-edits are included.`,
   },
 
   monitor: {

@@ -61,6 +61,7 @@ deckuse validate --workspace ./workspace --json
 deckuse history --workspace ./workspace --json
 deckuse undo --workspace ./workspace --steps 1 --json
 deckuse export ./out.pptx --workspace ./workspace --json
+# Default export rebuilds package.pptx from source/ (use --from-package to copy the snapshot only).
 
 # Live HTML preview; conversion starts when a browser subscribes.
 deckuse monitor --workspace ./workspace --port 4173

@@ -5,6 +5,11 @@ import {
   shapePropertyKeys,
   type ShapePropertyContext,
 } from './properties.js';
+import {
+  estimateTableHeightEmu,
+  estimateTableRowHeightEmu,
+  measureTableLayout,
+} from './table-measure.js';
 import { NS, attr, children, descendants, first, setNodeText } from './xml.js';
 
 const DEFAULT_ROW_H = '370840';
@@ -460,4 +465,86 @@ export function applyTableCellProperties(
     );
   }
   return ok({ applied });
+}
+
+const cellPlainText = (tc: Element): string =>
+  descendants(tc, 't')
+    .map((t) => t.textContent ?? '')
+    .join('');
+
+/** Read table grid width (sum of gridCol) or fall back to graphicFrame cx. */
+const tableWidthEmu = (graphicFrame: Element): number => {
+  const gridCols = descendants(graphicFrame, 'gridCol');
+  if (gridCols.length > 0) {
+    const sum = gridCols.reduce((acc, col) => acc + Number(attr(col, 'w') ?? 0), 0);
+    if (sum > 0) return sum;
+  }
+  const xfrm = first(graphicFrame, 'xfrm');
+  const ext = xfrm ? first(xfrm, 'ext') : undefined;
+  return Number(attr(ext, 'cx') ?? 914400);
+};
+
+export function applyTableLayout(
+  graphicFrame: Element,
+  options: {
+    height?: 'auto' | number;
+    redistribute?: 'equal' | 'content';
+  },
+): Result<{ applied: string[]; totalHeightEmu: number; estimatedEmu?: number }> {
+  if (graphicFrame.localName !== 'graphicFrame')
+    return err('INVALID_COMMAND', 'setTableLayout target must be a table graphicFrame');
+  const tbl = first(graphicFrame, 'tbl');
+  if (!tbl) return err('INVALID_COMMAND', 'Target is not a DrawingML table');
+  const rows = directChildren(tbl, 'tr');
+  if (rows.length === 0) return err('INVALID_COMMAND', 'Table has no rows');
+
+  const widthEmu = tableWidthEmu(graphicFrame);
+  const textRows = rows.map((tr) => directChildren(tr, 'tc').map((tc) => cellPlainText(tc)));
+  const redistribute =
+    options.redistribute ??
+    (options.height === 'auto' || options.height === undefined ? 'content' : 'equal');
+
+  const xfrm = first(graphicFrame, 'xfrm');
+  const ext = xfrm ? first(xfrm, 'ext') : undefined;
+  if (!ext) return err('INVALID_COMMAND', 'Table graphicFrame has no xfrm/ext');
+
+  const applied: string[] = [];
+  let totalHeightEmu: number;
+  let estimatedEmu: number | undefined;
+
+  if (redistribute === 'content' || options.height === 'auto') {
+    const layout = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
+    estimatedEmu = layout.totalHeightEmu;
+    for (let i = 0; i < rows.length; i++) {
+      const h = layout.rowHeightsEmu[i] ?? estimateTableRowHeightEmu(11);
+      rows[i]!.setAttribute('h', String(h));
+    }
+    if (typeof options.height === 'number') {
+      totalHeightEmu = options.height;
+    } else {
+      totalHeightEmu = layout.totalHeightEmu;
+    }
+    applied.push('redistribute:content');
+  } else {
+    totalHeightEmu =
+      typeof options.height === 'number'
+        ? options.height
+        : Number(attr(ext, 'cy') ?? estimateTableHeightEmu(rows.length));
+    const rowH = Math.max(1, Math.floor(totalHeightEmu / rows.length));
+    let assigned = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const h = i === rows.length - 1 ? Math.max(1, totalHeightEmu - assigned) : rowH;
+      rows[i]!.setAttribute('h', String(h));
+      assigned += h;
+    }
+    applied.push('redistribute:equal');
+  }
+
+  ext.setAttribute('cy', String(Math.round(totalHeightEmu)));
+  applied.push('height');
+  return ok({
+    applied,
+    totalHeightEmu,
+    ...(estimatedEmu !== undefined ? { estimatedEmu } : {}),
+  });
 }

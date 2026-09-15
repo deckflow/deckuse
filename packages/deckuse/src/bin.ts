@@ -501,7 +501,7 @@ try {
         const shapeType = optionFrom(clean, '--type');
         if (!slide || !shapeType)
           throw new Error(
-            'Usage: deckuse add shape --slide <n> --type <text|rect|rounded-rect|ellipse|line|image|group|table|chart|video|audio>',
+            'Usage: deckuse add shape --slide <n> --type <text|rect|rounded-rect|ellipse|line|connector|elbow|arrow|chevron|circular-arrow|image|group|table|chart|…>',
           );
         const rowsRaw = optionFrom(clean, '--rows');
         let rows: string[][] | undefined;
@@ -853,12 +853,14 @@ try {
       const output = clean[1];
       if (!output) throw new Error('Usage: deckuse export <output.pptx>');
       const workspace = await findWorkspace(workspaceOpt);
+      const fromPackage = takeFlag(clean, '--from-package');
       ok = await execute('deckuse export', {
         version: PROTOCOL_VERSION,
         type: 'export',
         workspaceId: workspace,
         output: resolve(output),
         ...(revisionOpt ? { revision: revisionOpt } : {}),
+        ...(fromPackage ? { fromPackage: true } : {}),
       });
     } else if (action === 'monitor') {
       const sub =

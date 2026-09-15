@@ -63,7 +63,8 @@ Dotted keys (`font.size`, `fill.color`, …) are normalized the same as `deckuse
 
 ## Text
 
-- `blocks` = one paragraph per entry; optional `runs[]` for intra-paragraph styling.
+- `blocks` = one paragraph per entry; optional `runs[]` for intra-paragraph styling (e.g. red first letter).
+- `\n` inside `blocks`/`runs` text becomes additional paragraphs (same as `setText`).
 - `deckuse measure --text "…" --font-size 24 --json` for heuristic box sizing.
 - Prefer `wrap: "none"` for short labels to avoid mid-word wraps.
 
@@ -71,10 +72,61 @@ Dotted keys (`font.size`, `fill.color`, …) are normalized the same as `deckuse
 
 - `line` / `connector` = straight `cxnSp`; `elbow` / `curved-connector`; `arrow` / `left-arrow` / …
 - `rounded-rect` + `cornerRadius` (0–1).
+- Flow / infographic: `chevron`, `pentagon`, `trapezoid`, `triangle`, `rt-triangle`, `circular-arrow`, `curved-right-arrow`, `curved-left-arrow`.
 
-## Tables / Charts / Align / Monitor
+### Flow strip (chevrons)
 
-Same as before. Chart series colors write to XML; **community `render` may not show them** — check `ppt/charts/*.xml`. Use `deckuse render --scale 2` when needed. Monitor: `--port 0` for ephemeral; port conflicts fail clearly.
+```json
+[
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "chevron",
+    "name": "Step1",
+    "x": "5%",
+    "y": "200px",
+    "width": "28%",
+    "height": "64px",
+    "fill": { "color": "2563EB" },
+    "blocks": [{ "text": "Collect", "fontSize": 16, "textColor": "FFFFFF", "align": "center" }]
+  }
+]
+```
+
+### Closed loop
+
+Prefer `circular-arrow` / `curved-*-arrow` over raster connectors. Last resort only: `shapeType: "image"` for artwork that cannot be a preset — do not default to Pillow/SVG for arrows.
+
+## Tables
+
+- `height: "auto"` uses wrap + padding heuristics; complex cells may still clip — always `render`, watch `TABLE_HEIGHT_MAY_CLIP`.
+- After `xfrmSet` changes only the frame: use `setTableLayout` with `height: "auto"` or `redistribute: "content"|"equal"` to reflow row heights (do not loop `xfrm --height`).
+
+```json
+{
+  "type": "addShape",
+  "slide": 1,
+  "shapeType": "table",
+  "name": "FinTable",
+  "x": "5%",
+  "y": "120px",
+  "width": "90%",
+  "height": "auto",
+  "theme": "zebra",
+  "alignColumns": ["left", "right", "right"],
+  "rows": [
+    ["指标", "Q3", "Q4"],
+    ["营收", "120", "135"],
+    ["全年合计", "480", "510"]
+  ]
+}
+```
+
+## Charts / Align / Monitor / Export
+
+Chart series colors write to XML; **community `render` may not show them** — check `ppt/charts/*.xml`. Use `deckuse render --scale 2` when needed. Monitor: `--port 0` for ephemeral.
+
+`export` rebuilds from `source/` by default (`--from-package` copies the snapshot). `status.packageStale` is true after hand-edits to `source/` until repack/export.
 
 ## Loop
 

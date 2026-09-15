@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -307,5 +307,213 @@ describe('agent batch UX', () => {
     expect(xml).toContain('prst="rightArrow"');
     expect(xml).toContain('prst="bentConnector3"');
     expect(xml).toContain('headEnd');
+  });
+
+  it('addShape chevron and circular-arrow presets', async () => {
+    const { workspace, revision } = await initWs();
+    const result = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'batch',
+        workspaceId: workspace,
+        transactionId: revision,
+        atomic: true,
+        commands: [
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'chevron',
+            name: 'Ch1',
+            x: 100,
+            y: 100,
+            width: 300000,
+            height: 100000,
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
+            shapeType: 'circular-arrow',
+            name: 'Loop1',
+            x: 100,
+            y: 300000,
+            width: 200000,
+            height: 200000,
+          },
+        ],
+      },
+      {},
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const xml = await readFile(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'), 'utf8');
+    expect(xml).toContain('prst="chevron"');
+    expect(xml).toContain('prst="circularArrow"');
+  });
+
+  it('blocks runs with newlines become multiple paragraphs', async () => {
+    const { workspace, revision } = await initWs();
+    const result = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: revision,
+        slide: 1,
+        shapeType: 'text',
+        name: 'MultiLine',
+        x: 100,
+        y: 100,
+        width: 900000,
+        height: 300000,
+        blocks: [{ runs: [{ text: 'LineA\nLineB', fontSize: 14 }] }],
+      },
+      {},
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const xml = await readFile(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'), 'utf8');
+    expect(xml).toContain('<a:t>LineA</a:t>');
+    expect(xml).toContain('<a:t>LineB</a:t>');
+    expect(xml).not.toMatch(/<a:t>[^<]*\n[^<]*<\/a:t>/);
+  });
+
+  it('table fixed short height emits TABLE_HEIGHT_MAY_CLIP', async () => {
+    const { workspace, revision } = await initWs();
+    const result = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: revision,
+        slide: 1,
+        shapeType: 'table',
+        name: 'ClipTable',
+        x: '5%',
+        y: '100px',
+        width: '90%',
+        height: 50_000,
+        rows: [
+          ['指标', '很长很长很长很长很长很长的中文内容需要折行显示'],
+          ['Q1', '100'],
+          ['全年合计', '999'],
+        ],
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.diagnostics.some((d) => d.code === 'TABLE_HEIGHT_MAY_CLIP')).toBe(true);
+  });
+
+  it('export repacks from source; fromPackage skips; packageStale flips', async () => {
+    const { workspace } = await initWs();
+    const slidePath = join(workspace, 'source', 'ppt', 'slides', 'slide1.xml');
+    const original = await readFile(slidePath, 'utf8');
+    await writeFile(slidePath, original.replace('</p:sld>', '<!--hand-edit--></p:sld>'));
+
+    const statusDirty = await pptxAdapter.execute(
+      { version: '2.0', type: 'status', workspaceId: workspace },
+      {},
+    );
+    expect(statusDirty.ok).toBe(true);
+    if (statusDirty.ok)
+      expect((statusDirty.value as { packageStale?: boolean }).packageStale).toBe(true);
+
+    const outDefault = join(workspace, '..', 'out-repack.pptx');
+    const exported = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'export',
+        workspaceId: workspace,
+        output: outDefault,
+      },
+      {},
+    );
+    expect(exported, JSON.stringify(exported)).toMatchObject({
+      ok: true,
+      value: { repacked: true, fromPackage: false },
+    });
+    const packed = await OpcArchive.openFile(outDefault);
+    expect(new TextDecoder().decode(packed.getPart('/ppt/slides/slide1.xml')!.data)).toContain(
+      'hand-edit',
+    );
+
+    const statusClean = await pptxAdapter.execute(
+      { version: '2.0', type: 'status', workspaceId: workspace },
+      {},
+    );
+    expect(statusClean.ok).toBe(true);
+    if (statusClean.ok)
+      expect((statusClean.value as { packageStale?: boolean }).packageStale).toBe(false);
+
+    await writeFile(slidePath, original.replace('</p:sld>', '<!--again--></p:sld>'));
+    const outSnap = join(workspace, '..', 'out-snap.pptx');
+    const snap = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'export',
+        workspaceId: workspace,
+        output: outSnap,
+        fromPackage: true,
+      },
+      {},
+    );
+    expect(snap).toMatchObject({ ok: true, value: { repacked: false, fromPackage: true } });
+    const snapArc = await OpcArchive.openFile(outSnap);
+    expect(new TextDecoder().decode(snapArc.getPart('/ppt/slides/slide1.xml')!.data)).not.toContain(
+      'again',
+    );
+  });
+
+  it('setTableLayout content redistribution updates row heights', async () => {
+    const { workspace, revision } = await initWs();
+    const created = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: revision,
+        slide: 1,
+        shapeType: 'table',
+        name: 'LayoutTable',
+        x: '5%',
+        y: '100px',
+        width: '90%',
+        height: 'auto',
+        rows: [
+          ['A', 'B'],
+          ['很长很长很长很长很长的内容', '2'],
+        ],
+      },
+      {},
+    );
+    expect(created.ok).toBe(true);
+    const rev2 = (
+      (
+        await pptxAdapter.execute(
+          { version: '2.0', type: 'status', workspaceId: workspace },
+          {},
+        )
+      ).value as { revision: string }
+    ).revision;
+    const laid = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setTableLayout',
+        workspaceId: workspace,
+        transactionId: rev2,
+        target: 'slide:1/shape:LayoutTable',
+        height: 'auto',
+        redistribute: 'content',
+      },
+      {},
+    );
+    expect(laid, JSON.stringify(laid)).toMatchObject({ ok: true });
+    const xml = await readFile(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'), 'utf8');
+    expect(xml).toMatch(/<a:tr h="\d+"/);
   });
 });

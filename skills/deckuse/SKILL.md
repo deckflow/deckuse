@@ -62,6 +62,8 @@ deckuse render --page 1 --workspace ./workspace --output ./slide-1.png --json
 deckuse export ./output.pptx --workspace ./workspace --json
 ```
 
+Default **`export` rebuilds from `source/`** (includes hand-edits). Use `--from-package` only to copy the existing snapshot. `status.packageStale` flags dirty `source/`.
+
 ### `setProperties` keys
 
 Canonical: `fontSize`, `bold`, `textColor`, `fill`, `stroke`, `paragraph.align` (accepts `center`/`ctr`), `wrap` (`none`|`square`), `anchor`/`valign` (`t`|`ctr`|`b`), `cornerRadius` (0–1 on roundRect).
@@ -93,7 +95,7 @@ Canonical: `fontSize`, `bold`, `textColor`, `fill`, `stroke`, `paragraph.align` 
 ]
 ```
 
-Intra-paragraph color (e.g. red first letter):
+Intra-paragraph color (e.g. red first letter) — **`runs` is supported**:
 
 ```json
 {
@@ -118,15 +120,69 @@ Intra-paragraph color (e.g. red first letter):
 }
 ```
 
-### B. Tables / C. Charts / D. Align / E. replaceText
+### B. Financial table
 
-Unchanged patterns from prior skill: `height: "auto"` tables, prefer `column|bar|line|pie` for render, `deckuse align …`, `replaceText`.
+`height: "auto"` is a **heuristic** (wrap + padding); still `render` and watch `TABLE_HEIGHT_MAY_CLIP`. If the frame was resized with `xfrmSet` only, follow with `setTableLayout` (`height: "auto"` or `redistribute: "content"|"equal"`) — do not keep bumping `xfrm --height`.
 
-Shape vocabulary: `line`/`connector` = straight connector; `elbow` / `curved-connector`; `arrow` / `left-arrow` / …; `rounded-rect` + `cornerRadius` (0–1).
+```json
+{
+  "type": "addShape",
+  "slide": 1,
+  "shapeType": "table",
+  "name": "FinTable",
+  "x": "5%",
+  "y": "120px",
+  "width": "90%",
+  "height": "auto",
+  "theme": "zebra",
+  "alignColumns": ["left", "right", "right"],
+  "rows": [
+    ["指标", "Q3", "Q4"],
+    ["营收", "120", "135"],
+    ["全年合计", "480", "510"]
+  ]
+}
+```
 
-### Charts
+### C. Flow / loop (native presets — no Pillow)
 
-Series `color` is written into chart XML. **Community `render` may still show theme defaults** — verify XML or PowerPoint.
+Shape vocabulary: `line`/`connector`; `elbow` / `curved-connector`; `arrow` / `left-arrow` / …; `rounded-rect` + `cornerRadius`; **`chevron`**, **`pentagon`**, **`trapezoid`**, **`triangle`**, **`circular-arrow`**, **`curved-right-arrow`**, **`curved-left-arrow`**.
+
+```json
+[
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "chevron",
+    "name": "StepCollect",
+    "x": "5%",
+    "y": "200px",
+    "width": "28%",
+    "height": "64px",
+    "fill": { "color": "2563EB" },
+    "blocks": [{ "text": "Collect", "fontSize": 16, "textColor": "FFFFFF", "align": "center" }]
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "circular-arrow",
+    "name": "Loop",
+    "x": "40%",
+    "y": "320px",
+    "width": "120px",
+    "height": "120px",
+    "fill": { "color": "F59E0B" }
+  }
+]
+```
+
+### D. Charts / Align / replaceText
+
+Prefer `column|bar|line|pie` for render. Series `color` is written into chart XML. **Community `render` may still show theme defaults** — verify XML or PowerPoint.
+
+### E. Capability fallback (last resort)
+
+Only when no preset fits: `shapeType: "image"`. Do **not** default to Pillow/SVG for connectors or arrows.
 
 ---
 
@@ -139,7 +195,7 @@ deckuse undo --workspace ./workspace --steps 1 --json
 - Always use `--json` for agents. On `INVALID_COMMAND`, read **`error.message`** (includes first field path) and **`error.diagnostics[]`** (`path` + `message`).
 - `TARGET_NOT_FOUND`: list shapes; for dry-run, ensure the name was added in the **same** apply batch.
 - `UNSUPPORTED_CAPABILITY`: community master/layout/theme gate.
-- `COMBO_CHART_RENDER_LIMITED` / `RENDER_FIDELITY`: visual preview limits, not write failures.
+- `COMBO_CHART_RENDER_LIMITED` / `RENDER_FIDELITY` / `TABLE_HEIGHT_MAY_CLIP`: warnings, not write failures.
 - Schema discovery: `deckuse schema --type addShape --json`.
 
 ---
@@ -152,4 +208,5 @@ deckuse undo --workspace ./workspace --steps 1 --json
 - [ ] Prefer `column`/`bar`/`line`/`pie` when using `render`?
 - [ ] Checked `error.diagnostics` on failure (not only top-level message)?
 - [ ] Validated + rendered key slides; chart colors verified in XML if needed?
-- [ ] Exported final PPTX?
+- [ ] Table auto-height rendered; used `setTableLayout` after frame-only resize if needed?
+- [ ] Exported final PPTX (default rebuilds from `source/`)?

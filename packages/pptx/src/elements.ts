@@ -1,6 +1,6 @@
 import { OpcArchive, parseXml } from '@deckflow/deckuse-opc';
 import type { Document, Element } from '@xmldom/xmldom';
-import { EMU_PER_PT, parseLength, type LengthInput } from '@deckflow/deckuse-core';
+import { parseLength, type LengthInput } from '@deckflow/deckuse-core';
 import {
   applyChartProperties,
   chartGraphicFrameXml,
@@ -12,6 +12,10 @@ import { addPicturePart } from './picture.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
 import { lengthContextFor } from './slide-size.js';
 import {
+  estimateTableRowHeightEmu,
+  measureTableLayout,
+} from './table-measure.js';
+import {
   NS,
   REL,
   allocateShapeIds,
@@ -19,6 +23,12 @@ import {
   descendants,
   nextShapeId,
 } from './xml.js';
+
+export {
+  estimateTableHeightEmu,
+  estimateTableRowHeightEmu,
+  measureTableLayout,
+} from './table-measure.js';
 const esc = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 const value = (obj: Record<string, unknown>, key: string, fallback: string): string =>
@@ -90,13 +100,6 @@ const groupXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
   return `<p:grpSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGrpSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Group ${String(id)}`))}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="${String(resolveEmu(e['x'], 0, 'x', archive))}" y="${String(resolveEmu(e['y'], 0, 'y', archive))}"/><a:ext cx="${String(w)}" cy="${String(h)}"/><a:chOff x="0" y="0"/><a:chExt cx="${String(w)}" cy="${String(h)}"/></a:xfrm></p:grpSpPr></p:grpSp>`;
 };
 
-/** Heuristic row height: ~1.65× body font (default 11pt). */
-export const estimateTableRowHeightEmu = (fontPt = 11): number =>
-  Math.round(fontPt * EMU_PER_PT * 1.65);
-
-export const estimateTableHeightEmu = (rowCount: number, fontPt = 11): number =>
-  Math.max(1, rowCount) * estimateTableRowHeightEmu(fontPt);
-
 const normalizeColAlign = (align: string | undefined): string => {
   if (!align) return 'ctr';
   const map: Record<string, string> = {
@@ -110,17 +113,25 @@ const normalizeColAlign = (align: string | undefined): string => {
   return map[align] ?? 'ctr';
 };
 
+/** Normalize addShape rows to string[][]. */
+export const normalizeTableRows = (raw: unknown): string[][] => {
+  if (!Array.isArray(raw) || raw.length === 0) return [['']];
+  return raw.map((row) =>
+    Array.isArray(row) ? row.map((cell) => (typeof cell === 'string' ? cell : '')) : [''],
+  );
+};
+
 const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
-  const rows = Array.isArray(e['rows']) ? (e['rows'] as unknown[][]) : [['']];
+  const rows = normalizeTableRows(e['rows']);
   const cols = Math.max(1, ...rows.map((r) => r.length));
   const width = resolveEmu(e['width'], 914400 * cols, 'x', archive);
-  const colW = String(Math.floor(width / cols));
-  const rowH = estimateTableRowHeightEmu(11);
+  const layout = measureTableLayout({ rows, widthEmu: width, fontPt: 11 });
+  const colW = String(layout.colWidthEmu);
   const heightRaw = e['height'];
   const height =
     heightRaw === 'auto' || heightRaw === undefined
-      ? estimateTableHeightEmu(rows.length)
-      : resolveEmu(heightRaw, estimateTableHeightEmu(rows.length), 'y', archive);
+      ? layout.totalHeightEmu
+      : resolveEmu(heightRaw, layout.totalHeightEmu, 'y', archive);
   const theme = typeof e['theme'] === 'string' ? e['theme'] : 'minimal';
   const alignColumns = Array.isArray(e['alignColumns'])
     ? (e['alignColumns'] as string[])
@@ -151,7 +162,15 @@ const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
       `<a:${side} w="6350"><a:solidFill><a:srgbClr val="D0D0D0"/></a:solidFill></a:${side}>`;
     return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"/><a:r><a:rPr lang="zh-CN" sz="1100"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:rPr><a:t>${esc(text)}</a:t></a:r></a:p></a:txBody><a:tcPr>${border('lnL')}${border('lnR')}${border('lnT')}${border('lnB')}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
   };
-  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(sized, archive)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${rows.map((row, rowIndex) => `<a:tr h="${String(rowH)}">${Array.from({ length: cols }, (_, i) => cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0, i, rowIndex)).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+  const body = rows
+    .map((row, rowIndex) => {
+      const rowH = layout.rowHeightsEmu[rowIndex] ?? estimateTableRowHeightEmu(11);
+      return `<a:tr h="${String(rowH)}">${Array.from({ length: layout.cols }, (_, i) =>
+        cellXml(typeof row[i] === 'string' ? row[i]! : '', rowIndex === 0, i, rowIndex),
+      ).join('')}</a:tr>`;
+    })
+    .join('');
+  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(sized, archive)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: layout.cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };
 async function pictureXml(
   archive: OpcArchive,

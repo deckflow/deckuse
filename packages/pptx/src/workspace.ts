@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import type { WorkspaceManifest } from '@deckflow/deckuse-core';
 import { OpcArchive, snapshotArchive, type OpcArchive as OpcArchiveType } from '@deckflow/deckuse-opc';
 import {
@@ -41,6 +41,58 @@ export const mediaHref = (workspace: string, mediaPart: string) =>
 export const readIndex = async (workspace: string): Promise<IndexFile> =>
   JSON.parse(await readFile(indexPath(workspace), 'utf8')) as IndexFile;
 
+/** Stable hash of all files under `source/` (path + bytes, sorted). */
+export async function hashSourceTree(workspace: string): Promise<string> {
+  const root = sourceDir(workspace);
+  const entries: { relative: string; data: Buffer }[] = [];
+  const walk = async (dir: string, prefix = ''): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute, relative);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      entries.push({ relative: relative.replaceAll('\\', '/'), data: await readFile(absolute) });
+    }
+  };
+  await walk(root);
+  entries.sort((a, b) => a.relative.localeCompare(b.relative));
+  const hash = createHash('sha256');
+  for (const entry of entries) {
+    hash.update(entry.relative);
+    hash.update('\0');
+    hash.update(entry.data);
+  }
+  return hash.digest('hex');
+}
+
+const withSourceContentHash = async (
+  workspace: string,
+  manifest: WorkspaceManifest,
+): Promise<WorkspaceManifest> => {
+  const sourceContentHash = await hashSourceTree(workspace);
+  return {
+    ...manifest,
+    metadata: {
+      ...(manifest.metadata ?? {}),
+      sourceContentHash,
+    },
+  };
+};
+
+export const isPackageStale = async (
+  workspace: string,
+  manifest?: WorkspaceManifest,
+): Promise<boolean> => {
+  const current = manifest ?? (await readManifest(workspace));
+  const stored = current.metadata?.['sourceContentHash'];
+  if (typeof stored !== 'string' || stored.length === 0) return false;
+  const live = await hashSourceTree(workspace);
+  return live !== stored;
+};
+
 const packPackage = async (
   workspace: string,
   archive: OpcArchiveType,
@@ -48,7 +100,7 @@ const packPackage = async (
 ): Promise<WorkspaceManifest> => {
   const path = packagePath(workspace);
   const { checksum } = await snapshotArchive(archive, path);
-  return {
+  const withFiles: WorkspaceManifest = {
     ...manifest,
     files: [
       {
@@ -58,7 +110,27 @@ const packPackage = async (
       },
     ],
   };
+  return withSourceContentHash(workspace, withFiles);
 };
+
+/** Rebuild `package.pptx` from `source/` and refresh manifest checksum + source hash. */
+export async function repackWorkspace(workspace: string): Promise<{
+  manifest: WorkspaceManifest;
+  packagePath: string;
+}> {
+  const root = resolve(workspace);
+  return withWriteLock(root, async () => {
+    const manifest = await readManifest(root);
+    const archive = await OpcArchive.openDirectory(sourceDir(root));
+    const index = await loadIndex(root, archive, manifest, { persist: true });
+    const packed = await packPackage(root, archive, {
+      ...manifest,
+      updatedAt: new Date().toISOString(),
+    });
+    await writeMetadata(root, packed, index);
+    return { manifest: packed, packagePath: packagePath(root) };
+  });
+}
 
 export async function initializeWorkspace(
   workspace: string,
@@ -130,6 +202,10 @@ export async function undoWrites(
   const manifest = await readManifest(root);
   const archive = await OpcArchive.openDirectory(sourceDir(root));
   const index = await loadIndex(root, archive, manifest, { persist: true });
-  await packPackage(root, archive, manifest);
+  const packed = await packPackage(root, archive, {
+    ...manifest,
+    updatedAt: new Date().toISOString(),
+  });
+  await writeMetadata(root, packed, index);
   return { undone: steps, revision: index.revision };
 }
