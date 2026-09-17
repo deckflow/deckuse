@@ -70,8 +70,8 @@ importers:
         specifier: workspace:*
         version: link:../xlsx
       '@deckflow/office2html':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.3.3
+        version: 0.3.3
       playwright-core:
         specifier: ^1.62.1
         version: 1.62.1
@@ -225,28 +225,28 @@ packages:
     resolution: {directory: packages/workspace, type: directory}
     engines: {node: '>=18.0.0'}
 
-  '@deckflow/office2html-darwin-arm64@0.3.0':
-    resolution: {integrity: sha512-h8QVLGE5ESwiGb7yB3PSlH3uwCISytOK40ulvYmkYS9ZxfXrflPth5jSx4LeOTbEXWr6fDFoaFJzPAeUBWDbmw==}
+  '@deckflow/office2html-darwin-arm64@0.3.3':
+    resolution: {integrity: sha512-GmqRHuqYjpNTTAzTI8jAKued2umSF3xqWJpT/K8SlMQS/9RKWkC9VHP/iHm2vLmAZG6Qu1bigUwkmWhguJnYVQ==}
     cpu: [arm64]
     os: [darwin]
 
-  '@deckflow/office2html-darwin-x64@0.3.0':
-    resolution: {integrity: sha512-7OhfSuI2VJpzsNeMGLoPG8MUXpGL4c64XV0ZlaZ5Tvpk09Ur45re+HbRpyuL0yzu0m931f70dN6ufto8PB09og==}
+  '@deckflow/office2html-darwin-x64@0.3.3':
+    resolution: {integrity: sha512-41XZ5qTzr61EXQkkG43xFolkpmexYMx3Lq8aUoGM5pS7myClXtgRORDx7qkvQCZ2CYijMHesO0O+AWpc6KEFqg==}
     cpu: [x64]
     os: [darwin]
 
-  '@deckflow/office2html-linux-x64@0.3.0':
-    resolution: {integrity: sha512-9iyQcdx8mnzoha4zw2G/94FeuQXjQoYo5MxbFN8MWaRVGNk569rLAiBUz3BwQ6AKQgt2rexnAyzUKQtSksTR+Q==}
+  '@deckflow/office2html-linux-x64@0.3.3':
+    resolution: {integrity: sha512-4h0TcE0mmdXd3D3Kk/TpgIoYw1myCbjbDi9rs7Kaj5RtZK0P6GZ8v+Ce0NUdDEhakYDSCQG23B69hkfMgpoGhA==}
     cpu: [x64]
     os: [linux]
 
-  '@deckflow/office2html-win32-x64@0.3.0':
-    resolution: {integrity: sha512-d1UzD3SLPD7YOegvun8mUqsSsxF75q2ariuARJWNWlmzXgKRUq7OpASfaR5K3UKZI3zTeBhdeGiQlOH+5mFkfQ==}
+  '@deckflow/office2html-win32-x64@0.3.3':
+    resolution: {integrity: sha512-PY1zMlSw0/kUHZ+7MHFQ6Qge5RMz8erduqUvjcX1j5SQkzemvX+uqJpgMGV4Nt0mMXLxygAFj09az4IRH2drjQ==}
     cpu: [x64]
     os: [win32]
 
-  '@deckflow/office2html@0.3.0':
-    resolution: {integrity: sha512-kyRAbG71+OH9oRSFWwP+B4SAfb1ZDuRCx/w31t0YD8qnMe+/kE4XC8yj1sbwGMViNLSPK12l1SlY65C4rxkPKA==, tarball: https://npm.pkg.github.com/download/@deckflow/office2html/0.3.0/3d5a37db079a9b3a67e36474cd7741e52ca3b3a9}
+  '@deckflow/office2html@0.3.3':
+    resolution: {integrity: sha512-mp8h5eFH5+vKYK1jQMi4OiMPBCjLKqTNGKz8KIRdGhV3OGZv5f4xlbRVIuMAtZWBBhNRKA58UdhTSuGvd6nc+A==}
     hasBin: true
 
   '@eslint-community/eslint-utils@4.10.1':
@@ -1429,24 +1429,24 @@ snapshots:
       '@deckflow/deckuse-core': file:packages/core
       isomorphic-git: 1.42.2
 
-  '@deckflow/office2html-darwin-arm64@0.3.0':
+  '@deckflow/office2html-darwin-arm64@0.3.3':
     optional: true
 
-  '@deckflow/office2html-darwin-x64@0.3.0':
+  '@deckflow/office2html-darwin-x64@0.3.3':
     optional: true
 
-  '@deckflow/office2html-linux-x64@0.3.0':
+  '@deckflow/office2html-linux-x64@0.3.3':
     optional: true
 
-  '@deckflow/office2html-win32-x64@0.3.0':
+  '@deckflow/office2html-win32-x64@0.3.3':
     optional: true
 
-  '@deckflow/office2html@0.3.0':
+  '@deckflow/office2html@0.3.3':
     optionalDependencies:
-      '@deckflow/office2html-darwin-arm64': 0.3.0
-      '@deckflow/office2html-darwin-x64': 0.3.0
-      '@deckflow/office2html-linux-x64': 0.3.0
-      '@deckflow/office2html-win32-x64': 0.3.0
+      '@deckflow/office2html-darwin-arm64': 0.3.3
+      '@deckflow/office2html-darwin-x64': 0.3.3
+      '@deckflow/office2html-linux-x64': 0.3.3
+      '@deckflow/office2html-win32-x64': 0.3.3
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.9.1)':
     dependencies:
