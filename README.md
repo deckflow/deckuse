@@ -11,6 +11,9 @@
 
 </div>
 
+Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It turns document editing into an explicit, reviewable workflow: open a versioned workspace, inspect and target its structure, apply JSON commands, validate the result, and export a new document.
+
+The engine is built around format adapters. PPTX is the currently implemented format; DOCX, XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
 This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared packages here are the source of truth; the commercial edition is a private thin overlay (`deckuse-commercial`) that swaps `@deckflow/deckuse-edition-config`, registers a `PptxEditionExtension` for gated writes, and may add proprietary packages.
@@ -38,6 +41,20 @@ existing.pptx → init → list / get → set / add → validate → export
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
 
 It preserves untouched XML and unknown package parts where possible. It is not a full PowerPoint rendering or layout engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. Use `monitor` for live HTML preview and `render` to screenshot one slide to PNG for agent visual review. Semantic `diff` / `branch` remain deferred past Phase 1a.
+
+## Where it creates value
+
+Deckuse is designed for document changes that need to be precise, repeatable,
+and auditable:
+
+- **Recurring content updates** — refresh dates, metrics, names, pricing, and
+  disclaimers without rebuilding a presentation.
+- **Customer and market variants** — create controlled versions with explicit
+  selectors and reviewable operations.
+- **Content governance** — query sensitive or outdated content, inspect every
+  match, and validate before export.
+- **Agent-driven automation** — use structured JSON, revision checks, dry runs,
+  atomic batches, and operation logs in larger workflows.
 
 ## Installation
 
