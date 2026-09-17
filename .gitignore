@@ -8,3 +8,6 @@ coverage/
 benchmark
 .test
 __temps__
+packages/deckuse/README.md
+packages/deckuse/LICENSE
+

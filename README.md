@@ -17,6 +17,16 @@ This repository is the **community edition** (`edition=community`). See [docs/ed
 
 PPTX is the currently implemented format (**protocol 2.0 / Phase 1a**). DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
+## Agent Skill (install first)
+
+Deckuse is agent-first. **Coding agents should install the Deckuse skill before using the CLI** — it encodes the workspace-first loop, batch `apply`, semantic addresses, units, and high-value recipes that are easy to get wrong from the README alone.
+
+- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor (project): copy or symlink into `.cursor/skills/deckuse/`
+- Cursor (personal): copy or symlink into `~/.cursor/skills/deckuse/`
+
+Requires **CLI `deckuse >= 1.2.0`**. Quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+
 ## Why Deckuse
 
 Deckuse lets an agent modify an existing presentation without recreating it from scratch. Its workflow is deliberately structural rather than visual:

@@ -17,6 +17,16 @@ Deckuse — локальный, управляемый схемами движо
 
 Этот репозиторий — **community-редакция** (`edition=community`). См. [docs/edition.md](docs/edition.md). Коммерческая редакция живёт в отдельном репозитории `deckuse-commercial`.
 
+## Agent Skill (установите сначала)
+
+Deckuse рассчитан на агентов. **Перед использованием CLI установите skill Deckuse** — в нём зафиксированы workspace-first цикл, пакетный `apply`, семантические адреса, единицы измерения и полезные рецепты.
+
+- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor (проект): скопируйте или сделайте symlink в `.cursor/skills/deckuse/`
+- Cursor (личный): скопируйте или сделайте symlink в `~/.cursor/skills/deckuse/`
+
+Требуется **CLI `deckuse >= 1.2.0`**. Краткая справка: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+
 ## Зачем нужен Deckuse
 
 Deckuse позволяет изменять существующую презентацию, не создавая её заново. Рабочий процесс намеренно ориентирован на структуру, а не на визуальное представление:

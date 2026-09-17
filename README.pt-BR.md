@@ -17,6 +17,16 @@ PPTX é o formato atualmente implementado. Os adaptadores DOCX, XLSX, Keynote e 
 
 Este repositório é a **edição community** (`edition=community`). Veja [docs/edition.md](docs/edition.md). A edição comercial fica no repositório separado `deckuse-commercial`.
 
+## Agent Skill (instale primeiro)
+
+O Deckuse é feito para agentes. **Instale o skill do Deckuse antes de usar a CLI** — ele codifica o loop workspace-first, o `apply` em lote, endereços semânticos, unidades e receitas de alto valor.
+
+- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor (projeto): copie ou crie um symlink em `.cursor/skills/deckuse/`
+- Cursor (pessoal): copie ou crie um symlink em `~/.cursor/skills/deckuse/`
+
+Requer **CLI `deckuse >= 1.2.0`**. Referência rápida: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+
 ## Por que usar o Deckuse
 
 O Deckuse permite modificar uma apresentação existente sem recriá-la do zero. O fluxo de trabalho prioriza deliberadamente a estrutura, e não o visual:

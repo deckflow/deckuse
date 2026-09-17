@@ -21,7 +21,7 @@
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm check:no-commercial-leak && changeset publish"
+    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "latest",

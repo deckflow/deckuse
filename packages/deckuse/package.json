@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/generate-cli-version.mjs && tsc -b",
+    "prepack": "node ../../scripts/sync-npm-readme.mjs",
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {

@@ -17,6 +17,16 @@ Deckuse는 코딩 에이전트를 위한 로컬 우선, 스키마 기반 Office 
 
 이 저장소는 **커뮤니티 에디션**(`edition=community`)입니다. 자세한 내용은 [docs/edition.md](docs/edition.md)를 참고하세요. 상용 에디션은 별도 저장소 `deckuse-commercial`에 있습니다.
 
+## Agent Skill (먼저 설치)
+
+Deckuse는 에이전트 우선입니다. **CLI를 쓰기 전에 Deckuse skill을 설치하세요.** workspace 우선 루프, 배치 `apply`, 시맨틱 주소, 단위계, 자주 쓰는 레시피가 담겨 있어 README만으로는 틀리기 쉽습니다.
+
+- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor (프로젝트): `.cursor/skills/deckuse/`로 복사 또는 심볼릭 링크
+- Cursor (개인): `~/.cursor/skills/deckuse/`로 복사 또는 심볼릭 링크
+
+**CLI `deckuse >= 1.2.0`** 필요. 빠른 참고: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+
 ## Deckuse를 선택하는 이유
 
 Deckuse는 프레젠테이션을 처음부터 다시 만들지 않고 기존 파일을 수정합니다. 이 워크플로는 시각적 판단보다 구조를 우선하도록 설계되었습니다.

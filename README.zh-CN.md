@@ -17,6 +17,16 @@ Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office �
 
 目前已实现 PPTX（**协议 2.0 / Phase 1a**）。DOCX、XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。
 
+## Agent Skill（请优先安装）
+
+Deckuse 面向编程智能体。**使用 CLI 前，请先安装 Deckuse skill**——其中固化了 workspace 优先、批量 `apply`、语义寻址、单位制与常用配方；仅靠 README 很容易用错。
+
+- Skill 文件：[`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor（项目级）：复制或软链到 `.cursor/skills/deckuse/`
+- Cursor（个人级）：复制或软链到 `~/.cursor/skills/deckuse/`
+
+需要 **CLI `deckuse >= 1.2.0`**。速查：[docs/agent-cookbook.md](docs/agent-cookbook.md)。
+
 ## 为何选择 Deckuse
 
 Deckuse 可在不从零重建演示文稿的情况下修改现有 PPT。其工作流刻意以结构为中心，而非视觉为中心：

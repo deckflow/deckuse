@@ -17,6 +17,16 @@ Deckuse は、コーディングエージェント向けのローカルファー
 
 本リポジトリは**コミュニティ版**（`edition=community`）です。詳細は [docs/edition.md](docs/edition.md)。商用版は別リポジトリ `deckuse-commercial` にあります。
 
+## Agent Skill（まずインストール）
+
+Deckuse はエージェント優先です。**CLI を使う前に Deckuse skill をインストールしてください**。workspace 優先のループ、バッチ `apply`、セマンティックアドレス、単位系、よく使うレシピが含まれており、README だけでは誤りやすいです。
+
+- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
+- Cursor（プロジェクト）: `.cursor/skills/deckuse/` へコピーまたはシンボリックリンク
+- Cursor（個人）: `~/.cursor/skills/deckuse/` へコピーまたはシンボリックリンク
+
+**CLI `deckuse >= 1.2.0`** が必要です。クイックリファレンス: [docs/agent-cookbook.md](docs/agent-cookbook.md)。
+
 ## Deckuse を使う理由
 
 Deckuse は既存のプレゼンテーションを作り直さずに変更できます。ワークフローは視覚ではなく構造を重視して設計されています。
