@@ -11,6 +11,12 @@
       "path": "../core"
     },
     {
+      "path": "../edition-config"
+    },
+    {
+      "path": "../workspace"
+    },
+    {
       "path": "../pptx"
     },
     {

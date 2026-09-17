@@ -2,25 +2,44 @@ import { basename } from 'node:path';
 import type { ElementRef } from '@deckflow/deckuse-core';
 import type { OpcArchive } from '@deckflow/deckuse-opc';
 import type { Element } from '@xmldom/xmldom';
+import { classifyChartPart } from './chart-classify.js';
+import { readSeriesColor } from './chart.js';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
 import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';
-const classify = (node: Element): ElementKind | undefined =>
-  node.localName === 'sp'
-    ? first(node, 'txBody')
-      ? 'textbox'
-      : 'shape'
-    : node.localName === 'pic'
-      ? 'picture'
-      : node.localName === 'cxnSp'
-        ? 'connector'
-        : node.localName === 'grpSp'
-          ? 'group'
-          : first(node, 'tbl')
-            ? 'table'
-            : first(node, 'chart')
-              ? 'chart'
-              : undefined;
+
+const directChild = (node: Element, localName: string): Element | undefined =>
+  children(node).find((child) => child.localName === localName);
+
+const classify = (node: Element): ElementKind | undefined => {
+  if (node.localName === 'sp') return first(node, 'txBody') ? 'textbox' : 'shape';
+  if (node.localName === 'pic')
+    return first(node, 'videoFile') ? 'video' : first(node, 'audioFile') ? 'audio' : 'picture';
+  if (node.localName === 'cxnSp') return 'connector';
+  if (node.localName === 'grpSp') return 'group';
+  if (node.localName === 'graphicFrame') {
+    if (first(node, 'tbl')) return 'table';
+    if (first(node, 'chart')) return 'chart';
+  }
+  return undefined;
+};
+
+const readPlaceholder = (
+  node: Element,
+): { type: string; idx?: string } | undefined => {
+  const nv =
+    directChild(node, 'nvSpPr') ??
+    directChild(node, 'nvPicPr') ??
+    directChild(node, 'nvCxnSpPr') ??
+    directChild(node, 'nvGraphicFramePr') ??
+    directChild(node, 'nvGrpSpPr');
+  const nvPr = nv ? directChild(nv, 'nvPr') : undefined;
+  const ph = nvPr ? directChild(nvPr, 'ph') : undefined;
+  if (!ph) return undefined;
+  const type = attr(ph, 'type') ?? 'body';
+  const idx = attr(ph, 'idx');
+  return { type, ...(idx !== undefined ? { idx } : {}) };
+};
 const transformOf = (node: Element): Record<string, number | boolean> | undefined => {
   const x = first(node, 'xfrm');
   if (!x) return;
@@ -45,6 +64,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
   const presentation = archive.readXml('/ppt/presentation.xml'),
     rels = archive.getRelationships('/ppt/presentation.xml');
   for (const sld of descendants(presentation, 'sldId')) {
+    if (sld.namespaceURI && sld.namespaceURI !== NS.p) continue;
     const rid = sld.getAttributeNS(NS.r, 'id') ?? attr(sld, 'r:id'),
       rel = rels.find((r) => r.id === rid);
     if (!rel?.resolvedTarget) continue;
@@ -77,6 +97,18 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           transform = transformOf(child),
           name = attr(cNvPr(child), 'name'),
           text = textOf(child);
+        const ph = readPlaceholder(child);
+        const placeholderType = ph?.type;
+        const placeholderIdx = ph?.idx;
+        const pr = cNvPr(child);
+        const hlink = pr
+          ? children(pr).find((c) => c.localName === 'hlinkClick')
+          : undefined;
+        const hlinkRid =
+          hlink?.getAttributeNS(NS.r, 'id') ?? (hlink ? attr(hlink, 'r:id') : undefined);
+        const hlinkRel = hlinkRid
+          ? archive.getRelationships(partUri).find((r) => r.id === hlinkRid)
+          : undefined;
         const indexed: IndexedElement = {
           ref: { documentId, elementId: id, path: `${partUri}#${id}`, revision: rev },
           kind,
@@ -88,6 +120,13 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           ...(text ? { text } : {}),
           ...(transform ? { transform } : {}),
         };
+        if (placeholderType || hlinkRel) {
+          indexed.payload = {
+            ...(placeholderType ? { placeholder: placeholderType } : {}),
+            ...(placeholderIdx !== undefined ? { placeholderIdx } : {}),
+            ...(hlinkRel ? { hyperlink: hlinkRel.target } : {}),
+          };
+        }
         elements.push(indexed);
         if (kind === 'table') {
           const rows = descendants(child, 'tr');
@@ -112,18 +151,26 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
               );
           });
         }
-        if (kind === 'picture') {
+        if (kind === 'picture' || kind === 'video' || kind === 'audio') {
           const blip = first(child, 'blip');
           const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
           const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
-          const rid = embed ?? link;
+          const video = first(child, 'videoFile');
+          const audio = first(child, 'audioFile');
+          const mediaLink =
+            (video ?? audio)?.getAttributeNS(NS.r, 'link') ??
+            attr(video ?? audio, 'r:link') ??
+            undefined;
+          const rid = mediaLink ?? embed ?? link;
           const rel = rid ? archive.getRelationships(partUri).find((r) => r.id === rid) : undefined;
           if (rel) {
             const mediaPart = rel.resolvedTarget ?? rel.target;
-            const external = Boolean(rel.external || (!embed && link));
+            const external = Boolean(rel.external || (!embed && link && !mediaLink));
             indexed.payload = {
+              ...(indexed.payload ?? {}),
               mediaPart,
               href: external ? rel.target : mediaHref(documentId, mediaPart),
+              ...(kind !== 'picture' ? { mediaKind: kind } : {}),
               ...(external ? { external: true } : {}),
               ...(!external && rel.resolvedTarget
                 ? {
@@ -142,21 +189,33 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
           if (cr?.resolvedTarget) {
             const chart = archive.readXml(cr.resolvedTarget);
             indexed.payload = {
+              ...(indexed.payload ?? {}),
               chartPart: cr.resolvedTarget,
+              chartVariant: classifyChartPart(archive, cr.resolvedTarget),
               title: textOf(first(chart, 'title') ?? chart),
-              series: descendants(chart, 'ser').map((ser) => ({
-                name:
-                  first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
-                  textOf(first(ser, 'tx') ?? ser),
-                values: descendants(first(ser, 'val') ?? ser, 'v').map((v) => v.textContent ?? ''),
-              })),
+              series: descendants(chart, 'ser').map((ser) => {
+                const color = readSeriesColor(ser);
+                return {
+                  name:
+                    first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
+                    textOf(first(ser, 'tx') ?? ser),
+                  values: descendants(first(ser, 'val') ?? ser, 'v').map(
+                    (v) => v.textContent ?? '',
+                  ),
+                  ...(color ? { color } : {}),
+                };
+              }),
               embeddedWorkbook: archive
                 .getRelationships(cr.resolvedTarget)
                 .some((r) => r.type === REL.package),
             };
+          } else {
+            // Fail closed: unresolvable chart parts are advanced (commercial-only edits).
+            indexed.payload = { ...(indexed.payload ?? {}), chartVariant: 'advanced' };
           }
         }
-        walk(child, [...ancestors, own], id);
+        // Only groups nest addressable descendants; table cells are indexed above.
+        if (kind === 'group') walk(child, [...ancestors, own], id);
       }
     };
     walk(root(doc), [], `slide:${slideId}`);
@@ -200,6 +259,35 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
       }
   return { revision: rev, elements };
 }
+export const slidePageMap = (index: IndexFile): Map<string, number> => {
+  const map = new Map<string, number>();
+  let page = 1;
+  for (const item of index.elements) {
+    if (item.kind !== 'slide') continue;
+    map.set(item.partUri, page);
+    if (item.slideId) map.set(item.slideId, page);
+    page += 1;
+  }
+  return map;
+};
+export const slidesForItem = (index: IndexFile, item: IndexedElement): number[] => {
+  const pages = slidePageMap(index);
+  if (item.kind === 'slide') {
+    const page = pages.get(item.partUri) ?? (item.slideId ? pages.get(item.slideId) : undefined);
+    return page ? [page] : [];
+  }
+  if (item.slideId) {
+    const page = pages.get(item.slideId);
+    return page ? [page] : [];
+  }
+  return [];
+};
+export const slidesForRef = (index: IndexFile, ref: ElementRef): number[] => {
+  const item = findIndexed(index, ref);
+  return item ? slidesForItem(index, item) : [];
+};
+export const mergeSlides = (...groups: number[][]): number[] =>
+  [...new Set(groups.flat())].sort((a, b) => a - b);
 export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement | undefined =>
   index.elements.find((e) => e.ref.elementId === ref.elementId || e.ref.path === ref.path);
 export function matchesSelector(

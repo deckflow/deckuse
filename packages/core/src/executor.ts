@@ -17,20 +17,40 @@ export class Executor {
     readonly options: ExecutorOptions = {},
   ) {}
   async execute(input: unknown): Promise<Result<unknown>> {
-    const parsed = commandSchema.safeParse(input);
-    if (!parsed.success)
+    if (
+      typeof input === 'object' &&
+      input !== null &&
+      'version' in input &&
+      (input as { version?: unknown }).version !== undefined &&
+      (input as { version?: unknown }).version !== '2.0'
+    ) {
       return err(
-        'INVALID_COMMAND',
-        'Command failed schema validation',
-        parsed.error.issues.map((issue) => ({
-          severity: 'error',
-          code: 'SCHEMA_VALIDATION',
-          message: issue.message,
-          path: issue.path.map((segment) =>
-            typeof segment === 'symbol' ? (segment.description ?? segment.toString()) : segment,
-          ),
-        })),
+        'UNSUPPORTED_VERSION',
+        `Unsupported protocol version: ${String((input as { version?: unknown }).version)}`,
+        [],
+        { hint: 'Use version "2.0". Protocol 1.0 workspaces must be re-initialized.' },
       );
+    }
+    const parsed = commandSchema.safeParse(input);
+    if (!parsed.success) {
+      const diagnostics = parsed.error.issues.map((issue) => ({
+        severity: 'error' as const,
+        code: 'SCHEMA_VALIDATION',
+        message: issue.message,
+        path: issue.path.map((segment) =>
+          typeof segment === 'symbol' ? (segment.description ?? segment.toString()) : segment,
+        ),
+      }));
+      const first = diagnostics[0];
+      const pathLabel =
+        first?.path && first.path.length > 0
+          ? `${first.path.map(String).join('.')}: `
+          : '';
+      const detail = first ? `${pathLabel}${first.message}` : 'invalid input';
+      const extra =
+        diagnostics.length > 1 ? ` (+${String(diagnostics.length - 1)} more issue(s))` : '';
+      return err('INVALID_COMMAND', `Command failed schema validation: ${detail}${extra}`, diagnostics);
+    }
     const command = parsed.data;
     if (command.type === 'init') {
       const adapter = this.registry.get(command.format);
@@ -66,16 +86,16 @@ export const inspect = (
   options: Partial<
     Omit<Extract<Command, { type: 'inspect' }>, 'type' | 'version' | 'workspaceId'>
   > = {},
-) => executor.execute({ version: '1.0', type: 'inspect', workspaceId, ...options });
+) => executor.execute({ version: '2.0', type: 'inspect', workspaceId, ...options });
 export const getText = (
   executor: Executor,
   workspaceId: string,
   ref: Extract<Command, { type: 'getText' }>['ref'],
-) => executor.execute({ version: '1.0', type: 'getText', workspaceId, ref });
+) => executor.execute({ version: '2.0', type: 'getText', workspaceId, ref });
 export const setText = (
   executor: Executor,
   workspaceId: string,
   transactionId: string,
-  ref: Extract<Command, { type: 'setText' }>['ref'],
+  ref: NonNullable<Extract<Command, { type: 'setText' }>['ref']>,
   text: string,
-) => executor.execute({ version: '1.0', type: 'setText', workspaceId, transactionId, ref, text });
+) => executor.execute({ version: '2.0', type: 'setText', workspaceId, transactionId, ref, text });

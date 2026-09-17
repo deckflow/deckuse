@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, posix, resolve } from 'node:path';
 import { DOMParser, XMLSerializer, type Document, type Element, type Node } from '@xmldom/xmldom';
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader, ZipWriter } from '@zip.js/zip.js';
@@ -11,8 +11,8 @@ export interface OpcLimits {
 }
 export const DEFAULT_OPC_LIMITS: OpcLimits = {
   maxEntries: 10_000,
-  maxEntrySize: 256 * 1024 * 1024,
-  maxTotalSize: 1024 * 1024 * 1024,
+  maxEntrySize: 1024 * 1024 * 1024,
+  maxTotalSize: 4 * 1024 * 1024 * 1024,
 };
 export interface OpcPart {
   readonly name: string;
@@ -34,6 +34,35 @@ export interface ContentTypes {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const XML_DANGEROUS = /<!DOCTYPE|<!ENTITY/i;
+
+/**
+ * Decode OPC XML part bytes. OOXML allows UTF-8 or UTF-16; many real-world
+ * PPTX files ship almost every part as UTF-16 BE/LE with a BOM.
+ */
+export const decodeXmlBytes = (data: Uint8Array): string => {
+  if (data.length >= 2) {
+    const b0 = data[0]!;
+    const b1 = data[1]!;
+    // UTF-16 BE BOM
+    if (b0 === 0xfe && b1 === 0xff) return new TextDecoder('utf-16be').decode(data);
+    // UTF-16 LE BOM (UTF-32 LE also starts FF FE, but OOXML does not use it)
+    if (b0 === 0xff && b1 === 0xfe) return new TextDecoder('utf-16le').decode(data);
+  }
+  return decoder.decode(data);
+};
+
+/** After decoding to a JS string, drop a leading U+FEFF so parsers see the decl. */
+const stripBomChar = (xml: string): string => (xml.charCodeAt(0) === 0xfeff ? xml.slice(1) : xml);
+
+/**
+ * Bytes we emit are always UTF-8; rewrite a stale encoding= in the XML decl.
+ */
+const withUtf8EncodingDecl = (xml: string): string =>
+  xml.replace(
+    /^(\s*<\?xml\b[^?]*?)\bencoding\s*=\s*(['"])[^'"]*\2/i,
+    `$1encoding=$2UTF-8$2`,
+  );
+
 export const normalizePartName = (name: string): string => {
   if (name.includes('\0')) throw new Error('OPC part name contains NUL');
   const slash = name.replaceAll(/\\+/g, '/');
@@ -44,7 +73,7 @@ export const normalizePartName = (name: string): string => {
 };
 export type XmlDocument = Document & { documentElement: Element };
 export const parseXml = (input: string | Uint8Array): XmlDocument => {
-  const xml = typeof input === 'string' ? input : decoder.decode(input);
+  const xml = stripBomChar(typeof input === 'string' ? input : decodeXmlBytes(input));
   if (XML_DANGEROUS.test(xml)) throw new Error('XML DTD and entities are not allowed');
   let error = '';
   const document = new DOMParser({
@@ -57,8 +86,186 @@ export const parseXml = (input: string | Uint8Array): XmlDocument => {
   if (!document.documentElement) throw new Error('Invalid XML: missing document element');
   return document as XmlDocument;
 };
+/**
+ * True for OPC parts that are XML text and safe to pretty-print.
+ *
+ * IMPORTANT: do not use `mediaType.includes('xml')` — every
+ * `application/vnd.openxmlformats-...` type contains that substring, including
+ * binary containers like `.xlsx` embeddings (`spreadsheetml.sheet`). Pretty-
+ * printing those corrupts the ZIP and makes PowerPoint demand a repair.
+ */
+const isXmlPart = (part: OpcPart): boolean => {
+  const name = part.name.toLowerCase();
+  if (name.endsWith('.xml') || name.endsWith('.rels')) return true;
+  // Nested Office packages and other binaries under embeddings/media.
+  if (
+    name.endsWith('.xlsx') ||
+    name.endsWith('.xlsm') ||
+    name.endsWith('.docx') ||
+    name.endsWith('.pptx') ||
+    name.endsWith('.bin') ||
+    name.includes('/embeddings/') ||
+    name.includes('/media/')
+  )
+    return false;
+  const mt = part.mediaType.toLowerCase();
+  return mt === 'application/xml' || mt === 'text/xml' || mt.endsWith('+xml');
+};
+
+/**
+ * Pretty-print XML for readable git diffs without changing the infoset.
+ *
+ * Rules:
+ * - Never inject or strip character data inside text nodes (e.g. `a:t`).
+ * - Elements with direct text / mixed content stay on one line (exact join).
+ * - Empty or whitespace-only text elements stay inline (`<a:t> </a:t>` preserved).
+ * - Only element-only children get newline + indent; inter-element whitespace is dropped.
+ */
+export const prettyPrintXml = (source: string): string => {
+  const trimmed = source.trim();
+  if (!trimmed) return '\n';
+
+  const tokens = trimmed.match(/<[^>]+>|[^<]+/g);
+  if (!tokens) return `${trimmed}\n`;
+
+  const isClose = (t: string) => t.startsWith('</');
+  const isPiOrDecl = (t: string) => t.startsWith('<?') || t.startsWith('<!');
+  const isSelfClosing = (t: string) => /^<[^!?/][^>]*\/>$/.test(t);
+  const isOpen = (t: string) =>
+    t.startsWith('<') && !isClose(t) && !isPiOrDecl(t) && !isSelfClosing(t);
+  const isText = (t: string) => !t.startsWith('<');
+  const isWsText = (t: string) => isText(t) && /^\s*$/.test(t);
+
+  const findClose = (openIdx: number): number => {
+    let depth = 0;
+    for (let j = openIdx; j < tokens.length; j++) {
+      const t = tokens[j]!;
+      if (isOpen(t)) depth += 1;
+      else if (isClose(t)) {
+        depth -= 1;
+        if (depth === 0) return j;
+      }
+    }
+    return -1;
+  };
+
+  /** Classify direct content of tokens[openIdx..closeIdx]. */
+  const classify = (openIdx: number, closeIdx: number): 'elements' | 'preserve' => {
+    let depth = 0;
+    let hasElement = false;
+    let hasSignificantText = false;
+    let hasWsOnlyText = false;
+    for (let j = openIdx + 1; j < closeIdx; j++) {
+      const t = tokens[j]!;
+      if (isOpen(t)) {
+        if (depth === 0) hasElement = true;
+        depth += 1;
+      } else if (isSelfClosing(t)) {
+        if (depth === 0) hasElement = true;
+      } else if (isClose(t)) {
+        depth -= 1;
+      } else if (isText(t) && depth === 0) {
+        if (isWsText(t)) hasWsOnlyText = true;
+        else hasSignificantText = true;
+      }
+    }
+    // Mixed content, leaf text, or ws-only text leaf: keep exact character data.
+    if (hasSignificantText || hasWsOnlyText) return 'preserve';
+    if (hasElement) return 'elements';
+    // Truly empty `<tag></tag>` — keep inline so we don't invent a text node.
+    return 'preserve';
+  };
+
+  const lines: string[] = [];
+
+  const emitElement = (openIdx: number, closeIdx: number, indent: number): void => {
+    const pad = '  '.repeat(indent);
+    const open = tokens[openIdx]!;
+    const close = tokens[closeIdx]!;
+    if (classify(openIdx, closeIdx) === 'preserve') {
+      lines.push(`${pad}${tokens.slice(openIdx, closeIdx + 1).join('')}`);
+      return;
+    }
+    lines.push(`${pad}${open}`);
+    let j = openIdx + 1;
+    while (j < closeIdx) {
+      const t = tokens[j]!;
+      if (isWsText(t)) {
+        j += 1;
+        continue;
+      }
+      if (isPiOrDecl(t) || isSelfClosing(t)) {
+        lines.push(`${'  '.repeat(indent + 1)}${t}`);
+        j += 1;
+        continue;
+      }
+      if (isOpen(t)) {
+        const childClose = findClose(j);
+        if (childClose === -1 || childClose > closeIdx) {
+          lines.push(`${'  '.repeat(indent + 1)}${t}`);
+          j += 1;
+          continue;
+        }
+        emitElement(j, childClose, indent + 1);
+        j = childClose + 1;
+        continue;
+      }
+      // Unexpected token inside element-only content — preserve without indent injection.
+      if (isText(t)) {
+        lines.push(t);
+        j += 1;
+        continue;
+      }
+      j += 1;
+    }
+    lines.push(`${pad}${close}`);
+  };
+
+  let i = 0;
+  while (i < tokens.length) {
+    const token = tokens[i]!;
+    if (isPiOrDecl(token) || isSelfClosing(token)) {
+      lines.push(token);
+      i += 1;
+      continue;
+    }
+    if (isOpen(token)) {
+      const closeIdx = findClose(i);
+      if (closeIdx === -1) {
+        lines.push(token);
+        i += 1;
+        continue;
+      }
+      emitElement(i, closeIdx, 0);
+      i = closeIdx + 1;
+      continue;
+    }
+    if (isText(token)) {
+      if (!isWsText(token)) lines.push(token);
+      i += 1;
+      continue;
+    }
+    if (isClose(token)) {
+      lines.push(token);
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+
+  return `${lines.join('\n')}\n`;
+};
+
+export const formatXmlBytes = (data: Uint8Array): Uint8Array => {
+  try {
+    return encoder.encode(withUtf8EncodingDecl(prettyPrintXml(stripBomChar(decodeXmlBytes(data)))));
+  } catch {
+    return data;
+  }
+};
+
 export const serializeXml = (document: Node): Uint8Array =>
-  encoder.encode(new XMLSerializer().serializeToString(document));
+  formatXmlBytes(encoder.encode(new XMLSerializer().serializeToString(document)));
 
 export const relationshipPartName = (source: string): string => {
   if (source === '/') return '/_rels/.rels';
@@ -79,6 +286,36 @@ export class OpcArchive {
   readonly contentTypes: ContentTypes = { defaults: new Map(), overrides: new Map() };
   readonly originalDigests = new Map<string, string>();
 
+  static async openDirectory(path: string, limitsInput: Partial<OpcLimits> = {}): Promise<OpcArchive> {
+    const limits = { ...DEFAULT_OPC_LIMITS, ...limitsInput };
+    const archive = new OpcArchive();
+    let total = 0;
+    const walk = async (dir: string, prefix = ''): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const absolute = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(absolute, relative);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        if (archive.parts.size >= limits.maxEntries)
+          throw new Error(`OPC entry limit exceeded: ${String(archive.parts.size)}`);
+        const name = normalizePartName(`/${relative.replaceAll('\\', '/')}`);
+        if (archive.parts.has(name)) throw new Error(`Duplicate OPC entry: ${name}`);
+        const data = await readFile(absolute);
+        if (data.length > limits.maxEntrySize) throw new Error(`OPC entry too large: ${name}`);
+        total += data.length;
+        if (total > limits.maxTotalSize) throw new Error('OPC total uncompressed size limit exceeded');
+        archive.parts.set(name, { name, mediaType: 'application/octet-stream', data });
+        archive.originalDigests.set(name, createHash('sha256').update(data).digest('hex'));
+      }
+    };
+    await walk(resolve(path));
+    if (!archive.parts.size) throw new Error('OPC directory is empty');
+    archive.loadMetadata();
+    return archive;
+  }
   static async openFile(path: string, limits: Partial<OpcLimits> = {}): Promise<OpcArchive> {
     return OpcArchive.open(await readFile(path), limits);
   }
@@ -162,19 +399,49 @@ export class OpcArchive {
   getPart(name: string): OpcPart | undefined {
     return this.parts.get(normalizePartName(name));
   }
+  /**
+   * True if any part path matches `name` ignoring case.
+   * PPTX packages must stay portable to case-insensitive filesystems (macOS
+   * default); allocating `media1.mp4` beside `media1.MP4` makes PowerPoint
+   * prompt to repair when the ZIP entries collide on extract.
+   */
+  hasPartIgnoreCase(name: string): boolean {
+    const needle = normalizePartName(name).toLowerCase();
+    for (const key of this.parts.keys()) {
+      if (key.toLowerCase() === needle) return true;
+    }
+    return false;
+  }
   readXml(name: string): Document {
     const part = this.getPart(name);
     if (!part) throw new Error(`OPC part not found: ${name}`);
     return parseXml(part.data);
   }
   writeXml(name: string, document: Node, mediaType?: string): void {
-    this.setPart(name, serializeXml(document), mediaType);
+    const normalized = normalizePartName(name);
+    // Prefer an explicit type, then a recorded Override — never promote the
+    // extension Default (e.g. application/xml) into an Override via getPart().
+    const resolved =
+      mediaType ??
+      this.contentTypes.overrides.get(normalized) ??
+      'application/octet-stream';
+    this.setPart(normalized, serializeXml(document), resolved);
   }
   setPart(name: string, data: Uint8Array, mediaType = 'application/octet-stream'): void {
     const normalized = normalizePartName(name);
     this.parts.set(normalized, { name: normalized, mediaType, data });
-    if (mediaType !== 'application/octet-stream')
+    // Prefer Default Extension over per-part Override when they already match
+    // (e.g. .rels). Promoting Defaults into Overrides makes some Office builds
+    // treat the package as damaged.
+    const ext = posix.extname(normalized).slice(1).toLowerCase();
+    const byDefault = ext ? this.contentTypes.defaults.get(ext) : undefined;
+    if (mediaType === 'application/octet-stream') {
+      this.contentTypes.overrides.delete(normalized);
+    } else if (byDefault === mediaType) {
+      this.contentTypes.overrides.delete(normalized);
+    } else {
       this.contentTypes.overrides.set(normalized, mediaType);
+    }
   }
   deletePart(name: string): boolean {
     const normalized = normalizePartName(name);
@@ -231,6 +498,14 @@ export class OpcArchive {
     }
     for (const [partName, contentType] of [...this.contentTypes.overrides].sort()) {
       if (!this.parts.has(partName)) continue;
+      // Drop Overrides that duplicate an extension Default (common for .rels /
+      // .xml after relationship rewrites).
+      const ext = posix.extname(partName).slice(1).toLowerCase();
+      const byDefault = ext ? this.contentTypes.defaults.get(ext) : undefined;
+      if (byDefault === contentType) {
+        this.contentTypes.overrides.delete(partName);
+        continue;
+      }
       const element = doc.createElementNS(doc.documentElement.namespaceURI, 'Override');
       element.setAttribute('PartName', partName);
       element.setAttribute('ContentType', contentType);
@@ -249,6 +524,34 @@ export class OpcArchive {
     for (const part of this.parts.values())
       await zip.add(part.name.slice(1), new Uint8ArrayReader(part.data));
     return zip.close();
+  }
+  async writeDirectory(path: string, overwrite = false): Promise<void> {
+    const destination = resolve(path);
+    if (!overwrite) {
+      try {
+        await stat(destination);
+        throw new Error(`Destination exists: ${destination}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    // Keep source/[Content_Types].xml in sync with in-memory overrides so the
+    // next openDirectory() does not fall back to Default Extension="xml".
+    this.syncContentTypes();
+    const temporary = `${destination}.${randomUUID()}.tmp`;
+    try {
+      for (const part of this.parts.values()) {
+        const file = resolve(temporary, part.name.slice(1));
+        await mkdir(dirname(file), { recursive: true });
+        const data = isXmlPart(part) ? formatXmlBytes(part.data) : part.data;
+        await writeFile(file, data);
+      }
+      await rm(destination, { recursive: true, force: true });
+      await rename(temporary, destination);
+    } catch (error) {
+      await rm(temporary, { recursive: true, force: true });
+      throw error;
+    }
   }
   async writeFile(path: string, overwrite = false): Promise<void> {
     const destination = resolve(path);
@@ -270,4 +573,13 @@ export class OpcArchive {
       throw error;
     }
   }
+}
+
+export async function snapshotArchive(
+  archive: OpcArchive,
+  outputPath: string,
+): Promise<{ checksum: string }> {
+  await archive.writeFile(outputPath, true);
+  const bytes = await readFile(resolve(outputPath));
+  return { checksum: createHash('sha256').update(bytes).digest('hex') };
 }

@@ -10,7 +10,12 @@ describe('executor', () => {
   it('validates input before dispatch', async () => {
     const result = await new Executor(new AdapterRegistry()).execute({ type: 'validate' });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('INVALID_COMMAND');
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_COMMAND');
+      expect(result.error.message).toMatch(/schema validation/i);
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.diagnostics[0]?.path?.length).toBeGreaterThan(0);
+    }
   });
   it('binds initialized workspaces to adapters', async () => {
     const execute = vi.fn(async () => ok({ valid: true }));
@@ -19,15 +24,11 @@ describe('executor', () => {
       version: '1',
       async init(command) {
         return ok({
-          schemaVersion: '1.0',
           workspaceId: command.workspaceId,
           format: 'test',
           source: command.source,
           revision: 'r1',
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-          adapterVersion: '1',
-          files: [],
+          elementCount: 0,
         });
       },
       execute,
@@ -36,7 +37,7 @@ describe('executor', () => {
     expect(
       (
         await executor.execute({
-          version: '1.0',
+          version: '2.0',
           type: 'init',
           workspaceId: 'w',
           format: 'test',
@@ -45,7 +46,7 @@ describe('executor', () => {
       ).ok,
     ).toBe(true);
     expect(
-      (await executor.execute({ version: '1.0', type: 'validate', workspaceId: 'w' })).ok,
+      (await executor.execute({ version: '2.0', type: 'validate', workspaceId: 'w' })).ok,
     ).toBe(true);
     expect(execute).toHaveBeenCalledOnce();
   });
@@ -63,7 +64,7 @@ describe('executor', () => {
     const resolver = vi.fn(async () => adapter);
     const executor = new Executor(new AdapterRegistry(), { resolveAdapter: resolver });
     const result = await executor.execute({
-      version: '1.0',
+      version: '2.0',
       type: 'validate',
       workspaceId: '/tmp/persistent-workspace',
     });
@@ -76,7 +77,7 @@ describe('executor', () => {
       new AdapterRegistry().register(createNotImplementedAdapter('docx')),
     );
     const result = await executor.execute({
-      version: '1.0',
+      version: '2.0',
       type: 'init',
       workspaceId: 'w',
       format: 'docx',

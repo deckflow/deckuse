@@ -1,8 +1,11 @@
 import { posix } from 'node:path';
 import { OpcArchive, type OpcRelationship } from '@deckflow/deckuse-opc';
 import { cleanupUnreferencedPart } from './picture.js';
-import { NS, REL, attr, descendants, first } from './xml.js';
+import { NS, REL, attr, descendants } from './xml.js';
+import type { Element, Node } from '@xmldom/xmldom';
 const SLIDE_CT = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
+const NOTES_CT = 'application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml';
+const EP_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/extended-properties';
 const nextNumber = (archive: OpcArchive, prefix: string): number =>
   Math.max(
     0,
@@ -18,6 +21,91 @@ const nextRelId = (rels: readonly OpcRelationship[]): string => {
   while (used.has(`rId${String(n)}`)) n++;
   return `rId${String(n)}`;
 };
+
+/**
+ * `p:sldId` entries in `p:sldIdLst` only.
+ *
+ * Decks with sections also carry `p14:sldId` under `p14:sectionLst`. Those share
+ * the local name `sldId` but must not be counted as slides — doing so makes
+ * `docProps/app.xml` `<Slides>` wrong and PowerPoint prompts to repair.
+ *
+ * Accepts either the presentation document or the `p:sldIdLst` element itself
+ * (`descendants` does not include the root node).
+ */
+const presentationSlideIds = (node: Node): Element[] => {
+  const el = node as Element;
+  const list =
+    el.nodeType === 1 && el.localName === 'sldIdLst' && el.namespaceURI === NS.p
+      ? el
+      : descendants(node, 'sldIdLst').find((item) => item.namespaceURI === NS.p);
+  if (!list) return [];
+  return descendants(list, 'sldId').filter((item) => item.namespaceURI === NS.p);
+};
+
+/** Keep docProps/app.xml Slides/Notes in sync with the package (PowerPoint repairs on mismatch). */
+export const syncAppSlideCounts = (archive: OpcArchive): void => {
+  const part = archive.getPart('/docProps/app.xml');
+  if (!part) return;
+  const slideCount = presentationSlideIds(archive.readXml('/ppt/presentation.xml')).length;
+  let notesCount = 0;
+  for (const [slidePart, rels] of archive.relationships) {
+    if (!slidePart.startsWith('/ppt/slides/')) continue;
+    if (rels.some((r) => r.type === REL.notes)) notesCount++;
+  }
+  const app = archive.readXml('/docProps/app.xml');
+  let dirty = false;
+  for (const [localName, value] of [
+    ['Slides', String(slideCount)],
+    ['Notes', String(notesCount)],
+  ] as const) {
+    const el = descendants(app, localName).find(
+      (node) => !node.namespaceURI || node.namespaceURI === EP_NS,
+    );
+    if (!el) continue;
+    if ((el.textContent ?? '') === value) continue;
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(app.createTextNode(value));
+    dirty = true;
+  }
+  if (dirty) archive.writeXml('/docProps/app.xml', app, part.mediaType);
+};
+
+/** Create a notes slide part for `slidePart` when missing; return the notes part URI. */
+export function ensureNotes(archive: OpcArchive, slidePart: string): string {
+  const existing = archive.getRelationships(slidePart).find((r) => r.type === REL.notes);
+  if (existing?.resolvedTarget && archive.getPart(existing.resolvedTarget))
+    return existing.resolvedTarget;
+
+  const number = nextNumber(archive, '/ppt/notesSlides/');
+  const part = `/ppt/notesSlides/notesSlide${String(number)}.xml`;
+  archive.setPart(
+    part,
+    new TextEncoder().encode(
+      `<p:notes xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder"/><p:cNvSpPr txBox="1"/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t></a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>`,
+    ),
+    NOTES_CT,
+  );
+  archive.setRelationships(part, [
+    {
+      id: 'rId1',
+      type: REL.slide,
+      target: relativeTarget(part, slidePart),
+      external: false,
+      resolvedTarget: slidePart,
+    },
+  ]);
+  const rels = [...archive.getRelationships(slidePart)];
+  const rid = nextRelId(rels);
+  rels.push({
+    id: rid,
+    type: REL.notes,
+    target: relativeTarget(slidePart, part),
+    external: false,
+    resolvedTarget: part,
+  });
+  archive.setRelationships(slidePart, rels);
+  return part;
+}
 const cloneMutableTargets = (
   archive: OpcArchive,
   sourcePart: string,
@@ -48,11 +136,16 @@ const cloneMutableTargets = (
   });
 const presentationState = (archive: OpcArchive) => {
   const doc = archive.readXml('/ppt/presentation.xml');
-  const list = first(doc, 'sldIdLst');
+  const list = descendants(doc, 'sldIdLst').find((el) => el.namespaceURI === NS.p);
   if (!list) throw new Error('presentation.xml has no sldIdLst');
   return { doc, list, rels: [...archive.getRelationships('/ppt/presentation.xml')] };
 };
-export function addSlide(archive: OpcArchive, templatePart?: string, layoutPart?: string): string {
+export function addSlide(
+  archive: OpcArchive,
+  templatePart?: string,
+  layoutPart?: string,
+  afterIndex?: number,
+): string {
   const { doc, list, rels } = presentationState(archive);
   const number = nextNumber(archive, '/ppt/slides/');
   const part = `/ppt/slides/slide${String(number)}.xml`;
@@ -99,19 +192,20 @@ export function addSlide(archive: OpcArchive, templatePart?: string, layoutPart?
   });
   archive.setRelationships('/ppt/presentation.xml', rels);
   const sld = doc.createElementNS(NS.p, 'p:sldId');
+  const existing = presentationSlideIds(list);
   sld.setAttribute(
     'id',
-    String(
-      Math.max(255, ...descendants(doc, 'sldId').map((n) => Number(attr(n, 'id') ?? 255))) + 1,
-    ),
+    String(Math.max(255, ...existing.map((n) => Number(attr(n, 'id') ?? 255))) + 1),
   );
   sld.setAttributeNS(NS.r, 'r:id', rid);
-  list.appendChild(sld);
-  archive.writeXml(
-    '/ppt/presentation.xml',
-    doc,
-    archive.getPart('/ppt/presentation.xml')?.mediaType,
-  );
+  // Insert after the given 1-based slide index; append when omitted / out of range.
+  const anchor =
+    afterIndex !== undefined && afterIndex > 0 ? existing[afterIndex - 1] : undefined;
+  if (anchor?.nextSibling) list.insertBefore(sld, anchor.nextSibling);
+  else if (anchor) list.appendChild(sld);
+  else list.appendChild(sld);
+  archive.writeXml('/ppt/presentation.xml', doc);
+  syncAppSlideCounts(archive);
   return part;
 }
 export function duplicateSlide(archive: OpcArchive, part: string): string {
@@ -121,7 +215,7 @@ export function removeSlide(archive: OpcArchive, part: string): void {
   const { doc, list, rels } = presentationState(archive);
   const rel = rels.find((r) => r.resolvedTarget === part);
   if (!rel) throw new Error(`Slide not registered: ${part}`);
-  const node = descendants(list, 'sldId').find(
+  const node = presentationSlideIds(list).find(
     (n) => (n.getAttributeNS(NS.r, 'id') ?? attr(n, 'r:id')) === rel.id,
   );
   node?.parentNode?.removeChild(node);
@@ -140,11 +234,8 @@ export function removeSlide(archive: OpcArchive, part: string): void {
     .flatMap((r) => (r.resolvedTarget ? [r.resolvedTarget] : []));
   archive.deletePart(part);
   for (const target of targets) cleanupUnreferencedPart(archive, target);
-  archive.writeXml(
-    '/ppt/presentation.xml',
-    doc,
-    archive.getPart('/ppt/presentation.xml')?.mediaType,
-  );
+  archive.writeXml('/ppt/presentation.xml', doc);
+  syncAppSlideCounts(archive);
 }
 export function slideElementPart(refPart: string): string {
   return refPart.split('#')[0] ?? refPart;

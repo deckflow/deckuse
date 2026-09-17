@@ -1,0 +1,13 @@
+import { join, resolve } from 'node:path';
+
+export const sourceDir = (workspace: string) => join(resolve(workspace), 'source');
+export const deckuseDir = (workspace: string) => join(resolve(workspace), '.deckuse');
+export const manifestPath = (workspace: string) => join(deckuseDir(workspace), 'manifest.json');
+export const indexPath = (workspace: string) => join(deckuseDir(workspace), 'index.json');
+export const operationsPath = (workspace: string) =>
+  join(deckuseDir(workspace), 'operations.jsonl');
+export const monitorDir = (workspace: string) => join(deckuseDir(workspace), 'monitor');
+export const previewDir = (workspace: string) => join(deckuseDir(workspace), 'preview');
+export const renderDir = (workspace: string) => join(deckuseDir(workspace), 'render');
+export const lockPath = (workspace: string) => join(deckuseDir(workspace), 'write.lock');
+export const gitignorePath = (workspace: string) => join(resolve(workspace), '.gitignore');

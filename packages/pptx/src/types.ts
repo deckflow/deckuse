@@ -4,6 +4,8 @@ export type ElementKind =
   | 'shape'
   | 'textbox'
   | 'picture'
+  | 'video'
+  | 'audio'
   | 'connector'
   | 'group'
   | 'table'
@@ -34,5 +36,6 @@ export interface MutationOutcome {
   matched?: number;
   refs?: ElementRef[];
   partUri?: string;
+  slides?: number[];
   diagnostics?: import('@deckflow/deckuse-core').Diagnostic[];
 }

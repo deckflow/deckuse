@@ -1,6 +1,7 @@
 {
   "name": "@deckflow/deckuse",
   "private": true,
+  "license": "AGPL-3.0",
   "type": "module",
   "packageManager": "pnpm@10.6.3",
   "engines": {
@@ -12,13 +13,15 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "test:integration-writes": "node scripts/integration-writes.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:no-commercial-leak": "node scripts/assert-no-commercial-leak.mjs",
     "install:global": "node scripts/install-global.mjs",
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "latest",

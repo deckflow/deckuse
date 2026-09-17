@@ -1,0 +1,35 @@
+---
+description: 保存文本文件时使用可 diff 的格式化输出（JSON、XML 等）
+alwaysApply: true
+---
+
+# 文本文件格式化
+
+工作区中保存的文本类文件应使用稳定、可读的格式，便于 `git diff` 逐行对比变更。
+
+## JSON
+
+- 使用 2 空格缩进：`JSON.stringify(value, null, 2)`
+- 文件末尾保留单个换行符
+- `.jsonl` / JSON Lines：每行一个紧凑 JSON 对象，行末换行（不要整文件 pretty-print）
+
+## XML / RELS
+
+- 使用缩进（2 空格）和多行布局，不要把整份文档压成一行
+- 修改或写入工作区 `source/` 下的 OPC 部件时，保持格式化输出
+- 优先通过 `serializeXml` / `formatXmlBytes` 等现有工具写入，不要手写单行 XML
+
+## 其他文本
+
+- 项目内配置文件（`*.json`、`*.md` 等）遵循 Prettier（`pnpm format`）
+- 避免无意义的空白或属性重排；只改与任务相关的内容
+
+## 反例
+
+```json
+{"revision":"abc","elements":[{"ref":{"documentId":"x"}}]}
+```
+
+```xml
+<?xml version="1.0"?><p:sld xmlns:p="..."><p:cSld>...</p:cSld></p:sld>
+```

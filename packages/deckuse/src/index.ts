@@ -37,3 +37,20 @@ export const createDefaultExecutor = (): Executor =>
   );
 export const runCommand = async (input: unknown): Promise<Result<unknown>> =>
   createDefaultExecutor().execute(input);
+
+export { startMonitor, type MonitorHandle, type MonitorOptions } from './monitor.js';
+export {
+  renderPage,
+  type RenderDependencies,
+  type RenderOptions,
+  type RenderResult,
+} from './render.js';
+export {
+  EDITION,
+  EDITION_VARIANT,
+  DISTRIBUTION_CHANNEL,
+  editionCapabilities,
+  editionMetadata,
+  type Edition,
+  type EditionCapabilities,
+} from './edition.js';
