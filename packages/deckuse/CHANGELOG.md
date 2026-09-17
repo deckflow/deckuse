@@ -1,5 +1,19 @@
 # @deckflow/deckuse
 
+## 1.2.1
+
+### Patch Changes
+
+- Harden table layout and export, bump office2html, and sync npm README with agent skill install guidance.
+- Updated dependencies
+  - @deckflow/deckuse-core@1.2.1
+  - @deckflow/deckuse-pptx@1.2.1
+  - @deckflow/deckuse-docx@0.1.3
+  - @deckflow/deckuse-key@0.1.3
+  - @deckflow/deckuse-numbers@0.1.3
+  - @deckflow/deckuse-workspace@1.1.2
+  - @deckflow/deckuse-xlsx@0.1.3
+
 ## 1.2.0
 
 ### Minor Changes
