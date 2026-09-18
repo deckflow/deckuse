@@ -33,6 +33,8 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
    Use `deckuse render --page N` for visual QA. Community render may **not** show custom chart series colors; confirm via `ppt/charts/chart*.xml` or PowerPoint. Response includes `RENDER_FIDELITY` warnings.
 6. **Community Edition Boundaries**:
    `master:*` / `layout:*` / `theme` writes → `UNSUPPORTED_CAPABILITY`.
+7. **Monitor daemons**:
+   `deckuse monitor status` (no `--workspace`) lists all running `monitor start` daemons (pid/port/workspace). Stop with `--workspace <path>` or `stop --all`. Foreground `deckuse monitor` is not tracked.
 
 ---
 

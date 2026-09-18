@@ -180,6 +180,72 @@ describe('deckuse CLI', () => {
     expect(renderHelp.stdout).toContain('usage: deckuse render --page <n>');
     expect(renderHelp.stdout).toContain('--page <n>');
     expect(renderHelp.stdout).toContain('office2html');
+
+    const monitorHelp = await run(['monitor', '--help']);
+    expect(monitorHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(monitorHelp.stdout).toContain('usage: deckuse monitor');
+    expect(monitorHelp.stdout).toContain('list all running daemons');
+    expect(monitorHelp.stdout).toContain('--all');
+  });
+
+  it('monitor status without workspace lists daemons instead of requiring a workspace', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'deckuse-cli-home-'));
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (done) => {
+        const child = spawn(
+          process.execPath,
+          [resolve('packages/deckuse/dist/bin.js'), 'monitor', 'status', '--json'],
+          {
+            cwd: tmpdir(),
+            env: { ...process.env, DECKUSE_HOME: home },
+          },
+        );
+        let stdout = '',
+          stderr = '';
+        child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+        child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+        child.on('close', (code) => done({ code, stdout, stderr }));
+      },
+    );
+    expect(result.stderr).toBe('');
+    expect(result.code).toBe(0);
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      data: { monitors: unknown[] };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(Array.isArray(envelope.data.monitors)).toBe(true);
+    expect(result.stdout).not.toContain('No deckuse workspace found');
+  });
+
+  it('monitor stop without workspace errors with guidance', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'deckuse-cli-home-'));
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (done) => {
+        const child = spawn(
+          process.execPath,
+          [resolve('packages/deckuse/dist/bin.js'), 'monitor', 'stop', '--json'],
+          {
+            cwd: tmpdir(),
+            env: { ...process.env, DECKUSE_HOME: home },
+          },
+        );
+        let stdout = '',
+          stderr = '';
+        child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+        child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+        child.on('close', (code) => done({ code, stdout, stderr }));
+      },
+    );
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as {
+      ok: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe('INVALID_COMMAND');
+    expect(envelope.error?.message).toContain('--all');
+    expect(envelope.error?.message).toContain('monitor status');
   });
   it('runs init, list, get, set, validate, history, undo and export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),

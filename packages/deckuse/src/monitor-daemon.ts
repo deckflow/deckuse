@@ -1,28 +1,23 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { monitorDir } from '@deckflow/deckuse-workspace';
 import { startMonitor, type MonitorHandle } from './monitor.js';
+import {
+  discoverMonitorsFromProcessTable,
+  isProcessAlive,
+  listMonitorRegistrations,
+  processLooksLikeMonitorDaemon,
+  removeMonitorRegistration,
+  upsertMonitorRegistration,
+  type DaemonMeta,
+} from './monitor-registry.js';
 
-export interface DaemonMeta {
-  readonly pid: number;
-  readonly host: string;
-  readonly port: number;
-  readonly url: string;
-  readonly workspace: string;
-  readonly startedAt: string;
-}
+export type { DaemonMeta } from './monitor-registry.js';
 
 export const daemonMetaPath = (workspace: string) => join(monitorDir(workspace), 'daemon.json');
 
-const isAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+export { isProcessAlive as isAlive };
 
 export async function readDaemonMeta(workspace: string): Promise<DaemonMeta | null> {
   try {
@@ -33,9 +28,27 @@ export async function readDaemonMeta(workspace: string): Promise<DaemonMeta | nu
   }
 }
 
+async function syncGlobalUpsert(meta: DaemonMeta): Promise<void> {
+  try {
+    await upsertMonitorRegistration(meta);
+  } catch {
+    // best-effort; local meta remains authoritative for single-workspace ops
+  }
+}
+
+async function syncGlobalRemove(workspace: string): Promise<void> {
+  try {
+    await removeMonitorRegistration(workspace);
+  } catch {
+    // ignore
+  }
+}
+
 export async function writeDaemonMeta(workspace: string, meta: DaemonMeta): Promise<void> {
   await mkdir(monitorDir(workspace), { recursive: true });
-  await writeFile(daemonMetaPath(workspace), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  const normalized: DaemonMeta = { ...meta, workspace: resolve(workspace) };
+  await writeFile(daemonMetaPath(workspace), `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  await syncGlobalUpsert(normalized);
 }
 
 export async function clearDaemonMeta(workspace: string): Promise<void> {
@@ -44,6 +57,7 @@ export async function clearDaemonMeta(workspace: string): Promise<void> {
   } catch {
     // ignore
   }
+  await syncGlobalRemove(workspace);
 }
 
 export async function probeMonitor(url: string): Promise<boolean> {
@@ -55,42 +69,189 @@ export async function probeMonitor(url: string): Promise<boolean> {
   }
 }
 
+/**
+ * If pid is alive but does not look like our daemon, refuse to signal it.
+ * Returns true when it is safe to send SIGTERM/SIGKILL.
+ */
+async function maySignalMonitorPid(pid: number, workspace: string): Promise<boolean> {
+  if (!isProcessAlive(pid)) return false;
+  const looks = await processLooksLikeMonitorDaemon(pid, workspace);
+  // Inconclusive (e.g. Windows / ps failed): allow signal if alive — legacy behavior.
+  if (looks === null) return true;
+  return looks;
+}
+
 export async function monitorStatus(workspace: string): Promise<{
   running: boolean;
   meta: DaemonMeta | null;
   reachable: boolean;
 }> {
-  const meta = await readDaemonMeta(workspace);
+  const abs = resolve(workspace);
+  const meta = await readDaemonMeta(abs);
   if (!meta) return { running: false, meta: null, reachable: false };
-  const running = isAlive(meta.pid);
-  const reachable = running ? await probeMonitor(meta.url) : false;
-  if (!running) await clearDaemonMeta(workspace);
-  return { running, meta: running ? meta : null, reachable };
+  const running = isProcessAlive(meta.pid);
+  if (!running) {
+    await clearDaemonMeta(abs);
+    return { running: false, meta: null, reachable: false };
+  }
+  const looks = await processLooksLikeMonitorDaemon(meta.pid, abs);
+  if (looks === false) {
+    // PID reused by an unrelated process — prune registration without killing.
+    await clearDaemonMeta(abs);
+    return { running: false, meta: null, reachable: false };
+  }
+  const reachable = await probeMonitor(meta.url);
+  // Heal global registry if local is authoritative and running.
+  await syncGlobalUpsert({ ...meta, workspace: abs });
+  return { running: true, meta: { ...meta, workspace: abs }, reachable };
+}
+
+export interface MonitorStatusEntry extends DaemonMeta {
+  readonly running: boolean;
+  readonly reachable: boolean;
+}
+
+function displayUrl(host: string, port: number): string {
+  const displayHost = host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+  return `http://${displayHost}:${String(port)}/`;
+}
+
+/**
+ * Merge registry files with live process-table discovery, reconcile, return running monitors.
+ */
+export async function monitorStatusAll(): Promise<{ monitors: MonitorStatusEntry[] }> {
+  const byWorkspace = new Map<string, DaemonMeta>();
+
+  for (const reg of await listMonitorRegistrations()) {
+    byWorkspace.set(resolve(reg.workspace), {
+      ...reg,
+      workspace: resolve(reg.workspace),
+    });
+  }
+
+  for (const disc of await discoverMonitorsFromProcessTable()) {
+    const ws = resolve(disc.workspace);
+    const existing = byWorkspace.get(ws);
+    if (existing && existing.pid === disc.pid) continue;
+    const host = disc.host ?? existing?.host ?? '0.0.0.0';
+    const port = disc.port ?? existing?.port ?? 4173;
+    byWorkspace.set(ws, {
+      pid: disc.pid,
+      host,
+      port,
+      url: existing?.url ?? displayUrl(host, port),
+      workspace: ws,
+      startedAt: existing?.startedAt ?? new Date().toISOString(),
+    });
+  }
+
+  const monitors: MonitorStatusEntry[] = [];
+  for (const [ws, meta] of byWorkspace) {
+    const running = isProcessAlive(meta.pid);
+    if (!running) {
+      await removeMonitorRegistration(ws);
+      const local = await readDaemonMeta(ws);
+      if (local?.pid === meta.pid) {
+        try {
+          await rm(daemonMetaPath(ws), { force: true });
+        } catch {
+          // ignore
+        }
+      }
+      continue;
+    }
+    const looks = await processLooksLikeMonitorDaemon(meta.pid, ws);
+    if (looks === false) {
+      await removeMonitorRegistration(ws);
+      const local = await readDaemonMeta(ws);
+      if (local?.pid === meta.pid) {
+        try {
+          await rm(daemonMetaPath(ws), { force: true });
+        } catch {
+          // ignore
+        }
+      }
+      continue;
+    }
+    const reachable = await probeMonitor(meta.url);
+    // Do not persist process-table-only discoveries here (plan: read-only until heal path).
+    // Heal only when local daemon.json already exists.
+    const local = await readDaemonMeta(ws);
+    if (local && isProcessAlive(local.pid)) {
+      await syncGlobalUpsert({ ...meta, workspace: ws });
+    }
+    monitors.push({
+      ...meta,
+      workspace: ws,
+      running: true,
+      reachable,
+    });
+  }
+
+  monitors.sort((a, b) => a.workspace.localeCompare(b.workspace));
+  return { monitors };
 }
 
 export async function monitorStop(workspace: string): Promise<{ stopped: boolean; meta: DaemonMeta | null }> {
-  const meta = await readDaemonMeta(workspace);
-  if (!meta) return { stopped: false, meta: null };
-  if (isAlive(meta.pid)) {
+  const abs = resolve(workspace);
+  const meta = await readDaemonMeta(abs);
+  // Also try global registration if local missing (desync).
+  let target = meta;
+  if (!target) {
+    const regs = await listMonitorRegistrations();
+    target = regs.find((r) => resolve(r.workspace) === abs) ?? null;
+  }
+  if (!target) {
+    // Process-table fallback
+    const disc = (await discoverMonitorsFromProcessTable()).find((d) => resolve(d.workspace) === abs);
+    if (disc) {
+      const host = disc.host ?? '0.0.0.0';
+      const port = disc.port ?? 4173;
+      target = {
+        pid: disc.pid,
+        host,
+        port,
+        url: displayUrl(host, port),
+        workspace: abs,
+        startedAt: new Date().toISOString(),
+      };
+    }
+  }
+  if (!target) return { stopped: false, meta: null };
+
+  if (await maySignalMonitorPid(target.pid, abs)) {
     try {
-      process.kill(meta.pid, 'SIGTERM');
+      process.kill(target.pid, 'SIGTERM');
     } catch {
       // ignore
     }
     for (let i = 0; i < 20; i++) {
-      if (!isAlive(meta.pid)) break;
+      if (!isProcessAlive(target.pid)) break;
       await new Promise((r) => setTimeout(r, 100));
     }
-    if (isAlive(meta.pid)) {
+    if (isProcessAlive(target.pid) && (await maySignalMonitorPid(target.pid, abs))) {
       try {
-        process.kill(meta.pid, 'SIGKILL');
+        process.kill(target.pid, 'SIGKILL');
       } catch {
         // ignore
       }
     }
   }
-  await clearDaemonMeta(workspace);
-  return { stopped: true, meta };
+  await clearDaemonMeta(abs);
+  return { stopped: true, meta: target };
+}
+
+export async function monitorStopAll(): Promise<{
+  stopped: number;
+  results: Array<{ workspace: string; stopped: boolean; meta: DaemonMeta | null }>;
+}> {
+  const { monitors } = await monitorStatusAll();
+  const results: Array<{ workspace: string; stopped: boolean; meta: DaemonMeta | null }> = [];
+  for (const entry of monitors) {
+    const result = await monitorStop(entry.workspace);
+    results.push({ workspace: entry.workspace, ...result });
+  }
+  return { stopped: results.filter((r) => r.stopped).length, results };
 }
 
 /**
@@ -101,10 +262,11 @@ export async function monitorStart(
   workspace: string,
   options: { host?: string; port?: number } = {},
 ): Promise<DaemonMeta> {
-  const existing = await monitorStatus(workspace);
+  const abs = resolve(workspace);
+  const existing = await monitorStatus(abs);
   if (existing.running && existing.meta) {
     if (existing.reachable) return existing.meta;
-    await monitorStop(workspace);
+    await monitorStop(abs);
   }
 
   const host = options.host ?? '0.0.0.0';
@@ -119,7 +281,7 @@ export async function monitorStart(
       'monitor',
       '--daemon-worker',
       '--workspace',
-      workspace,
+      abs,
       '--host',
       host,
       '--port',
@@ -142,32 +304,32 @@ export async function monitorStart(
     host,
     port,
     url: urlGuess,
-    workspace,
+    workspace: abs,
     startedAt: new Date().toISOString(),
   };
-  await writeDaemonMeta(workspace, meta);
+  await writeDaemonMeta(abs, meta);
 
   let reachable = false;
   for (let i = 0; i < 40; i++) {
-    const disk = await readDaemonMeta(workspace);
+    const disk = await readDaemonMeta(abs);
     if (disk?.url) meta = disk;
     if (await probeMonitor(meta.url)) {
       reachable = true;
       break;
     }
-    if (!isAlive(child.pid)) break;
+    if (!isProcessAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 100));
   }
   if (!reachable) {
     try {
-      if (isAlive(child.pid)) process.kill(child.pid, 'SIGTERM');
+      if (isProcessAlive(child.pid)) process.kill(child.pid, 'SIGTERM');
     } catch {
       // ignore
     }
-    await clearDaemonMeta(workspace);
+    await clearDaemonMeta(abs);
     throw new Error(
       `Monitor failed to start on ${host}:${String(port)} (EADDRINUSE or bind failure). ` +
-        `Try --port 0 for an ephemeral port, or run deckuse monitor status --workspace <path>.`,
+        `Try --port 0 for an ephemeral port, or run deckuse monitor status.`,
     );
   }
   return meta;
@@ -178,22 +340,23 @@ export async function runMonitorForeground(
   workspace: string,
   options: { host?: string; port?: number; asDaemonWorker?: boolean } = {},
 ): Promise<MonitorHandle> {
-  const monitor = await startMonitor(workspace, {
+  const abs = resolve(workspace);
+  const monitor = await startMonitor(abs, {
     host: options.host ?? '0.0.0.0',
     port: options.port ?? 4173,
   });
   if (options.asDaemonWorker) {
     const port = Number(new URL(monitor.url).port || (options.port ?? 4173));
-    await writeDaemonMeta(workspace, {
+    await writeDaemonMeta(abs, {
       pid: process.pid,
       host: options.host ?? '0.0.0.0',
       port,
       url: monitor.url,
-      workspace,
+      workspace: abs,
       startedAt: new Date().toISOString(),
     });
     const cleanup = async () => {
-      await clearDaemonMeta(workspace);
+      await clearDaemonMeta(abs);
       await monitor.close();
     };
     process.once('SIGINT', () => void cleanup().then(() => process.exit(0)));

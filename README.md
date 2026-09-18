@@ -92,6 +92,10 @@ deckuse export ./out.pptx --workspace ./workspace --json
 
 # Live HTML preview; conversion starts when a browser subscribes.
 deckuse monitor --workspace ./workspace --port 4173
+# Background daemon: start / status (lists all when --workspace omitted) / stop [--all]
+deckuse monitor start --workspace ./workspace --port 0
+deckuse monitor status --json
+deckuse monitor stop --workspace ./workspace
 
 # Screenshot one slide to PNG for visual review (requires Chrome / Chromium / Edge).
 deckuse render --page 1 --workspace ./workspace --json

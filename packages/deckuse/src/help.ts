@@ -636,15 +636,16 @@ Notes:
 
   monitor: {
     usage:
-      'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>]',
+      'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>] [--all]',
     summary:
       'Live HTML preview. Bare `monitor` is foreground; start/status/stop manage a background daemon.',
     example: 'deckuse monitor start --workspace ./workspace --port 4173',
     details: `Subcommands:
   (none)                    Foreground server until SIGINT/SIGTERM
   start                     Detach a background daemon (writes .deckuse/monitor/daemon.json)
-  status                    Show daemon pid / url / reachability
-  stop                      SIGTERM the daemon and clear daemon.json
+  status                    Without --workspace: list all running daemons (port, pid, workspace).
+                            With --workspace: show that workspace daemon pid / url / reachability
+  stop                      SIGTERM the daemon and clear daemon.json (requires --workspace or --all)
 
 Arguments:
   <workspace>               Optional workspace path (or use --workspace)
@@ -653,15 +654,19 @@ Options:
   --host <addr>             Bind address (default: 0.0.0.0)
   --port <n>                Port 0–65535 (default: 4173). Use 0 for an ephemeral free port.
   --workspace <path>        Workspace root
+  --all                     With stop: stop every running monitor daemon
 
 Notes:
+  Only \`monitor start\` / daemon-worker processes are tracked (not foreground \`monitor\`).
+  Global index: ~/.deckflow/deckuse/monitors/ (override with DECKUSE_HOME).
   Port conflicts (EADDRINUSE) return a clear error; daemon start fails if unreachable.
 
 Examples:
   deckuse monitor --port 4173
   deckuse monitor start --port 0
   deckuse monitor status --json
-  deckuse monitor stop`,
+  deckuse monitor stop --workspace ./workspace
+  deckuse monitor stop --all`,
   },
 
   render: {

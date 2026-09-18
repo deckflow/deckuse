@@ -17,7 +17,9 @@ import { runCommand } from './index.js';
 import {
   monitorStart,
   monitorStatus,
+  monitorStatusAll,
   monitorStop,
+  monitorStopAll,
   runMonitorForeground,
 } from './monitor-daemon.js';
 import { renderPage } from './render.js';
@@ -866,6 +868,7 @@ try {
       const sub =
         clean[1] === 'start' || clean[1] === 'stop' || clean[1] === 'status' ? clean[1] : undefined;
       const daemonWorker = takeFlag(clean, '--daemon-worker');
+      const stopAll = takeFlag(clean, '--all');
       const positionalWorkspace = sub
         ? clean[2] && !clean[2].startsWith('--')
           ? clean[2]
@@ -873,11 +876,58 @@ try {
         : clean[1] && !clean[1].startsWith('--')
           ? clean[1]
           : undefined;
-      const workspace = await findWorkspace(workspaceOpt ?? positionalWorkspace);
+      const hasWorkspaceArg = Boolean(workspaceOpt ?? positionalWorkspace);
       const port = Number(optionFrom(clean, '--port') ?? 4173);
       if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new Error('--port must be an integer between 0 and 65535');
       const host = optionFrom(clean, '--host') ?? '0.0.0.0';
+
+      if (sub === 'status' && !hasWorkspaceArg) {
+        const result = await monitorStatusAll();
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse monitor status',
+          data: result,
+        });
+        return;
+      }
+
+      if (sub === 'stop' && stopAll) {
+        const result = await monitorStopAll();
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse monitor stop',
+          data: result,
+        });
+        return;
+      }
+
+      if (sub === 'stop' && !hasWorkspaceArg) {
+        const listed = await monitorStatusAll();
+        const summary =
+          listed.monitors.length === 0
+            ? 'No running monitor daemons found.'
+            : `Running monitors:\n${listed.monitors
+                .map(
+                  (m) =>
+                    `  pid=${String(m.pid)} port=${String(m.port)} workspace=${m.workspace} url=${m.url}`,
+                )
+                .join('\n')}`;
+        outputEnvelope({
+          ok: false,
+          command: 'deckuse monitor stop',
+          error: {
+            code: 'INVALID_COMMAND',
+            message:
+              `Pass --workspace <path>, a workspace path argument, or --all. ` +
+              `Run deckuse monitor status to list daemons.\n${summary}`,
+          },
+        });
+        process.exitCode = 1;
+        return;
+      }
+
+      const workspace = await findWorkspace(workspaceOpt ?? positionalWorkspace);
 
       if (sub === 'start') {
         try {
