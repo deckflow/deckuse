@@ -22,6 +22,7 @@ Community edition:
 
 - **Allows** editing common slide objects: shapes, text boxes, connectors, groups, pictures, tables, and **basic** charts (`pie` / `line` / `bar`/`column` families, plus **limited combo** = one `barChart` + one `lineChart` with optional dual Y-axis).
 - **Allows** listing and resolving masters, layouts, and themes; placeholder inheritance reads remain available.
+- **Allows** rebinding a slide to another layout (`setSlideLayout` / `addSlide.layout`) — this updates the slide→slideLayout relationship only.
 - **Rejects** writes to master slides, layout slides, and theme parts (`UNSUPPORTED_CAPABILITY`).
 - **Rejects** edits to **advanced** charts (other non-basic families, ChartEx, unclassifiable charts, combos other than bar+line).
 - Embeds the closed-source `office2html` engine (not `office2html plus`).

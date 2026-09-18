@@ -32,7 +32,8 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
 5. **Structural Engine, Not Visual Brain**:
    Use `deckuse render --page N` for visual QA. Community render may **not** show custom chart series colors; confirm via `ppt/charts/chart*.xml` or PowerPoint. Response includes `RENDER_FIDELITY` warnings.
 6. **Community Edition Boundaries**:
-   `master:*` / `layout:*` / `theme` writes → `UNSUPPORTED_CAPABILITY`.
+   Writing `master:*` / `layout:*` / `theme` **part contents** → `UNSUPPORTED_CAPABILITY`.
+   Rebinding a slide's layout (`setSlideLayout`) is allowed — it only changes the relationship.
 7. **Monitor daemons**:
    `deckuse monitor status` (no `--workspace`) lists all running `monitor start` daemons (pid/port/workspace). Stop with `--workspace <path>` or `stop --all`. Foreground `deckuse monitor` is not tracked.
 
@@ -124,7 +125,23 @@ Intra-paragraph color (e.g. red first letter) — **`runs` is supported**:
 }
 ```
 
-### B. Financial table
+### B. Switch slide layout (rebind)
+
+Rebind an existing slide to another layout **without** editing layout parts (community-safe). Prefer `list layouts` for indexes / display names first.
+
+```json
+[
+  { "type": "setSlideLayout", "slide": 1, "layout": "2" },
+  { "type": "setSlideLayout", "slide": 1, "layout": "slide:3" },
+  { "type": "setSlideLayout", "slide": 2, "layout": "Blank" }
+]
+```
+
+CLI: `deckuse set slide-layout --slide 1 --layout 2` or `--layout slide:3`.
+
+`layout` accepts: 1-based index, `layout:N`, `slide:N` (copy that slide's layout), display name (`Blank`), or basename (`slideLayout2`). Same refs work on `addSlide.layout`. This only updates the slide→slideLayout relationship; shapes are preserved. Writing `layout:*` / `master:*` **part contents** remains `UNSUPPORTED_CAPABILITY`.
+
+### C. Financial table
 
 `height: "auto"` is a **heuristic** (wrap + padding); still `render` and watch `TABLE_HEIGHT_MAY_CLIP`. If the frame was resized with `xfrmSet` only, follow with `setTableLayout` (`height: "auto"` or `redistribute: "content"|"equal"`) — do not keep bumping `xfrm --height`.
 
@@ -148,7 +165,7 @@ Intra-paragraph color (e.g. red first letter) — **`runs` is supported**:
 }
 ```
 
-### C. Flow / loop (native presets — no Pillow)
+### D. Flow / loop (native presets — no Pillow)
 
 Shape vocabulary: `line`/`connector`; `elbow` / `curved-connector`; `arrow` / `left-arrow` / …; `rounded-rect` + `cornerRadius`; **`chevron`**, **`pentagon`**, **`trapezoid`**, **`triangle`**, **`circular-arrow`**, **`curved-right-arrow`**, **`curved-left-arrow`**.
 
@@ -180,11 +197,11 @@ Shape vocabulary: `line`/`connector`; `elbow` / `curved-connector`; `arrow` / `l
 ]
 ```
 
-### D. Charts / Align / replaceText
+### E. Charts / Align / replaceText
 
 Prefer `column|bar|line|pie` for render. Series `color` is written into chart XML. **Community `render` may still show theme defaults** — verify XML or PowerPoint.
 
-### E. Capability fallback (last resort)
+### F. Capability fallback (last resort)
 
 Only when no preset fits: `shapeType: "image"`. Do **not** default to Pillow/SVG for connectors or arrows.
 

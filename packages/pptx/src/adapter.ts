@@ -15,6 +15,12 @@ import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addre
 import { editionCapabilities, editionMetadata } from './edition.js';
 import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
 import { loadIndex } from './index-sync.js';
+import {
+  layoutDisplayName,
+  layoutListMeta,
+  orderedLayouts,
+  slideLayoutPart,
+} from './layout-ref.js';
 import { mutate } from './mutations.js';
 import { resolveProperties } from './resolve-properties.js';
 import { syncAppSlideCounts } from './slides.js';
@@ -46,6 +52,7 @@ const WRITE_TYPES = new Set([
   'alignElements',
   'add',
   'addSlide',
+  'setSlideLayout',
   'addShape',
   'remove',
   'replacePicture',
@@ -57,7 +64,7 @@ const WRITE_TYPES = new Set([
 export const pptxCapabilities = {
   protocol: '2.0',
   ...editionMetadata,
-  slides: { add: true, duplicate: true, remove: true },
+  slides: { add: true, duplicate: true, remove: true, setLayout: true },
   // Master/layout/theme: list always. `edit` flags are status metadata only —
   // writes require a registered PptxEditionExtension (never opened by flags alone).
   masters: { list: true, edit: editionCapabilities.mastersEdit },
@@ -276,22 +283,41 @@ const assertExpectRevision = (
 };
 
 const listResource = (
+  archive: OpcArchive,
   index: ReturnType<typeof buildIndex>,
   resource: 'slides' | 'shapes' | 'layouts' | 'masters' | 'theme',
   slide?: number,
 ) => {
   if (resource === 'slides') {
+    const layouts = orderedLayouts(index);
+    const layoutIndexByPart = new Map(
+      layouts.map((item, i) => [item.partUri, i + 1] as const),
+    );
     return index.elements
       .filter((item) => item.kind === 'slide')
-      .map((item, i) => ({
-        target: `slide:${i + 1}`,
-        uid: uidForItem(item),
-        index: i + 1,
-        slideId: item.slideId,
-        name: item.name,
-        titlePreview: item.text?.slice(0, 80),
-        partUri: item.partUri,
-      }));
+      .map((item, i) => {
+        const layoutPart = slideLayoutPart(archive, item.partUri);
+        const layout =
+          layoutPart !== undefined
+            ? {
+                target: `layout:${layoutPart.split('/').pop()?.replace(/\.xml$/i, '') ?? layoutPart}`,
+                displayName: layoutDisplayName(archive, layoutPart),
+                ...(layoutIndexByPart.has(layoutPart)
+                  ? { index: layoutIndexByPart.get(layoutPart)! }
+                  : {}),
+              }
+            : undefined;
+        return {
+          target: `slide:${i + 1}`,
+          uid: uidForItem(item),
+          index: i + 1,
+          slideId: item.slideId,
+          name: item.name,
+          titlePreview: item.text?.slice(0, 80),
+          partUri: item.partUri,
+          ...(layout !== undefined ? { layout } : {}),
+        };
+      });
   }
   if (resource === 'shapes') {
     if (slide === undefined)
@@ -333,7 +359,13 @@ const listResource = (
       }));
   }
   if (resource === 'layouts' || resource === 'masters') {
-    const kind = resource === 'layouts' ? 'layout' : 'master';
+    if (resource === 'layouts') {
+      return orderedLayouts(index).map((item, i) => ({
+        ...layoutListMeta(archive, item, i + 1),
+        uid: uidForItem(item),
+      }));
+    }
+    const kind = 'master';
     return index.elements
       .filter((item) => item.kind === kind)
       .map((item) => ({
@@ -577,7 +609,7 @@ export const pptxAdapter: FormatAdapter = {
       }
 
       if (command.type === 'list') {
-        const listed = listResource(index, command.resource, command.slide);
+        const listed = listResource(archive, index, command.resource, command.slide);
         if (listed && typeof listed === 'object' && 'ok' in listed && listed.ok === false)
           return listed;
         return ok({ resource: command.resource, items: listed });
@@ -748,6 +780,7 @@ export const pptxAdapter: FormatAdapter = {
         const STRUCTURAL_TYPES = new Set([
           'addShape',
           'addSlide',
+          'setSlideLayout',
           'remove',
           'duplicate',
           'add',

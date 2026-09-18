@@ -187,12 +187,27 @@ describe('community edition write gates', () => {
       if (!denied.ok) expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
     }
 
+    const rebindOk = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setSlideLayout',
+        workspaceId: workspace,
+        transactionId: rev,
+        slide: 1,
+        layout: 'slideLayout1',
+      },
+      {},
+    );
+    expect(rebindOk.ok).toBe(true);
+
     const slideOk = await pptxAdapter.execute(
       {
         version: '2.0',
         type: 'setText',
         workspaceId: workspace,
-        transactionId: rev,
+        transactionId: (rebindOk.ok
+          ? (rebindOk.value as { revision: string }).revision
+          : rev),
         target: 'slide:1/shape:2',
         text: 'StillOk',
       },

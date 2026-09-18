@@ -383,8 +383,20 @@ const addSlideCommandSchema = z
     ...mutationBase,
     type: z.literal('addSlide'),
     after: z.number().int().nonnegative().optional(),
+    /** Layout ref: index, layout:N, slide:N, display name, or basename. */
     layout: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
+  })
+  .strict();
+
+const setSlideLayoutCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('setSlideLayout'),
+    slide: z.number().int().positive(),
+    /** Layout ref: index, layout:N, slide:N, display name, or basename. */
+    layout: z.string().min(1),
   })
   .strict();
 
@@ -653,6 +665,7 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   alignElementsCommandSchema,
   addCommandSchema,
   addSlideCommandSchema,
+  setSlideLayoutCommandSchema,
   addShapeCommandSchema,
   removeCommandSchema,
   replacePictureCommandSchema,
@@ -689,6 +702,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   alignElementsCommandSchema,
   addCommandSchema,
   addSlideCommandSchema,
+  setSlideLayoutCommandSchema,
   addShapeCommandSchema,
   removeCommandSchema,
   replacePictureCommandSchema,

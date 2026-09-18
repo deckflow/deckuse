@@ -120,6 +120,15 @@ describe('addressing', () => {
     expect(resolved.value.item.partUri).toBe('/ppt/slideLayouts/slideLayout1.xml');
   });
 
+  it('resolves layout:2 as 1-based natural-order index', () => {
+    const index = sampleIndex();
+    // sampleIndex has layout1, layout10, layout11 → natural order: 1, 10, 11
+    const resolved = resolveTarget(index, 'layout:2');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.target).toBe('layout:slideLayout10');
+  });
+
   it('resolves layout:slideLayout10 uniquely among numbered layouts', () => {
     const index = sampleIndex();
     const resolved = resolveTarget(index, 'layout:slideLayout10');

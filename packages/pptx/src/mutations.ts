@@ -19,7 +19,8 @@ import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from '
 import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
-import { addSlide, duplicateSlide, ensureNotes, removeSlide } from './slides.js';
+import { addSlide, duplicateSlide, ensureNotes, removeSlide, setSlideLayout } from './slides.js';
+import { resolveLayoutRef } from './layout-ref.js';
 import { lengthContextFor } from './slide-size.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
 import { applyTableCellProperties, applyTableLayout, applyTableProperties } from './table.js';
@@ -769,32 +770,11 @@ export async function mutate(
     const slides = index.elements.filter((item) => item.kind === 'slide');
     let layout: string | undefined;
     if (command.layout) {
-      const layouts = index.elements.filter((item) => item.kind === 'layout');
-      const needle = command.layout.toLowerCase();
-      const layoutDisplayName = (partUri: string): string => {
-        try {
-          const cSld = first(archive.readXml(partUri), 'cSld');
-          return (attr(cSld, 'name') ?? '').toLowerCase();
-        } catch {
-          return '';
-        }
-      };
-      const match = layouts.find((item) => {
-        const fileName = (item.partUri.split('/').pop()?.replace(/\.xml$/i, '') ?? '').toLowerCase();
-        const display = layoutDisplayName(item.partUri);
-        // Match by cSld@name (e.g. "Blank") or part basename — never treat
-        // needle==="blank" as matching every layout (that picked Title Slide).
-        // Prefer exact basename / display; substring display match only (not
-        // fileName.includes) so slideLayout1 does not hit slideLayout10.
-        return (
-          display === needle ||
-          fileName === needle ||
-          (needle !== 'blank' && display.includes(needle))
-        );
+      const resolved = resolveLayoutRef(archive, index, command.layout, {
+        allowBlankFallback: true,
       });
-      if (!match && needle !== 'blank')
-        return err('TARGET_NOT_FOUND', `Layout not found: ${command.layout}`);
-      layout = match?.partUri;
+      if (!resolved.ok) return resolved;
+      layout = resolved.value;
     }
     // Prefer an explicit layout; otherwise inherit the layout of the anchor slide
     // (or the first slide) so blank pages still bind to a slideLayout.
@@ -815,6 +795,30 @@ export async function mutate(
       partUri,
       slides: [],
       changedParts: [partUri, '/ppt/presentation.xml'],
+    });
+  }
+
+  if (command.type === 'setSlideLayout') {
+    const slides = index.elements.filter((item) => item.kind === 'slide');
+    const slide = slides[command.slide - 1];
+    if (!slide)
+      return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
+        target: `slide:${command.slide}`,
+        hint: 'Run deckuse list slides --json.',
+      });
+    const resolved = resolveLayoutRef(archive, index, command.layout);
+    if (!resolved.ok) return resolved;
+    const layoutPart = resolved.value;
+    if (!layoutPart)
+      return err('TARGET_NOT_FOUND', `Layout not found: ${command.layout}`, [], {
+        target: command.layout,
+      });
+    const changed = setSlideLayout(archive, slide.partUri, layoutPart);
+    return ok({
+      changed,
+      slides: [command.slide],
+      changedTargets: [`slide:${command.slide}`],
+      changedParts: changed ? [slide.partUri] : [],
     });
   }
 
@@ -985,7 +989,8 @@ export async function mutate(
 
   // Edition gate (master/layout/theme/advanced chart): hard-deny unless
   // a registered PptxEditionExtension allows the target.
-  // Slide add/remove/duplicate and addSlide layout binding are not gated here.
+  // Slide add/remove/duplicate, addSlide layout binding, and setSlideLayout
+  // rebind are not gated here.
   if (item.kind !== 'slide') {
     const gated = assertWritable(item, archive);
     if (!gated.ok) return gated;

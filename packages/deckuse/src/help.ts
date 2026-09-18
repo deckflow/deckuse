@@ -27,7 +27,7 @@ Commands:
   search        Search text or shapes
   add           Add a slide or shape
   remove        Remove a slide or shape target
-  set           Set text or dotted properties on a target
+  set           Set text, slide layout, or dotted properties on a target
   replace-text  Find/replace text across the deck
   xfrm          Set geometry (x/y/width/height/rotation)
   align         Align or distribute shapes on a slide
@@ -142,12 +142,15 @@ Options:
 
   'list layouts': {
     usage: 'deckuse list layouts [options]',
-    summary: 'List slide layouts available in the package.',
+    summary: 'List slide layouts (index, displayName, type, target) in stable order.',
     example: 'deckuse list layouts --json',
     details: `Options:
   --workspace <path>        Workspace root
   --revision <rev>          Read a historical revision
-  --json                    Machine-readable envelope`,
+  --json                    Machine-readable envelope
+
+Items include 1-based index (usable as --layout 2 / layout:2), displayName
+(cSld@name), optional type (sldLayout@type), target, and partUri.`,
   },
 
   'list masters': {
@@ -264,10 +267,12 @@ Run 'deckuse add <slide|shape> --help' for details.`,
   'add slide': {
     usage: 'deckuse add slide [options]',
     summary: 'Insert one slide (and package/relationship updates) in a single revision.',
-    example: 'deckuse add slide --after 5 --layout title-and-content --name feature-page --json',
+    example: 'deckuse add slide --after 5 --layout 2 --name feature-page --json',
     details: `Options:
   --after <n>               Insert after one-based slide index (append if omitted)
-  --layout <name-or-id>     Layout to use (blank / title-and-content / ...)
+  --layout <ref>            Layout ref: index (2), layout:2, slide:N (copy that
+                            slide's layout), display name (Blank), or basename
+                            (slideLayout2). Omit to inherit anchor/first slide.
   --name <name>             Slide name stored in inventory
   ${WRITE_GLOBALS}`,
   },
@@ -338,12 +343,18 @@ Options:
   },
 
   set: {
-    usage: 'deckuse set text <target> --value <text> | deckuse set <target> --prop value ...',
-    summary: 'Write text or dotted semantic properties on exactly one target.',
-    example: "deckuse set slide:1/shape:2 --font.size 42 --fill.color '#0A2930' --json",
+    usage:
+      'deckuse set text <target> --value <text> | deckuse set slide-layout --slide <n> --layout <ref> | deckuse set <target> --prop value ...',
+    summary: 'Write text, rebind slide layout, or set dotted semantic properties.',
+    example: "deckuse set slide-layout --slide 1 --layout 2 --json",
     details: `Forms:
   set text <target> --value <text>
+  set slide-layout --slide <n> --layout <ref>
   set <target> --font.size 42 --fill.color '#RRGGBB' ...
+
+set slide-layout rebinds the slide→slideLayout relationship (does not edit
+layout parts). --layout accepts: index (2), layout:2, slide:N (copy that
+slide's layout), display name (Blank), or basename (slideLayout2).
 
 Common properties:
   font.family, font.size, font.weight, font.color, font.italic
@@ -367,7 +378,25 @@ Options:
   --value <text>            Required for set text
   ${WRITE_GLOBALS}
 
-Run 'deckuse set text --help' for the text form.`,
+Run 'deckuse set text --help' or 'deckuse set slide-layout --help' for those forms.`,
+  },
+
+  'set slide-layout': {
+    usage: 'deckuse set slide-layout --slide <n> --layout <ref> [options]',
+    summary:
+      'Rebind a slide to another slideLayout (by index, layout:N, slide:N, or name).',
+    example: 'deckuse set slide-layout --slide 1 --layout slide:3 --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+  --layout <ref>            Layout index (2), layout:2, slide:N, display name,
+                            or basename (slideLayout2). See list layouts --json.
+
+Notes:
+  Only updates the slide→layout relationship; slide shapes are preserved.
+  Writing layout:* / master:* part contents remains community-gated.
+
+Options:
+  ${WRITE_GLOBALS}`,
   },
 
   'set text': {

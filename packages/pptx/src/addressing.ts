@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { err, type ElementRef, type Result } from '@deckflow/deckuse-core';
 import type { IndexFile, IndexedElement } from './types.js';
+import { orderedLayouts } from './layout-ref.js';
 import { findIndexed, slidePageMap } from './indexer.js';
 
 export type TargetKind =
@@ -311,6 +312,22 @@ export function resolveTarget(
   }
 
   if (parsed.kind === 'layout' && parsed.layout) {
+    // Numeric layout:N matches list layouts 1-based index (natural basename order).
+    if (/^\d+$/.test(parsed.layout)) {
+      const page = Number(parsed.layout);
+      const layouts = orderedLayouts(index);
+      const item = layouts[page - 1];
+      if (!item)
+        return err('TARGET_NOT_FOUND', `Layout index out of range: ${page}`, [], {
+          target: raw,
+          hint: 'Run deckuse list layouts --json.',
+        });
+      return {
+        ok: true,
+        value: { target: targetPathForItem(index, item), uid: uidForItem(item), item, parsed },
+        diagnostics: [],
+      };
+    }
     const matches = matchNamedParts(index, 'layout', parsed.layout);
     if (matches.length === 0)
       return err('TARGET_NOT_FOUND', `Layout not found: ${parsed.layout}`, [], { target: raw });

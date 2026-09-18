@@ -654,6 +654,22 @@ try {
             value,
           });
         }
+      } else if (clean[1] === 'slide-layout') {
+        const slideRaw = optionFrom(clean, '--slide');
+        const layout = optionFrom(clean, '--layout');
+        if (!slideRaw || !layout)
+          throw new Error(
+            'Usage: deckuse set slide-layout --slide <n> --layout <index|layout:N|slide:N|name>',
+          );
+        const slide = Number(slideRaw);
+        if (!Number.isInteger(slide) || slide < 1)
+          throw new Error('--slide must be a positive integer');
+        ok = await execute('deckuse set slide-layout', {
+          ...base,
+          type: 'setSlideLayout',
+          slide,
+          layout,
+        });
       } else {
         const target = clean[1];
         if (!target) throw new Error('Usage: deckuse set <target> --font.size 42 ...');

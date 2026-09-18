@@ -211,6 +211,36 @@ export function addSlide(
 export function duplicateSlide(archive: OpcArchive, part: string): string {
   return addSlide(archive, part);
 }
+
+/**
+ * Rebind a slide's slideLayout relationship. Does not remap placeholders.
+ * Returns whether the relationship target actually changed.
+ */
+export function setSlideLayout(
+  archive: OpcArchive,
+  slidePart: string,
+  layoutPart: string,
+): boolean {
+  if (!archive.getPart(slidePart)) throw new Error(`Slide missing: ${slidePart}`);
+  if (!archive.getPart(layoutPart)) throw new Error(`Layout missing: ${layoutPart}`);
+  const rels = [...archive.getRelationships(slidePart)];
+  const existingIdx = rels.findIndex((r) => r.type === REL.layout);
+  const existing = existingIdx >= 0 ? rels[existingIdx] : undefined;
+  if (existing?.resolvedTarget === layoutPart) return false;
+  const target = relativeTarget(slidePart, layoutPart);
+  const nextRel: OpcRelationship = {
+    id: existing?.id ?? nextRelId(rels),
+    type: REL.layout,
+    target,
+    external: false,
+    resolvedTarget: layoutPart,
+  };
+  if (existingIdx >= 0) rels[existingIdx] = nextRel;
+  else rels.push(nextRel);
+  archive.setRelationships(slidePart, rels);
+  return true;
+}
+
 export function removeSlide(archive: OpcArchive, part: string): void {
   const { doc, list, rels } = presentationState(archive);
   const rel = rels.find((r) => r.resolvedTarget === part);

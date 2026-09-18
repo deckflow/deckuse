@@ -332,7 +332,7 @@ Deckuse 为智能体提供稳定引用、选择器、事务、验证和确定性
 - 几何支持 **EMU 数字或单位字符串**（`px`@96DPI、`pt`、`cm`、`mm`、`in`、相对幻灯片的 `%`）。`alignElements` / `deckuse align` 将对齐结果写回绝对 EMU。同一次 `apply` 内可按形状 `name` 前向引用刚 `addShape` 的对象。
 - `setTransform` 用于显式设置对象位置、尺寸、旋转与翻转。
 - `setProperties` 用于常见形状与文本属性，包括 `paragraph.align`（可用 `center`/`left` 等别名）、`paragraph.level`、`bullet`、填充透明度、`hyperlink`、`wrap`、`anchor`/`valign`、`cornerRadius`。
-- 可添加、复制与删除幻灯片；复制幻灯片时会克隆可变的备注与图表部件，版式与媒体可安全共享。
+- 可添加、复制、删除幻灯片，以及将已有页切换到另一版式（`setSlideLayout` / `deckuse set slide-layout`）；layout 引用支持序号、`layout:N`、`slide:N`、显示名或 basename。切换只改 slide→layout 关系，不编辑 layout 部件本身。复制幻灯片时会克隆可变的备注与图表部件，版式与媒体可安全共享。
 - 可添加形状/文本框（可选 `role` 写出 `p:ph` 占位符）、直线连接线（`line`/`connector`）、折线/曲线连接线、箭头预设、组合、图片（文件路径或 base64）、表格、图表（仅缓存）以及嵌入的视频/音频；可复制或删除元素。
 - `role` 须为 OOXML 占位符类型（`title`、`body`、`subTitle`、`ctrTitle` 等）。常见别名会规范化（如 `subtitle`→`subTitle`）；非 OOXML 标签（如 `card`）会被拒绝，以免 PowerPoint 提示修复。
 - 可用 `slide:N/placeholder:<type>` 寻址占位符；可用 `slide:N/shape:X/run:K` 对单个 run 做 `setProperties`。
