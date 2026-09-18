@@ -310,7 +310,7 @@ Deckuse fournit à l’agent des références stables, des sélecteurs, des tran
 - `setText` and `replaceText`, including literal or regular-expression replacement in an optional selector scope. Without a selector, `replaceText` prefers leaf text nodes over ancestor containers that aggregate descendant text. Newlines in `setText` become separate paragraphs.
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties, including `paragraph.align`, `paragraph.level`, `bullet`, `fill` transparency, and `hyperlink`.
-- Add, duplicate, and remove slides; duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
+- Add, duplicate, remove, and rebind slides to another layout (`setSlideLayout` / `deckuse set slide-layout`); layout refs accept index, `layout:N`, `slide:N`, display name, or basename. Rebind updates the relationship only (does not edit layout parts). Duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
 - Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), connectors, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
 - `role` must be an OOXML placeholder type (`title`, `body`, `subTitle`, `ctrTitle`, …). Common aliases like `subtitle`→`subTitle` are normalized; non-OOXML labels (for example `card`) are rejected so PowerPoint does not prompt to repair.
 - Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `subTitle`, `ctrTitle`).
