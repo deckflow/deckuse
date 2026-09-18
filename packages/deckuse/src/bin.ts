@@ -259,6 +259,7 @@ const APPLY_WRITE_TYPES = new Set([
   'setTransform',
   'setProperties',
   'set',
+  'setSlideLayout',
   'xfrmSet',
   'zMove',
   'add',

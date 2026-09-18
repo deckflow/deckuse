@@ -19,6 +19,7 @@
  *                          (directory scans already continue past unreadable packages)
  *   --limit <n>            process at most n presentations (dir mode only)
  *   --skip-export          omit final export
+ *   --skip-new             omit the bundled-template `deckuse new` bootstrap case
  *   --batch                merge consecutive writes into `apply` batch payloads;
  *                          skips undo/redo and other non-batchable steps
  *   --help
@@ -26,6 +27,9 @@
  * Resume: if the sibling workspace already exists (has .deckuse/manifest.json),
  * that case is skipped so a mid-run interrupt can continue. Delete the workspace
  * (or pass --force) to re-run a case.
+ *
+ * Also runs one `deckuse new` bootstrap case (unless --skip-new) to cover the
+ * zero-source entry point and setSlideLayout / list layouts write paths.
  */
 
 import { spawn } from 'node:child_process';
@@ -74,6 +78,7 @@ Options:
   --continue-on-error     do not stop on first failure
   --limit <n>             max presentations to process (dir mode)
   --skip-export           skip final export step
+  --skip-new              skip the deckuse new bootstrap case
   --batch                 merge writes into apply batches (skip undo/redo/…)
   --help                  show this help
 `);
@@ -102,6 +107,7 @@ const parseArgs = (argv) => {
   const force = takeFlag(args, '--force');
   const continueOnError = takeFlag(args, '--continue-on-error');
   const skipExport = takeFlag(args, '--skip-export');
+  const skipNew = takeFlag(args, '--skip-new');
   const batch = takeFlag(args, '--batch');
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
@@ -119,6 +125,7 @@ const parseArgs = (argv) => {
     force,
     continueOnError,
     skipExport,
+    skipNew,
     batch,
     limit,
   };
@@ -214,6 +221,14 @@ const cliToWriteCommand = (args) => {
       const value = opt('--value');
       if (!target || value === undefined) return null;
       return { type: 'setText', target, value };
+    }
+    if (args[1] === 'slide-layout') {
+      const slideRaw = opt('--slide');
+      const layout = opt('--layout');
+      if (!slideRaw || !layout) return null;
+      const slide = Number(slideRaw);
+      if (!Number.isInteger(slide) || slide < 1) return null;
+      return { type: 'setSlideLayout', slide, layout };
     }
     const target = args[1];
     if (!target || target.startsWith('--')) return null;
@@ -653,6 +668,12 @@ class Runner {
     return Array.isArray(items) ? items : [];
   }
 
+  async listLayouts() {
+    const envelope = await this.step('list layouts', ['list', 'layouts', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
   async listShapes(slide) {
     const envelope = await this.step(`list shapes slide:${String(slide)}`, [
       'list',
@@ -1028,20 +1049,145 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     { optional: true },
   );
 
+  // --- setSlideLayout / list layouts (layout rebind; community-safe) ---
+  const layouts = await runner.listLayouts();
+  const workSlideLayoutIndex =
+    typeof workSlideMeta?.layout?.index === 'number' ? workSlideMeta.layout.index : undefined;
+  const alternateLayout = layouts.find(
+    (layout) =>
+      typeof layout?.index === 'number' &&
+      layout.index !== workSlideLayoutIndex &&
+      (typeof layout.displayName === 'string' || typeof layout.name === 'string'),
+  );
+  const blankLayout =
+    layouts.find((layout) => layout?.displayName === 'Blank' || layout?.type === 'blank') ??
+    layouts.find((layout) => typeof layout?.displayName === 'string' && /blank/i.test(layout.displayName));
+
+  if (alternateLayout?.index !== undefined) {
+    await runner.step('set slide-layout by index (CLI)', [
+      'set',
+      'slide-layout',
+      '--slide',
+      String(workSlide),
+      '--layout',
+      String(alternateLayout.index),
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+    await runner.step(
+      'setSlideLayout by layout:N (via apply)',
+      ['apply', runner.workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setSlideLayout',
+        slide: workSlide,
+        layout: `layout:${String(alternateLayout.index)}`,
+      }),
+    );
+  } else {
+    runner.skip('set slide-layout by index (CLI)', 'need ≥2 layouts to rebind');
+  }
+
+  if (blankLayout?.displayName) {
+    await runner.step('set slide-layout by display name (CLI)', [
+      'set',
+      'slide-layout',
+      '--slide',
+      String(workSlide),
+      '--layout',
+      blankLayout.displayName,
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+  } else if (blankLayout?.name) {
+    await runner.step('set slide-layout by basename (CLI)', [
+      'set',
+      'slide-layout',
+      '--slide',
+      String(workSlide),
+      '--layout',
+      blankLayout.name,
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+  } else {
+    runner.skip('set slide-layout by display name (CLI)', 'no Blank layout in package');
+  }
+
+  // Out-of-range layout index should fail discovery (TARGET_NOT_FOUND).
+  await runner.step(
+    'set slide-layout out-of-range (expect TARGET_NOT_FOUND)',
+    [
+      'set',
+      'slide-layout',
+      '--slide',
+      String(workSlide),
+      '--layout',
+      '9999',
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ],
+    '',
+    { expectErrorCode: 'TARGET_NOT_FOUND' },
+  );
+
   // --- add slide + all shape kinds (deterministic names) ---
+  // Prefer layout index / slide:N refs (same resolver as setSlideLayout).
+  const addSlideLayoutRef =
+    alternateLayout?.index !== undefined
+      ? String(alternateLayout.index)
+      : blankLayout?.displayName ?? 'blank';
   await runner.step('add slide', [
     'add',
     'slide',
     '--after',
     String(workSlide),
     '--layout',
-    'blank',
+    addSlideLayoutRef,
     '--name',
     `${PREFIX}-slide`,
     '--reason',
     'integration-writes',
     ...runner.wsArgs(),
   ]);
+
+  // Copy layout from another slide via slide:N (requires ≥2 slides after the add above).
+  const slidesForLayoutCopy = await runner.listSlides();
+  if (slidesForLayoutCopy.length >= 2) {
+    const donor =
+      slidesForLayoutCopy.find((s) => s.index !== workSlide)?.index ?? slidesForLayoutCopy[1]?.index;
+    if (typeof donor === 'number') {
+      await runner.step('set slide-layout by slide:N (CLI)', [
+        'set',
+        'slide-layout',
+        '--slide',
+        String(workSlide),
+        '--layout',
+        `slide:${String(donor)}`,
+        '--reason',
+        'integration-writes',
+        ...runner.wsArgs(),
+      ]);
+      await runner.step('add slide with layout slide:N', [
+        'add',
+        'slide',
+        '--after',
+        String(workSlide),
+        '--layout',
+        `slide:${String(workSlide)}`,
+        '--name',
+        `${PREFIX}-slide-from-slide`,
+        '--reason',
+        'integration-writes',
+        ...runner.wsArgs(),
+      ]);
+    }
+  } else {
+    runner.skip('set slide-layout by slide:N (CLI)', 'need ≥2 slides');
+  }
 
   const addSlide = workSlide; // keep adding onto original first slide for density
   const geometry = ['--x', '914400', '--y', '914400', '--width', '1828800', '--height', '914400'];
@@ -1352,7 +1498,9 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     'add',
     'slide',
     '--layout',
-    'blank',
+    blankLayout?.index !== undefined
+      ? `layout:${String(blankLayout.index)}`
+      : blankLayout?.displayName ?? 'blank',
     '--name',
     `${PREFIX}-to-remove`,
     '--reason',
@@ -1517,6 +1665,114 @@ const processOne = async (pptxPath, options) => {
   return report;
 };
 
+const NEW_CASE_DIR = '_IT-from-new';
+
+/**
+ * Bootstrap via `deckuse new` (bundled blank template) and run the same write sequence.
+ * @param {string} parentDir
+ * @param {ReturnType<typeof parseArgs>} options
+ */
+const processNewBootstrap = async (parentDir, options) => {
+  const workspace = join(parentDir, NEW_CASE_DIR);
+  const label = `${NEW_CASE_DIR} (deckuse new)`;
+
+  process.stdout.write(`\n=== ${label} → ${workspace}\n`);
+
+  try {
+    await access(options.bin);
+  } catch {
+    throw new Error(`deckuse bin not found: ${options.bin} (run pnpm build first)`);
+  }
+
+  if (options.force) {
+    await rm(workspace, { recursive: true, force: true });
+  } else {
+    try {
+      await access(join(workspace, '.deckuse', 'manifest.json'));
+      process.stdout.write(
+        '  → SKIP  workspace already exists (delete it or pass --force to re-run)\n',
+      );
+      return {
+        pptx: '(deckuse new)',
+        workspace,
+        ok: true,
+        skipped: true,
+        fromNew: true,
+        steps: [],
+        failedSteps: [],
+      };
+    } catch {
+      // workspace does not exist yet — proceed
+    }
+  }
+
+  const mediaDir = join(workspace, '.integration-media');
+  const media = await ensureMedia(mediaDir);
+  const runner = new Runner(options.bin, workspace, {
+    continueOnError: options.continueOnError,
+    batch: options.batch,
+  });
+
+  if (options.batch) {
+    process.stdout.write('  (batch mode: consecutive writes merged via apply)\n');
+  }
+
+  const created = await runner.step('new', ['new', workspace, '--json']);
+  if (!created?.ok) {
+    return {
+      pptx: '(deckuse new)',
+      workspace,
+      ok: false,
+      fromNew: true,
+      steps: runner.steps,
+      failedSteps: runner.steps.filter((s) => !s.ok),
+    };
+  }
+
+  let summary = {};
+  try {
+    summary = await runWriteSequence(runner, media, { skipExport: options.skipExport });
+  } catch (cause) {
+    runner.failed = true;
+    const stepResult = {
+      name: 'sequence',
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+      ms: 0,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult);
+  }
+
+  const ok = !runner.failed && runner.steps.every((s) => s.ok);
+  const report = {
+    ok,
+    pptx: '(deckuse new)',
+    workspace,
+    fromNew: true,
+    startedAt: new Date().toISOString(),
+    summary,
+    steps: runner.steps,
+    failedSteps: runner.steps.filter((s) => !s.ok),
+  };
+  await mkdir(workspace, { recursive: true });
+  await writeFile(
+    join(workspace, 'integration-writes-report.json'),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+
+  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
+  const skipped = runner.steps.filter((s) => s.skipped).length;
+  const failed = runner.steps.filter((s) => !s.ok).length;
+  process.stdout.write(
+    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
+  );
+  for (const step of runner.steps.filter((s) => !s.ok)) {
+    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
+  }
+  return report;
+};
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -1599,6 +1855,27 @@ const main = async () => {
     }
   }
 
+  if (!options.skipNew) {
+    try {
+      const newReport = await processNewBootstrap(summaryDir, options);
+      reports.push(newReport);
+      if (!newReport.ok && !options.continueOnError) {
+        // keep going to write summary; exit code set below
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      process.stdout.write(`  → FAIL  ${message}\n`);
+      reports.push({
+        ok: false,
+        pptx: '(deckuse new)',
+        workspace: join(summaryDir, NEW_CASE_DIR),
+        fromNew: true,
+        error: message,
+        steps: [],
+      });
+    }
+  }
+
   const summaryPath = join(summaryDir, 'integration-writes-summary.json');
   const skipped = reports.filter((r) => r.skipped).length;
   const ran = reports.filter((r) => !r.skipped);
@@ -1616,6 +1893,7 @@ const main = async () => {
       ok: r.ok,
       skipped: r.skipped || undefined,
       unreadable: r.unreadable || undefined,
+      fromNew: r.fromNew || undefined,
       failedSteps: (r.failedSteps ?? []).map((s) => s.name),
       error: r.error,
     })),
