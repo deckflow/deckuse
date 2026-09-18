@@ -29,7 +29,7 @@ Nécessite **CLI `deckuse >= 1.2.0`**. Référence rapide : [docs/agent-cookbook
 
 ## Pourquoi Deckuse
 
-Deckuse permet de modifier une présentation existante sans la recréer. Son flux de travail privilégie volontairement la structure plutôt que le rendu visuel :
+Deckuse permet de modifier une présentation existante sans la recréer. Sans fichier source, `deckuse new` initialise un espace de travail à partir du modèle vide fourni. Son flux de travail privilégie volontairement la structure plutôt que le rendu visuel :
 
 ```text
 existing.pptx → init ─┐

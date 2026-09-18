@@ -29,7 +29,7 @@ Requer **CLI `deckuse >= 1.2.0`**. Referência rápida: [docs/agent-cookbook.md]
 
 ## Por que usar o Deckuse
 
-O Deckuse permite modificar uma apresentação existente sem recriá-la do zero. O fluxo de trabalho prioriza deliberadamente a estrutura, e não o visual:
+O Deckuse permite modificar uma apresentação existente sem recriá-la do zero. Sem arquivo de origem, `deckuse new` cria um espaço de trabalho a partir do modelo em branco incluso. O fluxo de trabalho prioriza deliberadamente a estrutura, e não o visual:
 
 ```text
 existing.pptx → init ─┐
