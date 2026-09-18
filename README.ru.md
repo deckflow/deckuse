@@ -32,7 +32,9 @@ Deckuse рассчитан на агентов. **Перед использов�
 Deckuse позволяет изменять существующую презентацию, не создавая её заново. Рабочий процесс намеренно ориентирован на структуру, а не на визуальное представление:
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
@@ -52,6 +54,9 @@ npm install -g @deckflow/deckuse
 ```sh
 # Создать постоянное рабочее пространство из презентации.
 deckuse init input.pptx ./workspace --json
+
+# Или начать с встроенного пустого шаблона 16:9 (input.pptx не нужен).
+deckuse new ./workspace --json
 
 # Проверить индексированный документ и найти целевые элементы.
 deckuse inspect ./workspace --json

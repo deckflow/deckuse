@@ -29,10 +29,12 @@ Deckuse 面向编程智能体。**使用 CLI 前，请先安装 Deckuse skill**�
 
 ## 为何选择 Deckuse
 
-Deckuse 可在不从零重建演示文稿的情况下修改现有 PPT。其工作流刻意以结构为中心，而非视觉为中心：
+Deckuse 可在不从零重建演示文稿的情况下修改现有 PPT。若没有源文件，可用 `deckuse new` 基于内置空白模板创建工作区。其工作流刻意以结构为中心，而非视觉为中心：
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 每次成功的写操作会自动提交 Git 版本、更新 `operations.jsonl`、重建 `package.pptx`，并刷新 `.deckuse/index.json`。可使用 `undo` 撤销、`history` 查看操作历史。
@@ -52,6 +54,9 @@ npm install -g @deckflow/deckuse
 ```sh
 # 从演示文稿创建持久工作空间（revision 从 1 开始）。
 deckuse init input.pptx ./workspace --json
+
+# 或从内置空白 16:9 模板起步（无需 input.pptx）。
+deckuse new ./workspace --json
 
 # 清单与带 provenance 的实时属性读取。
 deckuse status --workspace ./workspace --json

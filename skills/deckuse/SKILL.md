@@ -5,7 +5,7 @@ description: Use when inspecting, creating, modifying, automating, or verifying 
 
 # Deckuse Agent Skill
 
-**Requires CLI `deckuse >= 1.2.0` (edition=community).** Check with `deckuse --version`. If older, upgrade before following recipes below (1.1.0 npm lacked units / inline `blocks`/`fill` / same-batch forward refs).
+**Requires CLI `deckuse >= 1.3.0` (edition=community).** Check with `deckuse --version`. If older, upgrade before following recipes below (`new` and recent apply/units features).
 
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It treats PPTX files as versioned workspaces, provides stable semantic addresses (`slide:N/shape:ID`), applies surgical atomic mutations, and tracks history via Git revisions.
 
@@ -16,7 +16,7 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
 ## 1. Core Operating Principles for AI Agents
 
 1. **Workspace-First Architecture**:
-   Never edit `.pptx` in-place. Always `deckuse init input.pptx ./ws --json`. Mutations update `source/`, commit via Git, append `.deckuse/operations.jsonl`, and rebuild `./ws/package.pptx`.
+   Never edit `.pptx` in-place. Use `deckuse new ./ws --json` (bundled blank template) or `deckuse init input.pptx ./ws --json` (existing file). Mutations update `source/`, commit via Git, append `.deckuse/operations.jsonl`, and rebuild `./ws/package.pptx`.
 2. **Batch Mutations via `apply`**:
    Do **NOT** run many individual write CLIs. Each write = one revision + recompress. Prefer one JSON batch:
    ```bash
@@ -41,21 +41,23 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
 ## 2. Standard Agent Interaction Loop
 
 ```text
-[1. Init] ➔ [2. Inspect & Search] ➔ [3. Prepare & Apply Batch] ➔ [4. Validate & Render] ➔ [5. Export]
+[1. New or Init] ➔ [2. Inspect & Search] ➔ [3. Prepare & Apply Batch] ➔ [4. Validate & Render] ➔ [5. Export]
 ```
 
 ### Freeform layout (from-scratch / 1:1 recreate)
 
-1. Estimate a grid (margins, columns) using `%` / `px` or `deckuse measure --text … --font-size N --json`.
-2. Create shapes + styles in **one** `apply` (inline `fill`/`stroke`/`blocks`/`runs`).
-3. `deckuse validate` then `deckuse render --page N`.
-4. Adjust geometry with **another** `apply` containing multiple `xfrmSet` / `setTransform` ops (one revision).
-5. Prefer `wrap: "none"` and generous widths to avoid mid-word wraps; use `anchor` for valign.
+1. Start with `deckuse new ./workspace --json` (blank 16:9 title slide) unless you already have a master PPTX to `init`.
+2. Estimate a grid (margins, columns) using `%` / `px` or `deckuse measure --text … --font-size N --json`.
+3. Create shapes + styles in **one** `apply` (inline `fill`/`stroke`/`blocks`/`runs`).
+4. `deckuse validate` then `deckuse render --page N`.
+5. Adjust geometry with **another** `apply` containing multiple `xfrmSet` / `setTransform` ops (one revision).
+6. Prefer `wrap: "none"` and generous widths to avoid mid-word wraps; use `anchor` for valign.
 
 ### Step 1–5 (commands)
 
 ```bash
-deckuse init master.pptx ./workspace --json
+deckuse new ./workspace --json
+# or: deckuse init master.pptx ./workspace --json
 deckuse status --workspace ./workspace --json
 deckuse list shapes --slide 1 --workspace ./workspace --json
 deckuse apply --workspace ./workspace --input ops.json --json
@@ -205,7 +207,7 @@ deckuse undo --workspace ./workspace --steps 1 --json
 ## 5. Agent Workflow Checklist
 
 - [ ] CLI >= 1.2.0 (`deckuse --version`)?
-- [ ] Initialized workspace?
+- [ ] Workspace created (`new` or `init`)?
 - [ ] Used unit strings / named shapes / single `apply` batch?
 - [ ] Prefer `column`/`bar`/`line`/`pie` when using `render`?
 - [ ] Checked `error.diagnostics` on failure (not only top-level message)?

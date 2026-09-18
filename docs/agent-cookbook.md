@@ -130,4 +130,4 @@ Chart series colors write to XML; **community `render` may not show them** — c
 
 ## Loop
 
-`init → list/get/search → apply → validate → render → export`
+`init|new → list/get/search → apply → validate → render → export`

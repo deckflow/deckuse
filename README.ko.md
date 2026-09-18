@@ -32,7 +32,9 @@ Deckuse는 에이전트 우선입니다. **CLI를 쓰기 전에 Deckuse skill을
 Deckuse는 프레젠테이션을 처음부터 다시 만들지 않고 기존 파일을 수정합니다. 이 워크플로는 시각적 판단보다 구조를 우선하도록 설계되었습니다.
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
@@ -52,6 +54,9 @@ npm install -g @deckflow/deckuse
 ```sh
 # 프레젠테이션에서 영구 작업 공간을 만듭니다.
 deckuse init input.pptx ./workspace --json
+
+# 또는 번들된 빈 16:9 템플릿으로 시작 (input.pptx 불필요).
+deckuse new ./workspace --json
 
 # 인덱싱된 문서를 검사하고 대상 요소를 조회합니다.
 deckuse inspect ./workspace --json

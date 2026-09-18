@@ -12,6 +12,7 @@ import {
   type Result,
 } from '@deckflow/deckuse-core';
 import { resolveCliText } from './cli-text.js';
+import { assertDefaultPptxExists } from './default-template.js';
 import { helpTopicFromArgs, resolveHelp } from './help.js';
 import { runCommand } from './index.js';
 import {
@@ -425,6 +426,17 @@ try {
         workspaceId: resolve(workspace),
         format: extname(source).slice(1).toLowerCase(),
         source: resolve(source),
+      });
+    } else if (action === 'new') {
+      const workspace = workspaceOpt ?? clean[1];
+      if (!workspace) throw new Error('Usage: deckuse new <workspace/>');
+      const source = await assertDefaultPptxExists();
+      ok = await execute('deckuse new', {
+        version: PROTOCOL_VERSION,
+        type: 'init',
+        workspaceId: resolve(workspace),
+        format: 'pptx',
+        source,
       });
     } else if (action === 'status') {
       const workspace = await findWorkspace(workspaceOpt ?? clean[1]);

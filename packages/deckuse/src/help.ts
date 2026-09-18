@@ -19,6 +19,7 @@ ${GLOBAL_OPTIONS}
 
 Commands:
   init          Create a workspace from a .pptx
+  new           Create a workspace from the bundled blank template
   status        Show workspace revision / branch summary
   list          List slides, shapes, layouts, masters, or theme
   get           Read a target's properties (with provenance)
@@ -67,6 +68,24 @@ Options:
 Notes:
   Creates source/, package.pptx, .deckuse/, and a Git baseline.
   Does not normalize or rewrite slide content.`,
+  },
+
+  new: {
+    usage: 'deckuse new <workspace/>',
+    summary:
+      'Create a workspace from the bundled blank 16:9 PPTX (equivalent to init with the package default template).',
+    example: 'deckuse new ./workspace --json',
+    details: `Arguments:
+  <workspace/>              Destination directory for the workspace
+
+Options:
+  --workspace <path>        Same as the positional workspace argument
+  --json                    Machine-readable envelope
+
+Notes:
+  Uses the shipped assets/default.pptx (one blank title slide).
+  Same workspace layout as init: source/, package.pptx, .deckuse/, Git baseline.
+  Prefer init when you already have a presentation to import.`,
   },
 
   status: {

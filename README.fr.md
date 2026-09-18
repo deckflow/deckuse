@@ -32,7 +32,9 @@ Nécessite **CLI `deckuse >= 1.2.0`**. Référence rapide : [docs/agent-cookbook
 Deckuse permet de modifier une présentation existante sans la recréer. Son flux de travail privilégie volontairement la structure plutôt que le rendu visuel :
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 Chaque écriture réussie commit automatiquement une révision Git, met à jour `operations.jsonl` et reconstruit `package.pptx`. Utilisez `undo` pour annuler des écritures et `history` pour consulter le journal des opérations.
@@ -52,6 +54,9 @@ Cette commande installe globalement le CLI `deckuse`.
 ```sh
 # Créer un espace de travail persistant depuis une présentation.
 deckuse init input.pptx ./workspace --json
+
+# Ou démarrer depuis le modèle vide fourni (pas besoin de input.pptx).
+deckuse new ./workspace --json
 
 # Inspecter le document indexé et interroger les éléments ciblés.
 deckuse inspect ./workspace --json

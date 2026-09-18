@@ -32,7 +32,9 @@ Deckuse はエージェント優先です。**CLI を使う前に Deckuse skill 
 Deckuse は既存のプレゼンテーションを作り直さずに変更できます。ワークフローは視覚ではなく構造を重視して設計されています。
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, and rebuilds `package.pptx`. Use `undo` to revert writes and `history` to inspect the operation log.
@@ -52,6 +54,9 @@ npm install -g @deckflow/deckuse
 ```sh
 # プレゼンテーションから永続ワークスペースを作成します。
 deckuse init input.pptx ./workspace --json
+
+# または同梱の空白 16:9 テンプレートから開始（input.pptx 不要）。
+deckuse new ./workspace --json
 
 # インデックス済み文書を検査し、対象要素をクエリします。
 deckuse inspect ./workspace --json

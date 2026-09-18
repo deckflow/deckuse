@@ -141,6 +141,7 @@ describe('deckuse CLI', () => {
     expect(help.stdout).toContain('protocol 2.0');
     expect(help.stdout).toContain('--workspace');
     expect(help.stdout).toContain('add           Add a slide or shape');
+    expect(help.stdout).toContain('new           Create a workspace from the bundled blank template');
     expect(help.stdout).toContain('render        Screenshot one slide to PNG');
   });
 
@@ -152,6 +153,12 @@ describe('deckuse CLI', () => {
     expect(add.stdout).toContain('Example:');
     expect(add.stdout).toContain('deckuse add shape --slide 1 --type text');
     expect(add.stdout).toContain('Subcommands:');
+
+    const newHelp = await run(['new', '--help']);
+    expect(newHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(newHelp.stdout).toContain('usage: deckuse new <workspace/>');
+    expect(newHelp.stdout).toContain('bundled blank');
+    expect(newHelp.stdout).toContain('assets/default.pptx');
 
     const addShape = await run(['add', 'shape', '--help']);
     expect(addShape).toMatchObject({ code: 0, stderr: '' });
@@ -247,6 +254,34 @@ describe('deckuse CLI', () => {
     expect(envelope.error?.message).toContain('--all');
     expect(envelope.error?.message).toContain('monitor status');
   });
+
+  it('creates a workspace from the bundled blank template via new', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-new-'));
+    const workspace = join(root, 'workspace');
+    const missing = await run(['new', '--json']);
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toContain('Usage: deckuse new <workspace/>');
+
+    const created = await run(['new', workspace, '--json']);
+    expect(created.code).toBe(0);
+    const envelope = JSON.parse(created.stdout) as {
+      ok: boolean;
+      command?: string;
+      revision?: number;
+      data?: { source?: string; format?: string };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.command).toBe('deckuse new');
+    expect(envelope.revision).toBe(1);
+    expect(envelope.data?.format).toBe('pptx');
+    expect(envelope.data?.source).toContain(join('assets', 'default.pptx'));
+
+    await expect(
+      access(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml')),
+    ).resolves.toBeUndefined();
+    await expect(access(join(workspace, 'package.pptx'))).resolves.toBeUndefined();
+  });
+
   it('runs init, list, get, set, validate, history, undo and export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),
       source = join(root, 'source.pptx'),

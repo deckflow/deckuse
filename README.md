@@ -32,10 +32,12 @@ Requires **CLI `deckuse >= 1.2.0`**. Quick reference: [docs/agent-cookbook.md](d
 
 ## Why Deckuse
 
-Deckuse lets an agent modify an existing presentation without recreating it from scratch. Its workflow is deliberately structural rather than visual:
+Deckuse lets an agent modify an existing presentation without recreating it from scratch. When you have no source file, `deckuse new` bootstraps a workspace from the bundled blank template. Its workflow is deliberately structural rather than visual:
 
 ```text
-existing.pptx → init → list / get → set / add → validate → export
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
 ```
 
 Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
@@ -69,8 +71,11 @@ This installs the `deckuse` CLI globally.
 ## CLI workflow
 
 ```sh
-# Create a persistent workspace from a presentation (revision starts at 1).
+# Create a workspace from an existing presentation (revision starts at 1).
 deckuse init input.pptx ./workspace --json
+
+# Or start from the bundled blank 16:9 template (no input.pptx needed).
+deckuse new ./workspace --json
 
 # Inventory and read live properties with provenance.
 deckuse status --workspace ./workspace --json
