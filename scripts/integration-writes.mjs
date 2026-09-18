@@ -22,6 +22,7 @@
  *   --skip-new             omit the bundled-template `deckuse new` bootstrap case
  *   --batch                merge consecutive writes into `apply` batch payloads;
  *                          skips undo/redo and other non-batchable steps
+ *   --concurrency <n>      max parallel file workers (dir mode; default: cpus-2, min 1)
  *   --help
  *
  * Resume: if the sibling workspace already exists (has .deckuse/manifest.json),
@@ -30,9 +31,13 @@
  *
  * Also runs one `deckuse new` bootstrap case (unless --skip-new) to cover the
  * zero-source entry point and setSlideLayout / list layouts write paths.
+ *
+ * Directory mode runs each .pptx in its own child process (concurrency =
+ * availableParallelism()-2, minimum 1) so independent cases overlap.
  */
 
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   access,
   mkdir,
@@ -42,11 +47,16 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { availableParallelism, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_BIN = join(ROOT, 'packages/deckuse/dist/bin.js');
+
+/** Default parallel file workers for directory scans. */
+const defaultConcurrency = () => Math.max(1, availableParallelism() - 2);
 
 const PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -80,6 +90,7 @@ Options:
   --skip-export           skip final export step
   --skip-new              skip the deckuse new bootstrap case
   --batch                 merge writes into apply batches (skip undo/redo/…)
+  --concurrency <n>       parallel file workers (dir mode; default: cpus-2, min 1)
   --help                  show this help
 `);
 };
@@ -111,12 +122,23 @@ const parseArgs = (argv) => {
   const batch = takeFlag(args, '--batch');
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
+  const concurrencyRaw = takeOption(args, '--concurrency');
+  const concurrency =
+    concurrencyRaw !== undefined ? Number(concurrencyRaw) : defaultConcurrency();
+  // Internal: child worker writes its case report JSON here and skips batch summary / new.
+  const workerResult = takeOption(args, '--worker-result');
   const input = args[0];
   if (!input || args.length > 1) {
     return { error: 'Usage: node scripts/integration-writes.mjs <dir|file.pptx> [options]' };
   }
   if (limitRaw !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     return { error: '--limit must be a positive integer' };
+  }
+  if (
+    concurrencyRaw !== undefined &&
+    (!Number.isInteger(concurrency) || concurrency < 1)
+  ) {
+    return { error: '--concurrency must be a positive integer' };
   }
   return {
     input: resolve(input),
@@ -128,6 +150,8 @@ const parseArgs = (argv) => {
     skipNew,
     batch,
     limit,
+    concurrency: Math.max(1, concurrency),
+    workerResult: workerResult ? resolve(workerResult) : undefined,
   };
 };
 
@@ -1665,6 +1689,94 @@ const processOne = async (pptxPath, options) => {
   return report;
 };
 
+/**
+ * Run one presentation in a child process; buffer its logs until it finishes
+ * so concurrent cases do not interleave stdout.
+ * @param {string} pptxPath
+ * @param {ReturnType<typeof parseArgs>} options
+ */
+const processOneInWorker = (pptxPath, options) =>
+  new Promise((done) => {
+    const resultPath = join(tmpdir(), `integration-writes-worker-${randomUUID()}.json`);
+    /** @type {string[]} */
+    const args = [SCRIPT_PATH, pptxPath, '--bin', options.bin, '--skip-new', '--worker-result', resultPath];
+    if (options.force) args.push('--force');
+    if (options.continueOnError) args.push('--continue-on-error');
+    if (options.skipExport) args.push('--skip-export');
+    if (options.batch) args.push('--batch');
+
+    const child = spawn(process.execPath, args, {
+      cwd: ROOT,
+      env: process.env,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on('close', async (code) => {
+      if (stdout) process.stdout.write(stdout);
+      if (stderr) process.stderr.write(stderr);
+      try {
+        const raw = await readFile(resultPath, 'utf8');
+        await rm(resultPath, { force: true });
+        done(JSON.parse(raw));
+      } catch (cause) {
+        await rm(resultPath, { force: true }).catch(() => {});
+        const message =
+          cause instanceof Error
+            ? cause.message
+            : `worker exited ${String(code)} without a result file`;
+        process.stdout.write(`\n=== ${basename(pptxPath)}\n  → FAIL  ${message}\n`);
+        done({
+          ok: false,
+          pptx: pptxPath,
+          workspace: join(dirname(pptxPath), basename(pptxPath, extname(pptxPath))),
+          error: message,
+          steps: [],
+          failedSteps: [],
+        });
+      }
+    });
+  });
+
+/**
+ * Process items with a fixed worker pool. Stops scheduling new work when
+ * `shouldStop` returns true (in-flight tasks still finish).
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} concurrency
+ * @param {(item: T, index: number) => Promise<R>} fn
+ * @param {{ shouldStop?: (result: R) => boolean }} [opts]
+ * @returns {Promise<(R | undefined)[]>}
+ */
+const mapPool = async (items, concurrency, fn, opts = {}) => {
+  /** @type {(R | undefined)[]} */
+  const results = Array.from({ length: items.length });
+  let next = 0;
+  let stopping = false;
+
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), Math.max(1, items.length)) },
+    async () => {
+      for (;;) {
+        if (stopping) return;
+        const index = next;
+        next += 1;
+        if (index >= items.length) return;
+        const result = await fn(items[index], index);
+        results[index] = result;
+        if (opts.shouldStop?.(result)) stopping = true;
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+};
+
 const NEW_CASE_DIR = '_IT-from-new';
 
 /**
@@ -1797,6 +1909,8 @@ const main = async () => {
   let files;
   /** Directory used for the batch summary file (parent of a single .pptx, or the scan root). */
   let summaryDir;
+  /** @type {'file' | 'dir'} */
+  let mode;
   if (st.isFile()) {
     if (!isPptx(basename(options.input))) {
       process.stderr.write(`Not a .pptx file: ${options.input}\n`);
@@ -1812,10 +1926,18 @@ const main = async () => {
     }
     files = [options.input];
     summaryDir = dirname(options.input);
-    process.stdout.write(
-      `integration-writes: single file ${options.input}${options.batch ? ' (--batch)' : ''}\n`,
-    );
+    mode = 'file';
+    if (!options.workerResult) {
+      process.stdout.write(
+        `integration-writes: single file ${options.input}${options.batch ? ' (--batch)' : ''}\n`,
+      );
+    }
   } else if (st.isDirectory()) {
+    if (options.workerResult) {
+      process.stderr.write('--worker-result requires a single .pptx file\n');
+      process.exitCode = 2;
+      return;
+    }
     files = await collectPptx(options.input, options.recursive);
     if (options.limit !== undefined) files = files.slice(0, options.limit);
     if (files.length === 0) {
@@ -1824,8 +1946,11 @@ const main = async () => {
       return;
     }
     summaryDir = options.input;
+    mode = 'dir';
     process.stdout.write(
-      `integration-writes: ${String(files.length)} file(s) under ${options.input}${options.batch ? ' (--batch)' : ''}\n`,
+      `integration-writes: ${String(files.length)} file(s) under ${options.input}` +
+        ` (concurrency=${String(options.concurrency)})` +
+        `${options.batch ? ' (--batch)' : ''}\n`,
     );
   } else {
     process.stderr.write(`Not a file or directory: ${options.input}\n`);
@@ -1835,24 +1960,73 @@ const main = async () => {
 
   /** @type {Awaited<ReturnType<typeof processOne>>[]} */
   const reports = [];
-  for (const file of files) {
-    try {
-      const report = await processOne(file, options);
-      reports.push(report);
-      // Unreadable corpus packages (truncated ZIP, etc.) should not abort a directory scan.
-      if (!report.ok && !options.continueOnError && !report.unreadable) break;
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      process.stdout.write(`  → FAIL  ${message}\n`);
-      reports.push({
-        ok: false,
-        pptx: file,
-        workspace: join(dirname(file), basename(file, extname(file))),
-        error: message,
-        steps: [],
-      });
-      if (!options.continueOnError) break;
+
+  const isAbortingFailure = (report) =>
+    Boolean(report && !report.ok && !report.unreadable);
+
+  if (mode === 'dir' && files.length > 1) {
+    const pooled = await mapPool(
+      files,
+      options.concurrency,
+      async (file) => {
+        try {
+          return await processOneInWorker(file, options);
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          process.stdout.write(`\n=== ${basename(file)}\n  → FAIL  ${message}\n`);
+          return {
+            ok: false,
+            pptx: file,
+            workspace: join(dirname(file), basename(file, extname(file))),
+            error: message,
+            steps: [],
+            failedSteps: [],
+          };
+        }
+      },
+      {
+        shouldStop: (report) =>
+          !options.continueOnError && isAbortingFailure(report),
+      },
+    );
+    for (const report of pooled) {
+      if (report) reports.push(report);
     }
+  } else {
+    for (const file of files) {
+      try {
+        const report = await processOne(file, options);
+        reports.push(report);
+        // Unreadable corpus packages (truncated ZIP, etc.) should not abort a directory scan.
+        if (!options.continueOnError && isAbortingFailure(report)) break;
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        process.stdout.write(`  → FAIL  ${message}\n`);
+        reports.push({
+          ok: false,
+          pptx: file,
+          workspace: join(dirname(file), basename(file, extname(file))),
+          error: message,
+          steps: [],
+        });
+        if (!options.continueOnError) break;
+      }
+    }
+  }
+
+  // Worker child: emit the case report and exit (parent aggregates the batch summary).
+  if (options.workerResult) {
+    const report = reports[0] ?? {
+      ok: false,
+      pptx: options.input,
+      workspace: join(dirname(options.input), basename(options.input, extname(options.input))),
+      error: 'worker produced no report',
+      steps: [],
+      failedSteps: [],
+    };
+    await writeFile(options.workerResult, `${JSON.stringify(report, null, 2)}\n`);
+    if (!report.ok && !report.unreadable) process.exitCode = 1;
+    return;
   }
 
   if (!options.skipNew) {
@@ -1883,6 +2057,7 @@ const main = async () => {
     ok: reports.every((r) => r.ok),
     input: options.input,
     batch: Boolean(options.batch),
+    concurrency: mode === 'dir' ? options.concurrency : 1,
     total: reports.length,
     passed: ran.filter((r) => r.ok).length,
     skipped,
