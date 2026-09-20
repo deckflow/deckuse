@@ -105,4 +105,15 @@ describe('renderPage', () => {
     });
     expect(rendered.output).toBe(output);
   });
+
+  it('refuses to invent Word page numbers', async () => {
+    const workspace = await workspaceFixture();
+    await writeFile(
+      join(workspace, '.deckuse', 'manifest.json'),
+      JSON.stringify({ format: 'docx' }),
+    );
+    await expect(renderPage(workspace, { page: 1 })).rejects.toThrow(
+      /DOCX page render is not available/,
+    );
+  });
 });

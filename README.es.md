@@ -13,7 +13,7 @@
 
 Deckuse es un motor local-first, basado en esquemas, para automatizar documentos Office mediante agentes de programación. Abre un documento en un espacio de trabajo versionado, permite al agente inspeccionar y seleccionar su estructura, aplica comandos JSON explícitos, valida el resultado y exporta un documento nuevo.
 
-PPTX es el formato implementado actualmente. Los adaptadores de DOCX, XLSX, Keynote y Numbers devuelven deliberadamente `FORMAT_NOT_IMPLEMENTED`; aún no son destinos de edición compatibles.
+PPTX y DOCX son los formatos implementados. Los adaptadores de XLSX, Keynote y Numbers devuelven deliberadamente `FORMAT_NOT_IMPLEMENTED`; aún no son destinos de edición compatibles.
 
 Este repositorio es la **edición community** (`edition=community`). Véase [docs/edition.md](docs/edition.md). La edición comercial está en el repositorio separado `deckuse-commercial`.
 

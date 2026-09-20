@@ -161,7 +161,18 @@ const listCommandSchema = z
     ...commandBase,
     type: z.literal('list'),
     workspaceId: z.string().min(1),
-    resource: z.enum(['slides', 'shapes', 'layouts', 'masters', 'theme']),
+    resource: z.enum([
+      'slides',
+      'shapes',
+      'layouts',
+      'masters',
+      'theme',
+      'paragraphs',
+      'tables',
+      'sections',
+      'styles',
+      'bookmarks',
+    ]),
     slide: z.number().int().positive().optional(),
   })
   .strict();
@@ -512,9 +523,7 @@ const addShapeCommandSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if (
-      (value.shapeType === 'image' ||
-        value.shapeType === 'video' ||
-        value.shapeType === 'audio') &&
+      (value.shapeType === 'image' || value.shapeType === 'video' || value.shapeType === 'audio') &&
       !value.file
     ) {
       ctx.addIssue({
@@ -527,7 +536,7 @@ const addShapeCommandSchema = z
       ctx.addIssue({
         code: 'custom',
         message:
-          "--type table requires --rows '<json>' (example: --rows '[[\"A\",\"B\"],[\"1\",\"2\"]]')",
+          '--type table requires --rows \'<json>\' (example: --rows \'[["A","B"],["1","2"]]\')',
         path: ['rows'],
       });
     }
@@ -549,10 +558,8 @@ const addShapeCommandSchema = z
         });
       }
       if (value.chartType === 'combo' && value.data) {
-        const charts = new Set(
-          value.data.series.map((s) => s.chart ?? 'column'),
-        );
-        if (!charts.has('line') || (![...charts].some((c) => c === 'bar' || c === 'column'))) {
+        const charts = new Set(value.data.series.map((s) => s.chart ?? 'column'));
+        if (!charts.has('line') || ![...charts].some((c) => c === 'bar' || c === 'column')) {
           ctx.addIssue({
             code: 'custom',
             message:
@@ -563,6 +570,46 @@ const addShapeCommandSchema = z
       }
     }
   });
+
+const addParagraphCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('addParagraph'),
+    /** Insert after this target. Omit to append before the final sectPr. */
+    after: z.string().min(1).optional(),
+    /** Paragraph style id (for example Heading1). Wins over `level` when both are set. */
+    style: z.string().min(1).optional(),
+    /** Heading level 1–9, or 0 for Normal. Ignored when `style` is set. */
+    level: z.number().int().min(0).max(9).optional(),
+    /** Bookmark name so later commands in the same batch can target bookmark:<name>. */
+    name: z.string().min(1).optional(),
+    text: z.string().optional(),
+    /** Rich paragraphs; when set, preferred over `text`. The first block fills this paragraph. */
+    blocks: z.array(textBlockSchema).min(1).optional(),
+  })
+  .strict();
+
+const addTableCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('addTable'),
+    after: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    rows: z.array(z.array(z.string())).min(1),
+  })
+  .strict();
+
+const insertBreakCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('insertBreak'),
+    kind: z.enum(['page']).default('page'),
+    after: z.string().min(1).optional(),
+  })
+  .strict();
 
 const removeCommandSchema = z
   .object({
@@ -667,6 +714,9 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   addSlideCommandSchema,
   setSlideLayoutCommandSchema,
   addShapeCommandSchema,
+  addParagraphCommandSchema,
+  addTableCommandSchema,
+  insertBreakCommandSchema,
   removeCommandSchema,
   replacePictureCommandSchema,
   duplicateCommandSchema,
@@ -704,6 +754,9 @@ export const commandSchema = z.discriminatedUnion('type', [
   addSlideCommandSchema,
   setSlideLayoutCommandSchema,
   addShapeCommandSchema,
+  addParagraphCommandSchema,
+  addTableCommandSchema,
+  insertBreakCommandSchema,
   removeCommandSchema,
   replacePictureCommandSchema,
   duplicateCommandSchema,

@@ -85,6 +85,15 @@ importers:
       '@deckflow/deckuse-core':
         specifier: workspace:*
         version: file:packages/core
+      '@deckflow/deckuse-opc':
+        specifier: workspace:*
+        version: file:packages/opc
+      '@deckflow/deckuse-workspace':
+        specifier: workspace:*
+        version: file:packages/workspace
+      '@xmldom/xmldom':
+        specifier: latest
+        version: 0.9.12
 
   packages/edition-config: {}
 

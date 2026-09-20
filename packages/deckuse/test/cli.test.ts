@@ -140,16 +140,18 @@ describe('deckuse CLI', () => {
     expect(help.stdout).toContain('deckuse [global-options]');
     expect(help.stdout).toContain('protocol 2.0');
     expect(help.stdout).toContain('--workspace');
-    expect(help.stdout).toContain('add           Add a slide or shape');
-    expect(help.stdout).toContain('new           Create a workspace from the bundled blank template');
+    expect(help.stdout).toContain('add           Add a slide, shape, paragraph, or table');
+    expect(help.stdout).toContain(
+      'new           Create a workspace from the bundled blank template',
+    );
     expect(help.stdout).toContain('render        Screenshot one slide to PNG');
   });
 
   it('provides progressive command and subcommand help', async () => {
     const add = await run(['add', '--help']);
     expect(add).toMatchObject({ code: 0, stderr: '' });
-    expect(add.stdout).toContain('usage: deckuse add <slide|shape>');
-    expect(add.stdout).toContain('Add a slide or shape');
+    expect(add.stdout).toContain('usage: deckuse add <slide|shape|paragraph|table|break>');
+    expect(add.stdout).toContain('Add a slide, shape, paragraph, table, or page break');
     expect(add.stdout).toContain('Example:');
     expect(add.stdout).toContain('deckuse add shape --slide 1 --type text');
     expect(add.stdout).toContain('Subcommands:');
@@ -282,6 +284,31 @@ describe('deckuse CLI', () => {
     await expect(access(join(workspace, 'package.pptx'))).resolves.toBeUndefined();
   });
 
+  it('creates a DOCX workspace from the bundled blank template', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-docx-'));
+    const workspace = join(root, 'workspace');
+    const created = await run(['new', workspace, '--format', 'docx', '--json']);
+    expect(created.code).toBe(0);
+    const envelope = JSON.parse(created.stdout) as {
+      ok: boolean;
+      data?: { format?: string; elementCount?: number };
+    };
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data?.format).toBe('docx');
+    await expect(
+      access(join(workspace, 'source', 'word', 'document.xml')),
+    ).resolves.toBeUndefined();
+    await expect(access(join(workspace, 'package.docx'))).resolves.toBeUndefined();
+    const listed = await run(['list', 'paragraphs', '--workspace', workspace, '--json']);
+    expect(listed.code).toBe(0);
+    const listEnvelope = JSON.parse(listed.stdout) as {
+      ok: boolean;
+      data?: { items?: { target?: string }[] };
+    };
+    expect(listEnvelope.ok).toBe(true);
+    expect(listEnvelope.data?.items?.[0]?.target).toBe('body/p:1');
+  });
+
   it('runs init, list, get, set, validate, history, undo and export', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-')),
       source = join(root, 'source.pptx'),
@@ -319,7 +346,10 @@ describe('deckuse CLI', () => {
     const details = JSON.parse(got.stdout) as {
       ok: boolean;
       data: {
-        properties: Record<string, { effective?: unknown; inherited?: boolean; source?: { scope?: string } }>;
+        properties: Record<
+          string,
+          { effective?: unknown; inherited?: boolean; source?: { scope?: string } }
+        >;
       };
     };
     expect(details.ok).toBe(true);
@@ -351,7 +381,9 @@ describe('deckuse CLI', () => {
       '--json',
     ]);
     const after = JSON.parse(gotAfter.stdout) as {
-      data: { properties: Record<string, { effective?: unknown; direct?: unknown; inherited?: boolean }> };
+      data: {
+        properties: Record<string, { effective?: unknown; direct?: unknown; inherited?: boolean }>;
+      };
     };
     expect(after.data.properties['font.size']?.effective).toBe(42);
     expect(after.data.properties['font.size']?.inherited).toBe(false);

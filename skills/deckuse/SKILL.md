@@ -1,6 +1,6 @@
 ---
 name: deckuse
-description: Use when inspecting, creating, modifying, automating, or verifying PowerPoint (PPTX) presentations with the Deckuse CLI. Covers workspace management, semantic targeting, batch mutations with apply, layout alignment, rich text blocks, tables, charts, and visual rendering checks.
+description: Use when inspecting, creating, modifying, automating, or verifying PowerPoint (PPTX) or Word (DOCX) documents with the Deckuse CLI. Covers workspace management, semantic targeting, batch mutations with apply, layout alignment, rich text blocks, tables, charts, and visual rendering checks.
 ---
 
 # Deckuse Agent Skill
@@ -231,3 +231,111 @@ deckuse undo --workspace ./workspace --steps 1 --json
 - [ ] Validated + rendered key slides; chart colors verified in XML if needed?
 - [ ] Table auto-height rendered; used `setTableLayout` after frame-only resize if needed?
 - [ ] Exported final PPTX (default rebuilds from `source/`)?
+
+---
+
+## 6. Word (DOCX)
+
+Same workspace loop as PPTX. Do **not** send slide geometry (`addShape`, `xfrmSet`, `alignElements`, `zMove`); those return `UNSUPPORTED_CAPABILITY`.
+
+```bash
+deckuse new ./workspace --format docx --json
+# or: deckuse init report.docx ./workspace --json
+deckuse list paragraphs --workspace ./workspace --json
+deckuse apply --workspace ./workspace --input ops.json --json
+deckuse validate --workspace ./workspace --json
+deckuse export ./output.docx --workspace ./workspace --json
+```
+
+`new` without `--format` stays PPTX.
+
+### Addresses
+
+- `body/p:3` — 1-based body paragraph (tables are not paragraphs)
+- `body/p:3/run:0` — 0-based run
+- `para:1A2B3C4D` — `w14:paraId`
+- `bookmark:Intro` — bookmark. `addParagraph.name` creates one for same-batch forward refs
+- `body/table:1/row:2/cell:1/p:1`
+- `style:Heading1` — read only. Apply it with `paragraph.style`; do not write `styles.xml`
+
+### `replaceText`
+
+Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatting). `replaceText` concatenates visible `w:t` text **inside one paragraph**, then splices only the matched span and keeps neighboring `rPr`. It fails instead of rewriting tracked changes, fields, comments, content controls, or equations.
+
+### Create
+
+```json
+[
+  {
+    "type": "addParagraph",
+    "after": "body/p:1",
+    "style": "Heading1",
+    "name": "Intro",
+    "blocks": [{ "text": "总营收", "fontSize": 16, "bold": true }]
+  },
+  { "type": "setText", "target": "bookmark:Intro", "value": "Updated" },
+  {
+    "type": "addTable",
+    "name": "FinTable",
+    "rows": [["指标", "Q3"], ["营收", "120"]]
+  }
+]
+```
+
+`deckuse render --page` does not paginate DOCX. `@deckflow/office2html` converts PPTX only. Export and open the file in Word for layout checks.
+
+Schema: `deckuse schema --type addParagraph --json`.
+
+---
+
+## 6. Word (DOCX)
+
+Same workspace loop as PPTX. Do **not** send slide geometry (`addShape`, `xfrmSet`, `alignElements`, `zMove`); those return `UNSUPPORTED_CAPABILITY`.
+
+```bash
+deckuse new ./workspace --format docx --json
+# or: deckuse init report.docx ./workspace --json
+deckuse list paragraphs --workspace ./workspace --json
+deckuse apply --workspace ./workspace --input ops.json --json
+deckuse validate --workspace ./workspace --json
+deckuse export ./output.docx --workspace ./workspace --json
+```
+
+`new` without `--format` stays PPTX.
+
+### Addresses
+
+- `body/p:3` — 1-based body paragraph (tables are not paragraphs)
+- `body/p:3/run:0` — 0-based run
+- `para:1A2B3C4D` — `w14:paraId`
+- `bookmark:Intro` — bookmark. `addParagraph.name` creates one for same-batch forward refs
+- `body/table:1/row:2/cell:1/p:1`
+- `style:Heading1` — read only. Apply it with `paragraph.style`; do not write `styles.xml`
+
+### `replaceText`
+
+Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatting). `replaceText` concatenates visible `w:t` text **inside one paragraph**, then splices only the matched span and keeps neighboring `rPr`. It fails instead of rewriting tracked changes, fields, comments, content controls, or equations.
+
+### Create
+
+```json
+[
+  {
+    "type": "addParagraph",
+    "after": "body/p:1",
+    "style": "Heading1",
+    "name": "Intro",
+    "blocks": [{ "text": "总营收", "fontSize": 16, "bold": true }]
+  },
+  { "type": "setText", "target": "bookmark:Intro", "value": "Updated" },
+  {
+    "type": "addTable",
+    "name": "FinTable",
+    "rows": [["指标", "Q3"], ["营收", "120"]]
+  }
+]
+```
+
+`deckuse render --page` does not paginate DOCX. `@deckflow/office2html` converts PPTX only. Export and open the file in Word for layout checks.
+
+Schema: `deckuse schema --type addParagraph --json`.

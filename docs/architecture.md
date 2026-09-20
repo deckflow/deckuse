@@ -11,7 +11,7 @@ For OPC formats, the canonical state is the original package parts, relationship
 An initialized workspace contains:
 
 - `source/`: the unpacked OPC package; adapters mutate these files directly.
-- `package.pptx` (or future format snapshots): a generated archive rebuilt after every successful write. It is ignored by Git.
+- `package.pptx` or `package.docx`: a generated archive rebuilt after every successful write. It is ignored by Git.
 - `.deckuse/`: manifest, derived index, and `operations.jsonl`.
 - `.git/`: version history managed by `@deckflow/deckuse-workspace` (via isomorphic-git).
 

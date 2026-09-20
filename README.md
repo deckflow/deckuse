@@ -13,12 +13,12 @@
 
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It turns document editing into an explicit, reviewable workflow: open a versioned workspace, inspect and target its structure, apply JSON commands, validate the result, and export a new document.
 
-The engine is built around format adapters. PPTX is the currently implemented format; DOCX, XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
+The engine is built around format adapters. PPTX and DOCX are implemented. XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
 This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared packages here are the source of truth; the commercial edition is a private thin overlay (`deckuse-commercial`) that swaps `@deckflow/deckuse-edition-config`, registers a `PptxEditionExtension` for gated writes, and may add proprietary packages.
 
-PPTX is the currently implemented format (**protocol 2.0 / Phase 1a**). DOCX, XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
+PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
 ## Agent Skill (install first)
 
@@ -348,7 +348,19 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 
 Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
 
-### `setProperties` example
+## DOCX capabilities
+
+Word uses the same workspace loop as PPTX (`new` / `init`, `list`, `apply`, `validate`, `export`, `undo`) but not the slide canvas. `deckuse new ./workspace --format docx` starts from a blank document. `init report.docx` unpacks an existing file. Snapshot file is `package.docx`.
+
+- Addresses: `body/p:3` (1-based; tables are not paragraphs), `body/p:3/run:0` (0-based run), `para:<w14:paraId>`, `bookmark:<name>`, `body/table:1/row:2/cell:1/p:1`. `style:Heading1` is readable; applying a style uses `paragraph.style` and does not edit `styles.xml`.
+- `setText`, `replaceText` (matches across runs inside one paragraph, including text split by `w:proofErr`), `setProperties` (`fontSize`, `bold`, `italic`, `underline`, `textColor`, `fontFamily`, `paragraph.align`, `paragraph.style`).
+- `addParagraph` (`name` writes a bookmark for same-batch `bookmark:` refs), `addTable`, `insertBreak` (`page`). CLI: `deckuse add paragraph|table|break`.
+- Slide commands (`addShape`, `xfrmSet`, `alignElements`, …) return `UNSUPPORTED_CAPABILITY`.
+- Tracked changes, fields, comments, content controls, and equations are preserved. A command that would have to rewrite them fails instead of stripping them.
+- Community edition does not write style definitions, numbering definitions, theme, or settings parts.
+- `render --page` is PPTX-only. `@deckflow/office2html` does not paginate Word; export and open the `.docx` to check layout.
+
+## PPTX `setProperties` example
 
 ```json
 {

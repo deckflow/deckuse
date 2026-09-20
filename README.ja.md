@@ -13,7 +13,7 @@
 
 Deckuse は、コーディングエージェント向けのローカルファーストかつスキーマ駆動の Office 文書自動化エンジンです。文書をバージョン管理されたワークスペースとして開き、エージェントが構造を検査・対象指定し、明示的な JSON コマンドを適用、検証して新しい文書を出力できます。
 
-現在実装されている形式は PPTX です。DOCX、XLSX、Keynote、Numbers のアダプターは意図的に `FORMAT_NOT_IMPLEMENTED` を返します。これらはまだ編集対象としてサポートされていません。
+現在実装されている形式は PPTX と DOCX です。XLSX、Keynote、Numbers のアダプターは意図的に `FORMAT_NOT_IMPLEMENTED` を返します。これらはまだ編集対象としてサポートされていません。
 
 本リポジトリは**コミュニティ版**（`edition=community`）です。詳細は [docs/edition.md](docs/edition.md)。商用版は別リポジトリ `deckuse-commercial` にあります。
 

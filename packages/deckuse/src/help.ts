@@ -18,14 +18,14 @@ DeckUse Phase 1a CLI (protocol ${PROTOCOL_VERSION}).
 ${GLOBAL_OPTIONS}
 
 Commands:
-  init          Create a workspace from a .pptx
+  init          Create a workspace from a .pptx or .docx
   new           Create a workspace from the bundled blank template
   status        Show workspace revision / branch summary
-  list          List slides, shapes, layouts, masters, or theme
+  list          List slides, shapes, or Word paragraphs, tables, styles, bookmarks
   get           Read a target's properties (with provenance)
-  inspect       Deck/slide structural diagnostic
+  inspect       Structural diagnostic
   search        Search text or shapes
-  add           Add a slide or shape
+  add           Add a slide, shape, paragraph, or table
   remove        Remove a slide or shape target
   set           Set text, slide layout, or dotted properties on a target
   replace-text  Find/replace text across the deck
@@ -71,21 +71,22 @@ Notes:
   },
 
   new: {
-    usage: 'deckuse new <workspace/>',
+    usage: 'deckuse new <workspace/> [--format pptx|docx]',
     summary:
-      'Create a workspace from the bundled blank 16:9 PPTX (equivalent to init with the package default template).',
-    example: 'deckuse new ./workspace --json',
+      'Create a workspace from a bundled blank template (PPTX by default, or DOCX with --format docx).',
+    example: 'deckuse new ./workspace --format docx --json',
     details: `Arguments:
   <workspace/>              Destination directory for the workspace
 
 Options:
+  --format pptx|docx        Template format (default: pptx)
   --workspace <path>        Same as the positional workspace argument
   --json                    Machine-readable envelope
 
 Notes:
-  Uses the shipped assets/default.pptx (one blank title slide).
-  Same workspace layout as init: source/, package.pptx, .deckuse/, Git baseline.
-  Prefer init when you already have a presentation to import.`,
+  --format pptx uses assets/default.pptx (one blank title slide).
+  --format docx uses assets/default.docx (one empty paragraph, Normal and Heading 1–3).
+  Same workspace layout as init: source/, package.pptx or package.docx, .deckuse/, Git baseline.`,
   },
 
   status: {
@@ -99,11 +100,13 @@ Notes:
   },
 
   list: {
-    usage: 'deckuse list <slides|shapes|layouts|masters|theme> [options]',
+    usage:
+      'deckuse list <slides|shapes|layouts|masters|theme|paragraphs|tables|sections|styles|bookmarks> [options]',
     summary: 'List inventory resources from the workspace index / live package.',
-    example: 'deckuse list shapes --slide 1 --workspace ./workspace --json',
+    example: 'deckuse list paragraphs --workspace ./workspace --json',
     details: `Arguments:
-  slides | shapes | layouts | masters | theme
+  PPTX: slides | shapes | layouts | masters | theme
+  DOCX: paragraphs | tables | sections | styles | bookmarks
 
 Options:
   --slide <n>               Required for shapes; one-based slide index
@@ -114,7 +117,7 @@ Options:
 Examples:
   deckuse list slides --json
   deckuse list shapes --slide 12 --json
-  deckuse list layouts --json`,
+  deckuse list paragraphs --json`,
   },
 
   'list slides': {
@@ -251,17 +254,24 @@ Options:
   },
 
   add: {
-    usage: 'deckuse add <slide|shape> [options]',
-    summary: 'Add a slide or shape. One successful write commits one revision.',
-    example:
-      'deckuse add shape --slide 1 --type text --name Title --x 0 --y 0 --width 914400 --height 457200',
+    usage: 'deckuse add <slide|shape|paragraph|table|break> [options]',
+    summary:
+      'Add a slide, shape, paragraph, table, or page break. One successful write commits one revision.',
+    example: 'deckuse add paragraph --text "Hello" --style Heading1 --name Intro --json',
     details: `Subcommands:
-  slide                     Insert a new slide
-  shape                     Insert a shape on an existing slide
+  slide                     Insert a new slide (PPTX)
+  shape                     Insert a shape on an existing slide (PPTX)
+  paragraph                 Insert a paragraph (DOCX)
+  table                     Insert a table (DOCX)
+  break                     Insert a page break (DOCX)
 
 ${WRITE_GLOBALS}
 
-Run 'deckuse add <slide|shape> --help' for details.`,
+Examples:
+  deckuse add shape --slide 1 --type text --name Title --json
+  deckuse add paragraph --text "Hello" --style Heading1 --name Intro --json
+
+Run 'deckuse add <slide|shape|paragraph|table|break> --help' for details.`,
   },
 
   'add slide': {
@@ -346,7 +356,7 @@ Options:
     usage:
       'deckuse set text <target> --value <text> | deckuse set slide-layout --slide <n> --layout <ref> | deckuse set <target> --prop value ...',
     summary: 'Write text, rebind slide layout, or set dotted semantic properties.',
-    example: "deckuse set slide-layout --slide 1 --layout 2 --json",
+    example: 'deckuse set slide-layout --slide 1 --layout 2 --json',
     details: `Forms:
   set text <target> --value <text>
   set slide-layout --slide <n> --layout <ref>
@@ -383,8 +393,7 @@ Run 'deckuse set text --help' or 'deckuse set slide-layout --help' for those for
 
   'set slide-layout': {
     usage: 'deckuse set slide-layout --slide <n> --layout <ref> [options]',
-    summary:
-      'Rebind a slide to another slideLayout (by index, layout:N, slide:N, or name).',
+    summary: 'Rebind a slide to another slideLayout (by index, layout:N, slide:N, or name).',
     example: 'deckuse set slide-layout --slide 1 --layout slide:3 --json',
     details: `Required:
   --slide <n>               One-based slide index
@@ -426,8 +435,7 @@ Notes:
     usage:
       'deckuse replace-text --source <text> --target <text> [--regex] [--limit <n>] [--selector <sel>]',
     summary: 'Find and replace text across matching indexed text nodes.',
-    example:
-      'deckuse replace-text --source FY2025 --target FY2026 --json',
+    example: 'deckuse replace-text --source FY2025 --target FY2026 --json',
     details: `Required:
   --source <text>           Find string (non-empty); maps to protocol find
   --target <text>           Replacement string; maps to protocol replace
@@ -479,8 +487,7 @@ Options:
   },
 
   align: {
-    usage:
-      'deckuse align --slide <n> --targets <t1,t2,...> --mode <mode> [--gap <length>]',
+    usage: 'deckuse align --slide <n> --targets <t1,t2,...> --mode <mode> [--gap <length>]',
     summary:
       'Align or distribute shapes. Compiles to absolute EMU xfrm writes (not a layout engine).',
     example:
@@ -683,8 +690,7 @@ Notes:
   },
 
   monitor: {
-    usage:
-      'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>] [--all]',
+    usage: 'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>] [--all]',
     summary:
       'Live HTML preview. Bare `monitor` is foreground; start/status/stop manage a background daemon.',
     example: 'deckuse monitor start --workspace ./workspace --port 4173',
@@ -734,8 +740,48 @@ Options:
 Notes:
   Intended for AI agents to visually review whether an edit looks correct.
   Community render may not show custom chart series colors faithfully — check ppt/charts/*.xml or PowerPoint.
+  DOCX workspaces cannot be paginated: office2html converts PPTX only. Export and open the .docx in Word.
   Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
   Temporary office2html output is always removed after the screenshot.`,
+  },
+
+  'add paragraph': {
+    usage:
+      'deckuse add paragraph [--after <target>] [--style <id>] [--level <n>] [--name <bookmark>] [--text <text>]',
+    summary: 'Insert one or more paragraphs into a DOCX workspace.',
+    example:
+      'deckuse add paragraph --after body/p:1 --style Heading1 --name Intro --text "Hello" --json',
+    details: `Options:
+  --after <target>          Insert after this paragraph, table, or bookmark
+  --style <styleId>         Apply an existing paragraph style
+  --level <0-9>             Heading level when --style is omitted (0 = Normal)
+  --name <bookmark>         Bookmark so later commands can target bookmark:<name>
+  --text <text>             Paragraph text; newlines become extra paragraphs
+  --blocks <json>           Rich blocks (preferred over --text)
+
+${WRITE_GLOBALS}`,
+  },
+
+  'add table': {
+    usage: 'deckuse add table --rows <json> [--name <bookmark>] [--after <target>]',
+    summary: 'Insert a table into a DOCX workspace.',
+    example: `deckuse add table --rows '[["A","B"],["1","2"]]' --name FinTable --json`,
+    details: `Options:
+  --rows <json>             string[][] cell text
+  --name <bookmark>         Bookmark wrapping the table
+  --after <target>          Insert after this target (default: end of body)
+
+${WRITE_GLOBALS}`,
+  },
+
+  'add break': {
+    usage: 'deckuse add break [--after <target>]',
+    summary: 'Insert a page break paragraph into a DOCX workspace.',
+    example: 'deckuse add break --after body/p:1 --json',
+    details: `Options:
+  --after <target>          Insert after this target (default: end of body)
+
+${WRITE_GLOBALS}`,
   },
 
   query: {
@@ -791,9 +837,7 @@ export const resolveHelp = (topic: string[]): string => {
   }
 
   return (
-    `Unknown command: ${topic[0]}\n\n` +
-    HELP_MAIN +
-    `Run 'deckuse --help' for the command list.\n`
+    `Unknown command: ${topic[0]}\n\n` + HELP_MAIN + `Run 'deckuse --help' for the command list.\n`
   );
 };
 
@@ -802,7 +846,9 @@ export const helpTopicFromArgs = (clean: string[]): string[] | null => {
   if (clean.length === 0) return null;
 
   if (clean[0] === 'help') {
-    return clean.slice(1).filter((token) => token !== '--help' && token !== '-h' && !token.startsWith('--'));
+    return clean
+      .slice(1)
+      .filter((token) => token !== '--help' && token !== '-h' && !token.startsWith('--'));
   }
 
   const helpIndex = clean.findIndex((token) => token === '--help' || token === '-h');

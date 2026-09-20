@@ -159,7 +159,13 @@ export const pptxCapabilities = {
     },
   },
   query: { matchAll: ['*', 'all'], textRegex: true, hasText: true },
-  text: { setText: true, replaceText: true, multiParagraph: true, richRuns: true, paragraphBlocks: true },
+  text: {
+    setText: true,
+    replaceText: true,
+    multiParagraph: true,
+    richRuns: true,
+    paragraphBlocks: true,
+  },
   geometry: {
     units: ['emu', 'px', 'pt', 'cm', 'mm', 'in', '%'],
     alignElements: true,
@@ -285,14 +291,36 @@ const assertExpectRevision = (
 const listResource = (
   archive: OpcArchive,
   index: ReturnType<typeof buildIndex>,
-  resource: 'slides' | 'shapes' | 'layouts' | 'masters' | 'theme',
+  resource:
+    | 'slides'
+    | 'shapes'
+    | 'layouts'
+    | 'masters'
+    | 'theme'
+    | 'paragraphs'
+    | 'tables'
+    | 'sections'
+    | 'styles'
+    | 'bookmarks',
   slide?: number,
 ) => {
+  if (
+    resource === 'paragraphs' ||
+    resource === 'tables' ||
+    resource === 'sections' ||
+    resource === 'styles' ||
+    resource === 'bookmarks'
+  ) {
+    return err(
+      'UNSUPPORTED_CAPABILITY',
+      `list ${resource} is a Word resource and is not available for PPTX`,
+      [],
+      { hint: 'Use slides, shapes, layouts, masters, or theme.' },
+    );
+  }
   if (resource === 'slides') {
     const layouts = orderedLayouts(index);
-    const layoutIndexByPart = new Map(
-      layouts.map((item, i) => [item.partUri, i + 1] as const),
-    );
+    const layoutIndexByPart = new Map(layouts.map((item, i) => [item.partUri, i + 1] as const));
     return index.elements
       .filter((item) => item.kind === 'slide')
       .map((item, i) => {
@@ -300,7 +328,12 @@ const listResource = (
         const layout =
           layoutPart !== undefined
             ? {
-                target: `layout:${layoutPart.split('/').pop()?.replace(/\.xml$/i, '') ?? layoutPart}`,
+                target: `layout:${
+                  layoutPart
+                    .split('/')
+                    .pop()
+                    ?.replace(/\.xml$/i, '') ?? layoutPart
+                }`,
                 displayName: layoutDisplayName(archive, layoutPart),
                 ...(layoutIndexByPart.has(layoutPart)
                   ? { index: layoutIndexByPart.get(layoutPart)! }

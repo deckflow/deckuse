@@ -6,7 +6,22 @@ import { fileURLToPath } from 'node:url';
 export const resolveDefaultPptxPath = (): string =>
   join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'default.pptx');
 
-/** Resolve the bundled template and fail clearly if the package install is incomplete. */
+/** Absolute path to the bundled blank DOCX shipped next to `dist/`. */
+export const resolveDefaultDocxPath = (): string =>
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'default.docx');
+
+/** Resolve the bundled Word template and fail clearly if the package install is incomplete. */
+export const assertDefaultDocxExists = async (): Promise<string> => {
+  const path = resolveDefaultDocxPath();
+  try {
+    await access(path);
+  } catch {
+    throw new Error(
+      `Bundled default template missing: ${path}. Reinstall @deckflow/deckuse or restore packages/deckuse/assets/default.docx.`,
+    );
+  }
+  return path;
+};
 export const assertDefaultPptxExists = async (): Promise<string> => {
   const path = resolveDefaultPptxPath();
   try {

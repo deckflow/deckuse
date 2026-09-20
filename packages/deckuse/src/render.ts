@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -73,9 +73,7 @@ const launchChromium = async (): Promise<Browser> => {
     try {
       return await chromium.launch({ channel, headless: true });
     } catch (error) {
-      errors.push(
-        `${channel}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      errors.push(`${channel}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -132,9 +130,22 @@ export const renderPage = async (
   const absoluteWorkspace = resolve(workspace);
   await ensureGitignore(absoluteWorkspace);
 
-  const output = resolve(
-    options.output ?? joinRenderDefault(absoluteWorkspace, page),
-  );
+  let snapshot = PACKAGE_PPTX;
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(absoluteWorkspace, '.deckuse', 'manifest.json'), 'utf8'),
+    ) as { format?: string };
+    if (manifest.format === 'docx') snapshot = 'package.docx';
+  } catch {
+    // Missing manifest keeps the PPTX snapshot path used by existing render callers.
+  }
+  if (snapshot === 'package.docx') {
+    throw new Error(
+      'DOCX page render is not available. @deckflow/office2html converts PPTX only and does not paginate Word documents. Export the .docx and open it in Word to check layout.',
+    );
+  }
+
+  const output = resolve(options.output ?? joinRenderDefault(absoluteWorkspace, page));
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const converter = options.dependencies?.convert ?? office2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;

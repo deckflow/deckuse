@@ -17,7 +17,10 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
-    "@deckflow/deckuse-core": "workspace:*"
+    "@deckflow/deckuse-core": "workspace:*",
+    "@deckflow/deckuse-opc": "workspace:*",
+    "@deckflow/deckuse-workspace": "workspace:*",
+    "@xmldom/xmldom": "latest"
   },
   "engines": {
     "node": ">=18.0.0"

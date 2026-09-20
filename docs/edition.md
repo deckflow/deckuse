@@ -25,7 +25,9 @@ Community edition:
 - **Allows** rebinding a slide to another layout (`setSlideLayout` / `addSlide.layout`) — this updates the slide→slideLayout relationship only.
 - **Rejects** writes to master slides, layout slides, and theme parts (`UNSUPPORTED_CAPABILITY`).
 - **Rejects** edits to **advanced** charts (other non-basic families, ChartEx, unclassifiable charts, combos other than bar+line).
-- Embeds the closed-source `office2html` engine (not `office2html plus`).
+- Embeds the closed-source `office2html` engine (not `office2html plus`). That engine converts PPTX only, so `deckuse render --page` does not paginate DOCX.
+
+DOCX community writes cover body paragraphs, runs, tables, bookmarks, and page breaks, including applying a style id that already exists in the document. Writes to `word/styles.xml`, `word/numbering.xml` definitions, `word/theme/`, and `word/settings.xml` are rejected. Tracked changes, fields, comments, content controls, and equations stay untouched; a command that would have to rewrite them fails.
 
 `editionCapabilities` is **status metadata** only. Proprietary write authorization lives in commercial packages via `registerPptxEditionExtension`.
 
