@@ -4,8 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const packagePath = resolve(root, 'packages/deckuse/package.json');
-const outputPath = resolve(root, 'packages/deckuse/src/version.ts');
+const packagePath = resolve(root, 'package.json');
+const outputPath = resolve(root, 'src/version.ts');
 const { version } = JSON.parse(await readFile(packagePath, 'utf8'));
 
 if (typeof version !== 'string') {

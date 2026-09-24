@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  AdapterRegistry,
+  Executor,
+  createNotImplementedAdapter,
+  ok,
+  type FormatAdapter,
+} from '../../src/core/index.js';
+describe('executor', () => {
+  it('validates input before dispatch', async () => {
+    const result = await new Executor(new AdapterRegistry()).execute({ type: 'validate' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('INVALID_COMMAND');
+      expect(result.error.message).toMatch(/schema validation/i);
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.diagnostics[0]?.path?.length).toBeGreaterThan(0);
+    }
+  });
+  it('binds initialized workspaces to adapters', async () => {
+    const execute = vi.fn(async () => ok({ valid: true }));
+    const adapter: FormatAdapter = {
+      format: 'test',
+      version: '1',
+      async init(command) {
+        return ok({
+          workspaceId: command.workspaceId,
+          format: 'test',
+          source: command.source,
+          revision: 'r1',
+          elementCount: 0,
+        });
+      },
+      execute,
+    };
+    const executor = new Executor(new AdapterRegistry().register(adapter));
+    expect(
+      (
+        await executor.execute({
+          version: '2.0',
+          type: 'init',
+          workspaceId: 'w',
+          format: 'test',
+          source: 'a.test',
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (await executor.execute({ version: '2.0', type: 'validate', workspaceId: 'w' })).ok,
+    ).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('recovers an adapter through the persistent resolver', async () => {
+    const execute = vi.fn(async () => ok({ recovered: true }));
+    const adapter: FormatAdapter = {
+      format: 'test',
+      version: '1',
+      async init() {
+        throw new Error('not used');
+      },
+      execute,
+    };
+    const resolver = vi.fn(async () => adapter);
+    const executor = new Executor(new AdapterRegistry(), { resolveAdapter: resolver });
+    const result = await executor.execute({
+      version: '2.0',
+      type: 'validate',
+      workspaceId: '/tmp/persistent-workspace',
+    });
+    expect(result.ok).toBe(true);
+    expect(resolver).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+  });
+  it('returns the placeholder error', async () => {
+    const executor = new Executor(
+      new AdapterRegistry().register(createNotImplementedAdapter('docx')),
+    );
+    const result = await executor.execute({
+      version: '2.0',
+      type: 'init',
+      workspaceId: 'w',
+      format: 'docx',
+      source: 'a.docx',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('FORMAT_NOT_IMPLEMENTED');
+  });
+});

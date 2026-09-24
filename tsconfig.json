@@ -1,16 +1,22 @@
 {
-  "extends": "./tsconfig.base.json",
-  "files": [],
-  "references": [
-    { "path": "./packages/core" },
-    { "path": "./packages/edition-config" },
-    { "path": "./packages/workspace" },
-    { "path": "./packages/opc" },
-    { "path": "./packages/pptx" },
-    { "path": "./packages/deckuse" },
-    { "path": "./packages/docx" },
-    { "path": "./packages/xlsx" },
-    { "path": "./packages/key" },
-    { "path": "./packages/numbers" }
-  ]
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
 }

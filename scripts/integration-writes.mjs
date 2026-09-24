@@ -12,7 +12,7 @@
  * template is specialized with those targets.
  *
  * Options:
- *   --bin <path>           deckuse entry (default: packages/deckuse/dist/bin.js)
+ *   --bin <path>           deckuse entry (default: dist/bin.js)
  *   --recursive            scan subdirectories for .pptx (dir mode only)
  *   --force                remove existing workspace before init
  *   --continue-on-error    keep going after a failed step / file
@@ -38,22 +38,14 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import {
-  access,
-  mkdir,
-  readdir,
-  readFile,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const DEFAULT_BIN = join(ROOT, 'packages/deckuse/dist/bin.js');
+const DEFAULT_BIN = join(ROOT, 'dist/bin.js');
 
 /** Default parallel file workers for directory scans. */
 const defaultConcurrency = () => Math.max(1, availableParallelism() - 2);
@@ -82,7 +74,7 @@ If that workspace already exists, the case is skipped (resume-friendly). Delete 
 manually, or pass --force, to re-run.
 
 Options:
-  --bin <path>            deckuse bin.js (default: packages/deckuse/dist/bin.js)
+  --bin <path>            deckuse bin.js (default: dist/bin.js)
   --recursive             include .pptx in subdirectories (dir mode)
   --force                 delete existing workspace before init
   --continue-on-error     do not stop on first failure
@@ -123,8 +115,7 @@ const parseArgs = (argv) => {
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
   const concurrencyRaw = takeOption(args, '--concurrency');
-  const concurrency =
-    concurrencyRaw !== undefined ? Number(concurrencyRaw) : defaultConcurrency();
+  const concurrency = concurrencyRaw !== undefined ? Number(concurrencyRaw) : defaultConcurrency();
   // Internal: child worker writes its case report JSON here and skips batch summary / new.
   const workerResult = takeOption(args, '--worker-result');
   const input = args[0];
@@ -134,10 +125,7 @@ const parseArgs = (argv) => {
   if (limitRaw !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     return { error: '--limit must be a positive integer' };
   }
-  if (
-    concurrencyRaw !== undefined &&
-    (!Number.isInteger(concurrency) || concurrency < 1)
-  ) {
+  if (concurrencyRaw !== undefined && (!Number.isInteger(concurrency) || concurrency < 1)) {
     return { error: '--concurrency must be a positive integer' };
   }
   return {
@@ -193,11 +181,11 @@ const optionFromArgs = (list, name) => {
   return i >= 0 ? list[i + 1] : undefined;
 };
 
-/** Mirror of packages/deckuse/src/bin.ts parseProps (for CLI → command conversion). */
+/** Mirror of src/bin.ts parseProps (for CLI → command conversion). */
 const parseCliProps = (list) => {
   /** @type {Record<string, unknown>} */
   const props = {};
-  for (let i = 0; i < list.length; ) {
+  for (let i = 0; i < list.length;) {
     const token = list[i];
     if (!token?.startsWith('--')) {
       i += 1;
@@ -402,7 +390,8 @@ const classifyBatchStep = (args, stdin) => {
     if (
       list.length > 0 &&
       list.every(
-        (value) => typeof value === 'object' && value !== null && 'op' in value && !('type' in value),
+        (value) =>
+          typeof value === 'object' && value !== null && 'op' in value && !('type' in value),
       )
     ) {
       return { kind: 'passthrough' };
@@ -512,7 +501,9 @@ class Runner {
     const names = queued.map((item) => item.name);
     const label = `batch apply (${String(commands.length)})`;
     const detailNames =
-      names.length <= 4 ? names.join(', ') : `${names.slice(0, 3).join(', ')}, +${String(names.length - 3)} more`;
+      names.length <= 4
+        ? names.join(', ')
+        : `${names.slice(0, 3).join(', ')}, +${String(names.length - 3)} more`;
     process.stdout.write(`  · flush ${label}: ${detailNames}\n`);
     const envelope = await this.executeStep(
       label,
@@ -553,8 +544,7 @@ class Runner {
     try {
       envelope = parseEnvelope(result.stdout);
     } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : 'failed to parse JSON envelope';
+      const message = cause instanceof Error ? cause.message : 'failed to parse JSON envelope';
       this.failed = true;
       const stepResult = {
         name,
@@ -1085,7 +1075,9 @@ const runWriteSequence = async (runner, media, opts = {}) => {
   );
   const blankLayout =
     layouts.find((layout) => layout?.displayName === 'Blank' || layout?.type === 'blank') ??
-    layouts.find((layout) => typeof layout?.displayName === 'string' && /blank/i.test(layout.displayName));
+    layouts.find(
+      (layout) => typeof layout?.displayName === 'string' && /blank/i.test(layout.displayName),
+    );
 
   if (alternateLayout?.index !== undefined) {
     await runner.step('set slide-layout by index (CLI)', [
@@ -1163,7 +1155,7 @@ const runWriteSequence = async (runner, media, opts = {}) => {
   const addSlideLayoutRef =
     alternateLayout?.index !== undefined
       ? String(alternateLayout.index)
-      : blankLayout?.displayName ?? 'blank';
+      : (blankLayout?.displayName ?? 'blank');
   await runner.step('add slide', [
     'add',
     'slide',
@@ -1182,7 +1174,8 @@ const runWriteSequence = async (runner, media, opts = {}) => {
   const slidesForLayoutCopy = await runner.listSlides();
   if (slidesForLayoutCopy.length >= 2) {
     const donor =
-      slidesForLayoutCopy.find((s) => s.index !== workSlide)?.index ?? slidesForLayoutCopy[1]?.index;
+      slidesForLayoutCopy.find((s) => s.index !== workSlide)?.index ??
+      slidesForLayoutCopy[1]?.index;
     if (typeof donor === 'number') {
       await runner.step('set slide-layout by slide:N (CLI)', [
         'set',
@@ -1449,9 +1442,7 @@ const runWriteSequence = async (runner, media, opts = {}) => {
       '--showMajorGridlines',
       'true',
       '--series',
-      JSON.stringify([
-        { name: '2025', values: [15, 25], color: '#E67E22' },
-      ]),
+      JSON.stringify([{ name: '2025', values: [15, 25], color: '#E67E22' }]),
       '--reason',
       'integration-writes',
       ...runner.wsArgs(),
@@ -1524,7 +1515,7 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     '--layout',
     blankLayout?.index !== undefined
       ? `layout:${String(blankLayout.index)}`
-      : blankLayout?.displayName ?? 'blank',
+      : (blankLayout?.displayName ?? 'blank'),
     '--name',
     `${PREFIX}-to-remove`,
     '--reason',
@@ -1549,12 +1540,7 @@ const runWriteSequence = async (runner, media, opts = {}) => {
     );
   }
 
-  await runner.step('validate', [
-    'validate',
-    '--package',
-    '--relationships',
-    ...runner.wsArgs(),
-  ]);
+  await runner.step('validate', ['validate', '--package', '--relationships', ...runner.wsArgs()]);
   await runner.step('history', ['history', '--limit', '50', ...runner.wsArgs()]);
 
   if (!opts.skipExport) {
@@ -1619,12 +1605,7 @@ const processOne = async (pptxPath, options) => {
     process.stdout.write('  (batch mode: consecutive writes merged via apply)\n');
   }
 
-  const init = await runner.step('init', [
-    'init',
-    pptxPath,
-    workspace,
-    '--json',
-  ]);
+  const init = await runner.step('init', ['init', pptxPath, workspace, '--json']);
   if (!init?.ok) {
     const errCode =
       init && typeof init === 'object' && init.error && typeof init.error === 'object'
@@ -1632,9 +1613,7 @@ const processOne = async (pptxPath, options) => {
         : undefined;
     const unreadable = errCode === 'IO_ERROR';
     if (unreadable) {
-      process.stdout.write(
-        '  → SKIP  unreadable package (IO_ERROR); not a product regression\n',
-      );
+      process.stdout.write('  → SKIP  unreadable package (IO_ERROR); not a product regression\n');
     }
     return {
       pptx: pptxPath,
@@ -1699,7 +1678,15 @@ const processOneInWorker = (pptxPath, options) =>
   new Promise((done) => {
     const resultPath = join(tmpdir(), `integration-writes-worker-${randomUUID()}.json`);
     /** @type {string[]} */
-    const args = [SCRIPT_PATH, pptxPath, '--bin', options.bin, '--skip-new', '--worker-result', resultPath];
+    const args = [
+      SCRIPT_PATH,
+      pptxPath,
+      '--bin',
+      options.bin,
+      '--skip-new',
+      '--worker-result',
+      resultPath,
+    ];
     if (options.force) args.push('--force');
     if (options.continueOnError) args.push('--continue-on-error');
     if (options.skipExport) args.push('--skip-export');
@@ -1961,8 +1948,7 @@ const main = async () => {
   /** @type {Awaited<ReturnType<typeof processOne>>[]} */
   const reports = [];
 
-  const isAbortingFailure = (report) =>
-    Boolean(report && !report.ok && !report.unreadable);
+  const isAbortingFailure = (report) => Boolean(report && !report.ok && !report.unreadable);
 
   if (mode === 'dir' && files.length > 1) {
     const pooled = await mapPool(
@@ -1985,8 +1971,7 @@ const main = async () => {
         }
       },
       {
-        shouldStop: (report) =>
-          !options.continueOnError && isAbortingFailure(report),
+        shouldStop: (report) => !options.continueOnError && isAbortingFailure(report),
       },
     );
     for (const report of pooled) {
@@ -2083,6 +2068,8 @@ const main = async () => {
 };
 
 main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

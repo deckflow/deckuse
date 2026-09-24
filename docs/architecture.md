@@ -1,6 +1,6 @@
 # Deckuse architecture
 
-Deckuse is a schema-first document automation monorepo. `@deckflow/deckuse-core` owns the versioned wire contract, validation, results, diagnostics, adapter registry, and dispatch. `@deckflow/deckuse-workspace` owns shared workspace infrastructure (Git history, write locks, operation logs, metadata paths). Format packages implement `FormatAdapter`; the CLI is only a JSON-in/JSON-out transport and does not define a second contract.
+Deckuse is a schema-first document automation library published as `@deckflow/deckuse`. Internal modules under `src/` own distinct responsibilities: `src/core` owns the versioned wire contract, validation, results, diagnostics, adapter registry, and dispatch; `src/workspace` owns shared workspace infrastructure (Git history, write locks, operation logs, metadata paths). Format modules (`src/pptx`, `src/docx`, …) implement `FormatAdapter`; the CLI is only a JSON-in/JSON-out transport and does not define a second contract.
 
 ## Canonical model: OOXML plus derived indexes
 
@@ -13,7 +13,7 @@ An initialized workspace contains:
 - `source/`: the unpacked OPC package; adapters mutate these files directly.
 - `package.pptx` or `package.docx`: a generated archive rebuilt after every successful write. It is ignored by Git.
 - `.deckuse/`: manifest, derived index, and `operations.jsonl`.
-- `.git/`: version history managed by `@deckflow/deckuse-workspace` (via isomorphic-git).
+- `.git/`: version history managed by `src/workspace` (via isomorphic-git).
 
 ## Transactions
 

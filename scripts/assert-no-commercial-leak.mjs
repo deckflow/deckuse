@@ -5,7 +5,7 @@
  * Runtime license / certificate verification must live only in deckuse-commercial.
  */
 import { pathToFileURL } from 'node:url';
-import { readdirSync, readFileSync, statSync, existsSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 const root = process.cwd();
@@ -59,8 +59,6 @@ const FORBIDDEN_LICENSE_EXPORTS = [
   'LICENSE_ENV_VAR',
 ];
 
-const LOCAL_EDITION_CONFIG = join(root, 'packages', 'edition-config');
-
 const errors = [];
 
 const walk = (dir, out = []) => {
@@ -110,12 +108,8 @@ for (const marker of FORBIDDEN_PATH_MARKERS) {
   if (hit) errors.push(`Forbidden path marker "${marker}" found at ${relative(root, hit)}`);
 }
 
-const packagesRoot = join(root, 'packages');
-const underPackages = (p) => p === packagesRoot || p.startsWith(`${packagesRoot}${sep}`);
-
-const pkgPaths = allFiles.filter((p) => p.endsWith('package.json') && underPackages(p));
-
-for (const pkgPath of pkgPaths) {
+const pkgPath = join(root, 'package.json');
+if (existsSync(pkgPath)) {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
   const deps = {
     ...pkg.dependencies,
@@ -125,28 +119,28 @@ for (const pkgPath of pkgPaths) {
   };
   for (const name of FORBIDDEN_PACKAGE_NAMES) {
     if (deps[name]) {
-      errors.push(`${relative(root, pkgPath)} depends on forbidden package ${name}`);
+      errors.push(`package.json depends on forbidden package ${name}`);
     }
   }
 }
 
 const sourceExt = /\.(ts|js|mjs)$/;
-const sourceFiles = allFiles.filter((p) => sourceExt.test(p) && underPackages(p));
+const sourceRoot = join(root, 'src');
+const underSource = (p) => p === sourceRoot || p.startsWith(`${sourceRoot}${sep}`);
+const sourceFiles = allFiles.filter((p) => sourceExt.test(p) && underSource(p));
 
 for (const file of sourceFiles) {
   const text = readFileSync(file, 'utf8');
   for (const marker of FORBIDDEN_LICENSE_MARKERS) {
     if (text.includes(marker)) {
-      errors.push(
-        `Forbidden license/certificate marker "${marker}" in ${relative(root, file)}`,
-      );
+      errors.push(`Forbidden license/certificate marker "${marker}" in ${relative(root, file)}`);
     }
   }
 }
 
-const editionSrc = join(root, 'packages/edition-config/src/index.ts');
+const editionSrc = join(root, 'src/edition-config/index.ts');
 if (!existsSync(editionSrc)) {
-  errors.push('packages/edition-config/src/index.ts missing');
+  errors.push('src/edition-config/index.ts missing');
 } else {
   const src = readFileSync(editionSrc, 'utf8');
   if (!src.includes("export const EDITION: Edition = 'community'")) {
@@ -160,37 +154,7 @@ if (!existsSync(editionSrc)) {
   }
 }
 
-const assertEditionConfigLink = (pkgDir) => {
-  const linked = join(root, 'packages', pkgDir, 'node_modules/@deckflow/deckuse-edition-config');
-  if (!existsSync(linked)) {
-    errors.push(
-      `${pkgDir} cannot resolve workspace @deckflow/deckuse-edition-config (run pnpm install)`,
-    );
-    return;
-  }
-  try {
-    const real = realpathSync(linked);
-    if (real !== LOCAL_EDITION_CONFIG && !real.startsWith(`${LOCAL_EDITION_CONFIG}${sep}`)) {
-      errors.push(
-        `${pkgDir}: @deckflow/deckuse-edition-config must link to packages/edition-config (got ${real})`,
-      );
-    }
-    if (real.includes(`${sep}deckuse-commercial${sep}`)) {
-      errors.push(
-        `${pkgDir}: @deckflow/deckuse-edition-config must not resolve into deckuse-commercial (${real})`,
-      );
-    }
-  } catch (err) {
-    errors.push(
-      `Failed to realpath ${pkgDir} edition-config link: ${err instanceof Error ? err.message : err}`,
-    );
-  }
-};
-
-assertEditionConfigLink('pptx');
-assertEditionConfigLink('deckuse');
-
-const distJs = join(root, 'packages/edition-config/dist/index.js');
+const distJs = join(root, 'dist/edition-config/index.js');
 if (existsSync(distJs)) {
   try {
     const cfg = await import(pathToFileURL(distJs).href);

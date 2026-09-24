@@ -1,17 +1,39 @@
 {
   "name": "@deckflow/deckuse",
-  "private": true,
+  "version": "1.2.1",
   "license": "AGPL-3.0",
   "type": "module",
+  "private": false,
   "packageManager": "pnpm@10.6.3",
   "engines": {
     "node": ">=20.19.0"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./bin": {
+      "types": "./dist/bin.d.ts",
+      "import": "./dist/bin.js"
+    },
+    "./schema/command.json": "./schema/command.schema.json"
+  },
+  "files": [
+    "dist",
+    "assets",
+    "schema"
+  ],
+  "bin": {
+    "deckuse": "./dist/bin.js"
+  },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
-    "build": "node scripts/generate-cli-version.mjs && tsc -b && node scripts/generate-schema.mjs",
+    "build": "node scripts/generate-cli-version.mjs && tsc && node scripts/generate-schema.mjs",
+    "prepack": "node scripts/sync-npm-readme.mjs",
+    "postpack": "node scripts/sync-npm-readme.mjs --restore",
     "lint": "eslint .",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc --pretty false",
     "test": "vitest run",
     "test:integration-writes": "node scripts/integration-writes.mjs",
     "format": "prettier --write .",
@@ -21,7 +43,15 @@
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish"
+    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore"
+  },
+  "dependencies": {
+    "@deckflow/office2html": "^0.3.3",
+    "@xmldom/xmldom": "^0.9.10",
+    "@zip.js/zip.js": "^2.8.34",
+    "isomorphic-git": "latest",
+    "playwright-core": "^1.62.1",
+    "zod": "latest"
   },
   "devDependencies": {
     "@changesets/cli": "latest",
@@ -33,5 +63,10 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "latest",
     "vitest": "latest"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deckflow/deckuse.git"
+  },
+  "homepage": "https://github.com/deckflow/deckuse#readme"
 }

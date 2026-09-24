@@ -13,7 +13,7 @@
 
 Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office 文档自动化引擎。它将文档打开为带版本的工作区，让智能体用语义地址（如 `slide:1/shape:2`）检查并精确定位结构，执行显式变更、验证结果，再导出新文档。
 
-本仓库为**社区版**（`edition=community`），说明见 [docs/edition.md](docs/edition.md)。共享包以此仓为唯一源；商业版是私有薄覆盖层仓库 `deckuse-commercial`（替换 `@deckflow/deckuse-edition-config`，并可增加专有包）。
+本仓库为**社区版**（`edition=community`），说明见 [docs/edition.md](docs/edition.md)。共享源码以此仓为唯一源，发布为 `@deckflow/deckuse`；商业版是私有薄覆盖层仓库 `deckuse-commercial`（注册 `PptxEditionExtension`，并可增加专有包）。
 
 目前已实现 PPTX 与 DOCX（**协议 2.0**）。XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。Word 与 PPTX 共用工作区循环（`new --format docx`、`init`、`apply`、`validate`、`export`），寻址用 `body/p:N`、`bookmark:名称`、`para:<paraId>`，而不是幻灯片形状。`render --page` 仍只支持 PPTX。完整说明见 [README.md](README.md) 的 DOCX capabilities。
 
@@ -105,14 +105,14 @@ workspace/
 
 Phase 1a 优先使用 `search text` / `search shape` 与 `list`。`query` 仍可用作兼容入口，接受选择器字符串或命令中的结构化选择器。空格分隔的条件以 AND 组合。
 
-| 语法                                     | 含义                                   |
-| ---------------------------------------- | -------------------------------------- |
-| `*` 或 `all`                             | 匹配所有已索引元素。                   |
-| `kind=textbox`                           | 按不区分大小写的子串匹配元素 kind。    |
-| `text=Quarter`                           | 匹配包含字面量的文本。                 |
-| `text~=pattern`                          | 用 Unicode 正则匹配文本。              |
-| `hasText=true`                           | 匹配含文本的元素。                     |
-| `slide=256`、`id=256:10`、`name=Title` | 按幻灯片 ID、元素 ID 或名称过滤。      |
+| 语法                                   | 含义                                |
+| -------------------------------------- | ----------------------------------- |
+| `*` 或 `all`                           | 匹配所有已索引元素。                |
+| `kind=textbox`                         | 按不区分大小写的子串匹配元素 kind。 |
+| `text=Quarter`                         | 匹配包含字面量的文本。              |
+| `text~=pattern`                        | 用 Unicode 正则匹配文本。           |
+| `hasText=true`                         | 匹配含文本的元素。                  |
+| `slide=256`、`id=256:10`、`name=Title` | 按幻灯片 ID、元素 ID 或名称过滤。   |
 
 查询结果提供稳定的元素引用。引用包含文档 ID 以及元素 ID 或结构路径；数组下标不是稳定标识符。
 

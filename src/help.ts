@@ -1,0 +1,858 @@
+import { PROTOCOL_VERSION } from './core/index.js';
+
+const GLOBAL_OPTIONS = `Global options:
+  --workspace <path>        Explicit workspace (default: nearest .deckuse)
+  --revision <rev>          Read a historical revision (writes reject it)
+  --json                    Machine-readable envelope
+  --quiet                   Suppress human-oriented summaries
+  --dry-run                 Plan a write without committing
+  --expect-revision <rev>   Optimistic-concurrency guard for writes
+  --reason <text>           Stored with write history`;
+
+const WRITE_GLOBALS = `Write globals: --workspace, --json, --dry-run, --expect-revision, --reason`;
+
+export const HELP_MAIN = `usage: deckuse [global-options] <command> [subcommand] [target] [options]
+
+DeckUse Phase 1a CLI (protocol ${PROTOCOL_VERSION}).
+
+${GLOBAL_OPTIONS}
+
+Commands:
+  init          Create a workspace from a .pptx or .docx
+  new           Create a workspace from the bundled blank template
+  status        Show workspace revision / branch summary
+  list          List slides, shapes, or Word paragraphs, tables, styles, bookmarks
+  get           Read a target's properties (with provenance)
+  inspect       Structural diagnostic
+  search        Search text or shapes
+  add           Add a slide, shape, paragraph, or table
+  remove        Remove a slide or shape target
+  set           Set text, slide layout, or dotted properties on a target
+  replace-text  Find/replace text across the deck
+  xfrm          Set geometry (x/y/width/height/rotation)
+  align         Align or distribute shapes on a slide
+  z             Change z-order
+  apply         Apply one or many JSON / JSONL write commands
+  schema        Print command JSON Schema (self-describing CLI)
+  measure       Heuristic text size estimate (for layout)
+  validate      Validate package / relationships
+  history       Show write history
+  undo          Undo recent write revisions
+  export        Pack source/ to .pptx (default; --from-package copies snapshot)
+  monitor       Live HTML preview server (foreground or start/status/stop)
+  render        Screenshot one slide to PNG (for visual review)
+  query         Back-compat selector query (prefer search / list)
+
+Run 'deckuse <command> --help' for details.
+`;
+
+type HelpEntry = {
+  usage: string;
+  summary: string;
+  example: string;
+  details?: string;
+};
+
+const entries: Record<string, HelpEntry> = {
+  init: {
+    usage: 'deckuse init <input.pptx> <workspace/>',
+    summary: 'Unpack a PPTX into a versioned DeckUse workspace (revision starts at 1).',
+    example: 'deckuse init input.pptx ./workspace --json',
+    details: `Arguments:
+  <input.pptx>              Source presentation to unpack
+  <workspace/>              Destination directory for the workspace
+
+Options:
+  --json                    Machine-readable envelope
+
+Notes:
+  Creates source/, package.pptx, .deckuse/, and a Git baseline.
+  Does not normalize or rewrite slide content.`,
+  },
+
+  new: {
+    usage: 'deckuse new <workspace/> [--format pptx|docx]',
+    summary:
+      'Create a workspace from a bundled blank template (PPTX by default, or DOCX with --format docx).',
+    example: 'deckuse new ./workspace --format docx --json',
+    details: `Arguments:
+  <workspace/>              Destination directory for the workspace
+
+Options:
+  --format pptx|docx        Template format (default: pptx)
+  --workspace <path>        Same as the positional workspace argument
+  --json                    Machine-readable envelope
+
+Notes:
+  --format pptx uses assets/default.pptx (one blank title slide).
+  --format docx uses assets/default.docx (one empty paragraph, Normal and Heading 1–3).
+  Same workspace layout as init: source/, package.pptx or package.docx, .deckuse/, Git baseline.`,
+  },
+
+  status: {
+    usage: 'deckuse status [--workspace <path>]',
+    summary: 'Show workspace revision, branch, and package summary.',
+    example: 'deckuse status --workspace ./workspace --json',
+    details: `Options:
+  --workspace <path>        Workspace root (default: nearest .deckuse)
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  list: {
+    usage:
+      'deckuse list <slides|shapes|layouts|masters|theme|paragraphs|tables|sections|styles|bookmarks> [options]',
+    summary: 'List inventory resources from the workspace index / live package.',
+    example: 'deckuse list paragraphs --workspace ./workspace --json',
+    details: `Arguments:
+  PPTX: slides | shapes | layouts | masters | theme
+  DOCX: paragraphs | tables | sections | styles | bookmarks
+
+Options:
+  --slide <n>               Required for shapes; one-based slide index
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope
+
+Examples:
+  deckuse list slides --json
+  deckuse list shapes --slide 12 --json
+  deckuse list paragraphs --json`,
+  },
+
+  'list slides': {
+    usage: 'deckuse list slides [options]',
+    summary: 'List slides with index, uid, title preview, layout, and notes flags.',
+    example: 'deckuse list slides --workspace ./workspace --json',
+    details: `Options:
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  'list shapes': {
+    usage: 'deckuse list shapes --slide <n> [options]',
+    summary: 'List shapes on a slide (id, name, role, type, bbox, text preview).',
+    example: 'deckuse list shapes --slide 1 --workspace ./workspace --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+
+Options:
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  'list layouts': {
+    usage: 'deckuse list layouts [options]',
+    summary: 'List slide layouts (index, displayName, type, target) in stable order.',
+    example: 'deckuse list layouts --json',
+    details: `Options:
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope
+
+Items include 1-based index (usable as --layout 2 / layout:2), displayName
+(cSld@name), optional type (sldLayout@type), target, and partUri.`,
+  },
+
+  'list masters': {
+    usage: 'deckuse list masters [options]',
+    summary: 'List slide masters available in the package.',
+    example: 'deckuse list masters --json',
+    details: `Options:
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  'list theme': {
+    usage: 'deckuse list theme [options]',
+    summary: 'List theme tokens / theme inventory.',
+    example: 'deckuse list theme --json',
+    details: `Options:
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  get: {
+    usage: 'deckuse get <target> [options]',
+    summary: 'Read a semantic target with direct/effective values and provenance.',
+    example: 'deckuse get slide:1/shape:2 --resolve both --json',
+    details: `Arguments:
+  <target>                  e.g. slide:1, slide:1/shape:2, slide:1/shape:2/text
+
+Options:
+  --resolve <mode>          effective | direct | both (default: both)
+  --props <a,b,c>           Comma-separated property filter
+  --no-provenance           Omit inheritance source paths
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  inspect: {
+    usage: 'deckuse inspect [<target>] [options]',
+    summary: 'Structural diagnostic for the deck or a slide/target.',
+    example: 'deckuse inspect slide:1 --visual-tree --depth 2 --json',
+    details: `Arguments:
+  <target>                  Optional; omit for presentation-level inspect
+
+Options:
+  --visual-tree             Include object tree projection
+  --depth <n>               Tree depth (default: 2)
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  search: {
+    usage: 'deckuse search <text|shape> ...',
+    summary: 'Search indexed text or shapes; never mutates the workspace.',
+    example: 'deckuse search text "Q2 Revenue" --limit 50 --json',
+    details: `Subcommands:
+  text <query>              Literal text search
+  shape                     Shape search via --name / --query
+
+Options:
+  --name <name>             Match shape name
+  --query <text>            Query string (shape mode)
+  --limit <n>               Max results (default: 100)
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope
+
+Run 'deckuse search <text|shape> --help' for details.`,
+  },
+
+  'search text': {
+    usage: 'deckuse search text <query> [options]',
+    summary: 'Search slide text for a literal query string.',
+    example: 'deckuse search text "FY2025" --limit 100 --json',
+    details: `Arguments:
+  <query>                   Literal text to find
+
+Options:
+  --limit <n>               Max results (default: 100)
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  'search shape': {
+    usage: 'deckuse search shape [options]',
+    summary: 'Search shapes by name and/or query string.',
+    example: 'deckuse search shape --name "Title" --limit 50 --json',
+    details: `Options:
+  --name <name>             Match shape name
+  --query <text>            Additional query string
+  --limit <n>               Max results (default: 100)
+  --workspace <path>        Workspace root
+  --revision <rev>          Read a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  add: {
+    usage: 'deckuse add <slide|shape|paragraph|table|break> [options]',
+    summary:
+      'Add a slide, shape, paragraph, table, or page break. One successful write commits one revision.',
+    example: 'deckuse add paragraph --text "Hello" --style Heading1 --name Intro --json',
+    details: `Subcommands:
+  slide                     Insert a new slide (PPTX)
+  shape                     Insert a shape on an existing slide (PPTX)
+  paragraph                 Insert a paragraph (DOCX)
+  table                     Insert a table (DOCX)
+  break                     Insert a page break (DOCX)
+
+${WRITE_GLOBALS}
+
+Examples:
+  deckuse add shape --slide 1 --type text --name Title --json
+  deckuse add paragraph --text "Hello" --style Heading1 --name Intro --json
+
+Run 'deckuse add <slide|shape|paragraph|table|break> --help' for details.`,
+  },
+
+  'add slide': {
+    usage: 'deckuse add slide [options]',
+    summary: 'Insert one slide (and package/relationship updates) in a single revision.',
+    example: 'deckuse add slide --after 5 --layout 2 --name feature-page --json',
+    details: `Options:
+  --after <n>               Insert after one-based slide index (append if omitted)
+  --layout <ref>            Layout ref: index (2), layout:2, slide:N (copy that
+                            slide's layout), display name (Blank), or basename
+                            (slideLayout2). Omit to inherit anchor/first slide.
+  --name <name>             Slide name stored in inventory
+  ${WRITE_GLOBALS}`,
+  },
+
+  'add shape': {
+    usage: 'deckuse add shape --slide <n> --type <kind> [options]',
+    summary:
+      'Insert a shape on a slide. Geometry accepts EMU numbers or unit strings (px|pt|cm|mm|in|%).',
+    example:
+      'deckuse add shape --slide 1 --type text --text "Hello\\nWorld" --name Title --x 5% --y 120px --width 90% --height 150px --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+  --type <kind>             text | rect | rounded-rect | ellipse | line | connector |
+                            elbow | curved-connector | arrow | left-arrow | up-arrow | down-arrow |
+                            chevron | pentagon | trapezoid | triangle | rt-triangle |
+                            circular-arrow | curved-right-arrow | curved-left-arrow |
+                            image | group | table | chart | video | audio
+                            (line/connector = straight cxnSp; elbow/curved = bent/curved connectors)
+
+Common options:
+  --name <name>             Shape name (should be unique on the slide)
+  --role <role>             OOXML p:ph type (title, body, subTitle, ctrTitle, …).
+                            Aliases: subtitle→subTitle, centertitle→ctrTitle.
+                            Unknown roles are rejected (INVALID_COMMAND).
+  --x/--y/--width/--height  EMU number, or unit string: 120px, 12pt, 1.5in, 5%, …
+                            Bare numbers are EMU. % is relative to slide size.
+                            px uses 96 DPI (1px = 9525 EMU).
+
+Type-specific:
+  --text <text>             Initial text (--type text). Supports \\n / \\t escapes.
+  --text-file <path>        Read initial text from a UTF-8 file
+  --text-raw                Disable escape processing for --text
+  --file <path>             Media path (required for image | video | audio)
+  --rows <json>             string[][] JSON (required for table)
+  --height auto             Table only: heuristic height from cell wrap + padding (may still clip; check TABLE_HEIGHT_MAY_CLIP / render)
+  --theme <name>            Table theme: minimal | zebra
+  --align-columns <list>    Table column aligns (JSON array or comma list: l,ctr,r)
+  --chart-type <kind>       bar | column | line | pie | combo (required for chart; prefer bar/column/line/pie for community render)
+  --data <json>             Chart data JSON (required for chart):
+                            {"title?":"...","categories":["Q1"],"series":[{"name":"S1","values":[1],"color?":"#5B8DEF","chart?":"column","axis?":"primary"}]}
+  --show-data-labels        Enable chart data labels on create
+
+Chart styling (via set / apply setProperties on a chart target):
+  title, series[{name,values,color}], textColor / font.color,
+  gapWidth, showMajorGridlines, showDataLabels, valueFormatCode / axisFormatCode
+
+Examples:
+  deckuse add shape --slide 1 --type text --text 'Hello\\nWorld' --json
+  deckuse add shape --slide 1 --type image --file ./photo.png --json
+  deckuse add shape --slide 1 --type table --rows '[["A","B"],["1","2"]]' --height auto --theme zebra --json
+  deckuse add shape --slide 1 --type chart --chart-type column --data '{"categories":["Q1","Q2"],"series":[{"name":"2024","values":[10,20]}]}' --show-data-labels --json
+  deckuse add shape --slide 1 --type chart --chart-type combo --data '{"categories":["Q1","Q2"],"series":[{"name":"Rev","values":[10,20],"chart":"column"},{"name":"Margin","values":[0.1,0.2],"chart":"line","axis":"secondary"}]}' --json
+  deckuse add shape --slide 1 --type video --file ./clip.mp4 --json
+  deckuse add shape --slide 1 --type audio --file ./track.mp3 --json
+
+  ${WRITE_GLOBALS}`,
+  },
+
+  remove: {
+    usage: 'deckuse remove <target> [options]',
+    summary: 'Remove a slide or shape target in one revision.',
+    example: 'deckuse remove slide:1/shape:2 --reason "obsolete bullet" --json',
+    details: `Arguments:
+  <target>                  e.g. slide:9 or slide:6/shape:17
+
+Options:
+  ${WRITE_GLOBALS}`,
+  },
+
+  set: {
+    usage:
+      'deckuse set text <target> --value <text> | deckuse set slide-layout --slide <n> --layout <ref> | deckuse set <target> --prop value ...',
+    summary: 'Write text, rebind slide layout, or set dotted semantic properties.',
+    example: 'deckuse set slide-layout --slide 1 --layout 2 --json',
+    details: `Forms:
+  set text <target> --value <text>
+  set slide-layout --slide <n> --layout <ref>
+  set <target> --font.size 42 --fill.color '#RRGGBB' ...
+
+set slide-layout rebinds the slide→slideLayout relationship (does not edit
+layout parts). --layout accepts: index (2), layout:2, slide:N (copy that
+slide's layout), display name (Blank), or basename (slideLayout2).
+
+Common properties:
+  font.family, font.size, font.weight, font.color, font.italic
+  fill.kind, fill.color, fill.transparency
+  line.kind, line.color, line.width, line.dash
+  paragraph.align, paragraph.level, bullet, hyperlink, name, visible
+  x, y, width, height, rotation
+
+Table targets also accept:
+  insertRow / deleteRow / insertColumn / deleteColumn (object with index)
+  Cell targets accept fill
+
+Chart targets also accept:
+  title, series (JSON array with name/values/color),
+  textColor | font.color, gapWidth, showMajorGridlines,
+  showDataLabels, valueFormatCode | axisFormatCode,
+  fill | background, gridlineColor
+
+Options:
+  --scope <scope>           local only in Phase 1a (default); other scopes reject
+  --value <text>            Required for set text
+  ${WRITE_GLOBALS}
+
+Run 'deckuse set text --help' or 'deckuse set slide-layout --help' for those forms.`,
+  },
+
+  'set slide-layout': {
+    usage: 'deckuse set slide-layout --slide <n> --layout <ref> [options]',
+    summary: 'Rebind a slide to another slideLayout (by index, layout:N, slide:N, or name).',
+    example: 'deckuse set slide-layout --slide 1 --layout slide:3 --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+  --layout <ref>            Layout index (2), layout:2, slide:N, display name,
+                            or basename (slideLayout2). See list layouts --json.
+
+Notes:
+  Only updates the slide→layout relationship; slide shapes are preserved.
+  Writing layout:* / master:* part contents remains community-gated.
+
+Options:
+  ${WRITE_GLOBALS}`,
+  },
+
+  'set text': {
+    usage:
+      'deckuse set text <target> (--value <text> | --text-file <path> | --blocks <json>) [options]',
+    summary:
+      'Replace the full text body of a target. CLI \\n/\\t escapes become real characters unless --text-raw.',
+    example: "deckuse set text slide:1/shape:2 --value 'Line1\\nLine2' --json",
+    details: `Arguments:
+  <target>                  e.g. slide:1/shape:2 or slide:1/shape:2/text
+
+Text source (choose one):
+  --value <text>            Replacement text (\\n \\t \\\\ unescaped unless --text-raw)
+  --text-file <path>        Read UTF-8 text from file
+  --blocks <json>           Rich paragraphs: [{"text":"…","fontSize":12,"textColor":"6B7280","bold":true}, …]
+
+Options:
+  --text-raw                Keep escape sequences in --value literal
+  ${WRITE_GLOBALS}
+
+Notes:
+  Prefer protocol JSON setText (real newlines or blocks) for agents.
+  Each blocks[] entry becomes one styled paragraph.`,
+  },
+
+  'replace-text': {
+    usage:
+      'deckuse replace-text --source <text> --target <text> [--regex] [--limit <n>] [--selector <sel>]',
+    summary: 'Find and replace text across matching indexed text nodes.',
+    example: 'deckuse replace-text --source FY2025 --target FY2026 --json',
+    details: `Required:
+  --source <text>           Find string (non-empty); maps to protocol find
+  --target <text>           Replacement string; maps to protocol replace
+
+Options:
+  --regex                   Treat --source as a Unicode regular expression
+  --limit <n>               Max replacements
+  --selector <sel>          Narrow matches (e.g. slide=1)
+  ${WRITE_GLOBALS}`,
+  },
+
+  xfrm: {
+    usage: 'deckuse xfrm set (--target <t> | --slide <n> --shape <id>) [geometry]',
+    summary: 'Low-level geometry write. All supplied fields apply atomically.',
+    example:
+      'deckuse xfrm set --slide 1 --shape 2 --x 0 --y 0 --width 914400 --height 457200 --json',
+    details: `Subcommands:
+  set                       Set transform fields on one shape
+
+Options (via set):
+  --target <target>         e.g. slide:1/shape:2
+  --slide <n> --shape <id>  Alternative addressing
+  --x <emu> --y <emu>
+  --width|--cx <emu>
+  --height|--cy <emu>
+  --rotation <deg>          Clockwise degrees
+  ${WRITE_GLOBALS}
+
+Run 'deckuse xfrm set --help' for details.`,
+  },
+
+  'xfrm set': {
+    usage: 'deckuse xfrm set (--target <t> | --slide <n> --shape <id>) [geometry]',
+    summary:
+      'Set x/y/width/height/rotation. Lengths may be EMU numbers or unit strings (px|pt|cm|mm|in|%).',
+    example:
+      'deckuse xfrm set --target slide:1/shape:2 --x 5% --y 120px --width 90% --height 150px',
+    details: `Addressing (one required):
+  --target <target>         e.g. slide:1/shape:2
+  --slide <n> --shape <id>  Combined into slide:<n>/shape:<id>
+
+Geometry (all optional; supplied fields applied together):
+  --x/--y/--width/--height  EMU or unit string (px, pt, cm, mm, in, %). Bare number = EMU.
+  --cx/--cy                 Aliases for width/height
+  --rotation <deg>          Clockwise rotation
+
+Options:
+  ${WRITE_GLOBALS}`,
+  },
+
+  align: {
+    usage: 'deckuse align --slide <n> --targets <t1,t2,...> --mode <mode> [--gap <length>]',
+    summary:
+      'Align or distribute shapes. Compiles to absolute EMU xfrm writes (not a layout engine).',
+    example:
+      'deckuse align --slide 2 --targets "slide:2/shape:3,slide:2/shape:4,slide:2/shape:5" --mode distribute-h --gap 20px --json',
+    details: `Required:
+  --slide <n>               One-based slide index
+  --targets <list>          Comma-separated targets
+  --mode <mode>             left | right | top | bottom | center-h | center-v |
+                            distribute-h | distribute-v
+
+Options:
+  --gap <length>            Optional gap for distribute-* (px|pt|cm|in|%|EMU)
+  ${WRITE_GLOBALS}`,
+  },
+
+  z: {
+    usage: 'deckuse z move <target> (--above <t> | --below <t> | --to-front | --to-back)',
+    summary: 'Change relative z-order of a shape.',
+    example: 'deckuse z move slide:1/shape:6 --above slide:1/shape:2 --json',
+    details: `Subcommands:
+  move                      Reorder one target relative to another
+
+Options (via move):
+  --above <target>          Place above another target
+  --below <target>          Place below another target
+  --to-front                Bring to front
+  --to-back                 Send to back
+  ${WRITE_GLOBALS}
+
+Run 'deckuse z move --help' for details.`,
+  },
+
+  'z move': {
+    usage: 'deckuse z move <target> (--above <t> | --below <t> | --to-front | --to-back)',
+    summary: 'Move a shape above/below another target, or to front/back.',
+    example: 'deckuse z move slide:1/shape:7 --to-front --json',
+    details: `Arguments:
+  <target>                  Shape to move, e.g. slide:1/shape:6
+
+Position (choose one):
+  --above <target>          Place immediately above
+  --below <target>          Place immediately below
+  --to-front                Bring to front of the slide
+  --to-back                 Send to back of the slide
+
+Options:
+  ${WRITE_GLOBALS}`,
+  },
+
+  apply: {
+    usage: 'deckuse apply [<workspace>] [--input <file|->]',
+    summary:
+      'Apply one or many write commands from JSON / JSONL. High-level arrays (and { "operations": [...] } of high-level types) run as one atomic batch; items with op run as applyTransaction.',
+    example: 'deckuse apply --workspace ./workspace --input ops.json --json',
+    details: `Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  --input <file|->          Input path; "-" (default) reads stdin
+  ${WRITE_GLOBALS}
+
+Accepted input shapes:
+  [ { "type": "setText", ... }, ... ]   High-level batch (preferred)
+  { "operations": [ { "type": ... } ] } High-level batch (same as array)
+  { "type": "setText", ... }            Single command
+  JSONL                                 One command object per line
+  [ { "op": ... }, ... ]                Low-level applyTransaction
+  { "operations": [ { "op": ... } ] }   Low-level applyTransaction
+
+Notes:
+  Prefer apply for agent workflows: one revision, one audit entry, atomic rollback.
+  Only write command types are accepted (setText, setProperties, addShape,
+  setTransform / xfrmSet, alignElements, …).
+  setProperties accepts camelCase/nested keys and dotted keys (font.size, fill.color).
+  Same-batch forward refs by shape name work after addShape.
+
+Template (ops.json) — KPI card with inline style:
+
+  [
+    {
+      "type": "addShape",
+      "slide": 2,
+      "shapeType": "rect",
+      "name": "kpi-1",
+      "x": "5%",
+      "y": "120px",
+      "width": "28%",
+      "height": "100px",
+      "fill": { "color": "F0FDF4" },
+      "stroke": { "color": "BBF7D0", "width": 1 },
+      "blocks": [
+        { "text": "全年总收入", "fontSize": 12, "textColor": "6B7280" },
+        { "text": "598 百万元", "fontSize": 20, "textColor": "059669", "bold": true }
+      ]
+    },
+    {
+      "type": "alignElements",
+      "slide": 2,
+      "targets": ["slide:2/shape:kpi-1", "slide:2/shape:kpi-2", "slide:2/shape:kpi-3"],
+      "mode": "distribute-h",
+      "gap": "20px"
+    }
+  ]
+
+Examples:
+  deckuse apply --input ops.json --json
+  deckuse apply --input ops.jsonl --json
+  printf '%s\\n' '{"type":"setText",...}' '{"type":"setProperties",...}' | deckuse apply --json`,
+  },
+
+  schema: {
+    usage: 'deckuse schema [--type <commandType>] [--json]',
+    summary: 'Print the command JSON Schema (Draft 2020-12) with CLI/protocol version.',
+    example: 'deckuse schema --type addShape --json',
+    details: `Options:
+  --type <commandType>      Slice to one command (e.g. addShape, setProperties, batch)
+  --json                    Compact JSON (default pretty-print)
+
+Notes:
+  Prefer this over guessing fields from docs. Includes cliVersion, protocolVersion, edition.`,
+  },
+
+  measure: {
+    usage: 'deckuse measure --text <string> --font-size <pt> [--max-width <len>] [--bold]',
+    summary: 'Heuristic text width/height estimate for layout (not a font rasterizer).',
+    example: 'deckuse measure --text "总营收" --font-size 24 --max-width 28% --json',
+    details: `Required:
+  --text <string>           Text to measure
+  --font-size <pt>          Font size in points
+
+Options:
+  --max-width <len>         Wrap width (EMU number or unit string / %)
+  --bold                    Assume bold glyphs
+  --font-family <name>      Recorded in output only (heuristic ignores metrics)
+  --json                    Machine-readable envelope
+
+Notes:
+  Returns EMU/px and line count. Expect ~10–20% error vs PowerPoint; verify with render.`,
+  },
+
+  validate: {
+    usage: 'deckuse validate [<workspace>] [options]',
+    summary: 'Validate package integrity and optional relationship checks.',
+    example: 'deckuse validate --workspace ./workspace --package --relationships --json',
+    details: `Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  --level <level>           Validation level (default: full)
+  --package                 Include package checks
+  --relationships           Include relationship graph checks
+  --slide <n>               Limit to one slide when supported
+  --workspace <path>        Workspace root
+  --revision <rev>          Validate a historical revision
+  --json                    Machine-readable envelope`,
+  },
+
+  history: {
+    usage: 'deckuse history [<workspace>] [options]',
+    summary: 'List committed write operations from the workspace journal.',
+    example: 'deckuse history --workspace ./workspace --limit 20 --json',
+    details: `Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  --limit <n>               Max entries (default: 100)
+  --offset <n>              Skip entries (default: 0)
+  --slide <n>               Filter to operations affecting a slide
+  --workspace <path>        Workspace root
+  --json                    Machine-readable envelope`,
+  },
+
+  undo: {
+    usage: 'deckuse undo [<workspace>] [--steps <n>]',
+    summary: 'Undo one or more recent write revisions.',
+    example: 'deckuse undo --workspace ./workspace --steps 1 --json',
+    details: `Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  --steps <n>               Number of revisions to undo (default: 1)
+  ${WRITE_GLOBALS}`,
+  },
+
+  export: {
+    usage: 'deckuse export <output.pptx> [options]',
+    summary: 'Pack workspace source/ to .pptx (default) or copy package.pptx.',
+    example: 'deckuse export ./out.pptx --workspace ./workspace --json',
+    details: `Arguments:
+  <output.pptx>             Destination path
+
+Options:
+  --workspace <path>        Workspace root
+  --from-package            Copy existing package.pptx without rebuilding from source/
+  --revision <rev>          Export a historical revision (not available in Phase 1a)
+  --json                    Machine-readable envelope
+
+Notes:
+  Default export rebuilds package.pptx from source/ so hand-edits are included.`,
+  },
+
+  monitor: {
+    usage: 'deckuse monitor [start|status|stop] [<workspace>] [--host <addr>] [--port <n>] [--all]',
+    summary:
+      'Live HTML preview. Bare `monitor` is foreground; start/status/stop manage a background daemon.',
+    example: 'deckuse monitor start --workspace ./workspace --port 4173',
+    details: `Subcommands:
+  (none)                    Foreground server until SIGINT/SIGTERM
+  start                     Detach a background daemon (writes .deckuse/monitor/daemon.json)
+  status                    Without --workspace: list all running daemons (port, pid, workspace).
+                            With --workspace: show that workspace daemon pid / url / reachability
+  stop                      SIGTERM the daemon and clear daemon.json (requires --workspace or --all)
+
+Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  --host <addr>             Bind address (default: 0.0.0.0)
+  --port <n>                Port 0–65535 (default: 4173). Use 0 for an ephemeral free port.
+  --workspace <path>        Workspace root
+  --all                     With stop: stop every running monitor daemon
+
+Notes:
+  Only \`monitor start\` / daemon-worker processes are tracked (not foreground \`monitor\`).
+  Global index: ~/.deckflow/deckuse/monitors/ (override with DECKUSE_HOME).
+  Port conflicts (EADDRINUSE) return a clear error; daemon start fails if unreachable.
+
+Examples:
+  deckuse monitor --port 4173
+  deckuse monitor start --port 0
+  deckuse monitor status --json
+  deckuse monitor stop --workspace ./workspace
+  deckuse monitor stop --all`,
+  },
+
+  render: {
+    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
+    summary:
+      'Convert one slide to HTML (office2html), screenshot it with Playwright, then delete the HTML staging output.',
+    example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',
+    details: `Required:
+  --page <n>                One-based slide index (exactly one page per call)
+
+Options:
+  --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)
+  --scale <n>               Device scale factor (default: 1)
+  --workspace <path>        Workspace root (default: nearest .deckuse)
+  --json                    Machine-readable envelope
+
+Notes:
+  Intended for AI agents to visually review whether an edit looks correct.
+  Community render may not show custom chart series colors faithfully — check ppt/charts/*.xml or PowerPoint.
+  DOCX workspaces cannot be paginated: office2html converts PPTX only. Export and open the .docx in Word.
+  Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
+  Temporary office2html output is always removed after the screenshot.`,
+  },
+
+  'add paragraph': {
+    usage:
+      'deckuse add paragraph [--after <target>] [--style <id>] [--level <n>] [--name <bookmark>] [--text <text>]',
+    summary: 'Insert one or more paragraphs into a DOCX workspace.',
+    example:
+      'deckuse add paragraph --after body/p:1 --style Heading1 --name Intro --text "Hello" --json',
+    details: `Options:
+  --after <target>          Insert after this paragraph, table, or bookmark
+  --style <styleId>         Apply an existing paragraph style
+  --level <0-9>             Heading level when --style is omitted (0 = Normal)
+  --name <bookmark>         Bookmark so later commands can target bookmark:<name>
+  --text <text>             Paragraph text; newlines become extra paragraphs
+  --blocks <json>           Rich blocks (preferred over --text)
+
+${WRITE_GLOBALS}`,
+  },
+
+  'add table': {
+    usage: 'deckuse add table --rows <json> [--name <bookmark>] [--after <target>]',
+    summary: 'Insert a table into a DOCX workspace.',
+    example: `deckuse add table --rows '[["A","B"],["1","2"]]' --name FinTable --json`,
+    details: `Options:
+  --rows <json>             string[][] cell text
+  --name <bookmark>         Bookmark wrapping the table
+  --after <target>          Insert after this target (default: end of body)
+
+${WRITE_GLOBALS}`,
+  },
+
+  'add break': {
+    usage: 'deckuse add break [--after <target>]',
+    summary: 'Insert a page break paragraph into a DOCX workspace.',
+    example: 'deckuse add break --after body/p:1 --json',
+    details: `Options:
+  --after <target>          Insert after this target (default: end of body)
+
+${WRITE_GLOBALS}`,
+  },
+
+  query: {
+    usage: 'deckuse query [<workspace>] <selector> [--limit <n>]',
+    summary: 'Back-compat selector query (prefer search / list for Phase 1a).',
+    example: "deckuse query ./workspace 'text=FY2025' --limit 100 --json",
+    details: `Arguments:
+  <workspace>               Optional workspace path when not using --workspace
+  <selector>                Selector string (default: *)
+
+Options:
+  --limit <n>               Max results (default: 100)
+  --workspace <path>        Workspace root
+  --json                    Machine-readable envelope
+
+Selector examples:
+  * | all
+  kind=textbox
+  text=Quarter
+  text~=pattern
+  hasText=true
+  slide=1 name=Title`,
+  },
+};
+
+const formatEntry = (entry: HelpEntry): string => {
+  const parts = [`usage: ${entry.usage}`, '', entry.summary, '', `Example:`, `  ${entry.example}`];
+  if (entry.details) {
+    parts.push('', entry.details);
+  }
+  parts.push('');
+  return parts.join('\n');
+};
+
+/** Resolve progressive help for a command path such as ['add','shape']. */
+export const resolveHelp = (topic: string[]): string => {
+  if (topic.length === 0) return HELP_MAIN;
+
+  const key = topic.map((part) => part.toLowerCase()).join(' ');
+  const entry = entries[key];
+  if (entry) return formatEntry(entry);
+
+  if (topic.length > 1) {
+    const parentKey = topic[0]!.toLowerCase();
+    const parent = entries[parentKey];
+    if (parent) {
+      return (
+        `Unknown subcommand: ${topic.slice(1).join(' ')}\n\n` +
+        formatEntry(parent) +
+        `Run 'deckuse ${parentKey} --help' for available forms.\n`
+      );
+    }
+  }
+
+  return (
+    `Unknown command: ${topic[0]}\n\n` + HELP_MAIN + `Run 'deckuse --help' for the command list.\n`
+  );
+};
+
+/** Tokens that form a help topic (command path), ignoring options and help flags. */
+export const helpTopicFromArgs = (clean: string[]): string[] | null => {
+  if (clean.length === 0) return null;
+
+  if (clean[0] === 'help') {
+    return clean
+      .slice(1)
+      .filter((token) => token !== '--help' && token !== '-h' && !token.startsWith('--'));
+  }
+
+  const helpIndex = clean.findIndex((token) => token === '--help' || token === '-h');
+  if (helpIndex < 0) return null;
+
+  return clean.slice(0, helpIndex).filter((token) => !token.startsWith('--'));
+};

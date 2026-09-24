@@ -1,18 +1,18 @@
 # DeckUse Community Edition
 
-This repository is the **community** product line (`edition=community`). It is the **sole source of truth** for shared packages (`core`, `opc`, `pptx`, `workspace`, …).
+This repository is the **community** product line (`edition=community`). It is the **sole source of truth** for shared Deckuse source (`src/core`, `src/opc`, `src/pptx`, `src/workspace`, …), published as the single npm package `@deckflow/deckuse`.
 
-The commercial product lives in the private `deckuse-commercial` repository as a **thin overlay**: it replaces `@deckflow/deckuse-edition-config`, registers a `PptxEditionExtension`, and may add proprietary packages. It must not maintain a second copy of shared source.
+The commercial product lives in the private `deckuse-commercial` repository as a **thin overlay**: it registers a `PptxEditionExtension`, supplies its own edition metadata / licensing, and may add proprietary packages. It must not maintain a second copy of shared source, and must not rewrite community `src/edition-config` in this tree.
 
 ## Capability classes
 
-| Class | Meaning | Where code lives |
-| --- | --- | --- |
-| **Shared primitives** | OOXML helpers used by community slide / basic-chart edits (`setNodeText`, `applyChartProperties`, …) | Public `@deckflow/deckuse-pptx` |
-| **Edition-gated writes** | Master / Layout / Theme / Advanced Chart writes are **hard-denied** in shared code regardless of `editionCapabilities` | Allowed only via a registered `PptxEditionExtension` from private commercial packages |
-| **B — proprietary** | Editors that must not appear in this public tree (SmartArt, office2html plus, …) | Only `deckuse-commercial` private packages, injected through the same extension / hooks |
+| Class                    | Meaning                                                                                                                | Where code lives                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Shared primitives**    | OOXML helpers used by community slide / basic-chart edits (`setNodeText`, `applyChartProperties`, …)                   | Public `src/pptx` in `@deckflow/deckuse`                                                |
+| **Edition-gated writes** | Master / Layout / Theme / Advanced Chart writes are **hard-denied** in shared code regardless of `editionCapabilities` | Allowed only via a registered `PptxEditionExtension` from private commercial packages   |
+| **B — proprietary**      | Editors that must not appear in this public tree (SmartArt, office2html plus, …)                                       | Only `deckuse-commercial` private packages, injected through the same extension / hooks |
 
-Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism for shared primitives. Anything committed here is visible under AGPL. Commercial overlays own *authorization and product write paths* for gated targets; they must not rely on flipping `editionCapabilities` in a swapped config package.
+Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism for shared primitives. Anything committed here is visible under AGPL. Commercial overlays own _authorization and product write paths_ for gated targets; they must not rely on flipping `editionCapabilities` in `src/edition-config`.
 
 ## Boundaries (community)
 
@@ -33,7 +33,15 @@ DOCX community writes cover body paragraphs, runs, tables, bookmarks, and page b
 
 ## License / certificate verification
 
-Runtime commercial license checks (issue, verify, activate, `--license` / `DECKUSE_LICENSE` / `deckuse.lic`, and any `licensing/` gate) **must live only** in the private `deckuse-commercial` repository. This community repo’s `@deckflow/deckuse-edition-config` is constants-only: it must not contain licensing source, stubs, or conditional activation logic. `pnpm check:no-commercial-leak` enforces that boundary.
+Runtime commercial license checks (issue, verify, activate, `--license` / `DECKUSE_LICENSE` / `deckuse.lic`, and any `licensing/` gate) **must live only** in the private `deckuse-commercial` repository. This community repo’s `src/edition-config` is constants-only: it must not contain licensing source, stubs, or conditional activation logic. `pnpm check:no-commercial-leak` enforces that boundary.
+
+### Commercial overlay migration note
+
+Previously, commercial builds swapped the separate npm package `@deckflow/deckuse-edition-config`. That package no longer exists: edition constants live in `src/edition-config` inside `@deckflow/deckuse`. Commercial overlays should:
+
+1. Keep shared source synced from this community repo (do not fork `src/pptx` / `src/core` / …).
+2. Register a `PptxEditionExtension` (and any proprietary adapters) from commercial-only packages.
+3. Supply commercial edition metadata / licensing from commercial entrypoints — never by patching community `src/edition-config` for publish of this AGPL package.
 
 ## Observability
 

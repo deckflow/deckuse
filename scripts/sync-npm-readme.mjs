@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 /**
- * Copy the repo-root README.md and LICENSE into packages/deckuse for npm publish,
- * rewriting relative repo links to absolute GitHub URLs.
+ * Rewrite root README.md relative links to absolute GitHub URLs for npm publish.
+ * Use --restore to check out README.md from git after pack/publish.
  */
-import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const githubBlobBase = 'https://github.com/deckflow/deckuse/blob/main';
-const packageDir = resolve(root, 'packages/deckuse');
+const restore = process.argv.includes('--restore');
+
+if (restore) {
+  const result = spawnSync('git', ['checkout', '--', 'README.md'], {
+    cwd: root,
+    stdio: 'inherit',
+  });
+  process.exit(result.status ?? 1);
+}
 
 function isExternalOrAnchor(href) {
   return (
@@ -36,20 +45,14 @@ function rewriteMarkdownLinks(markdown) {
 }
 
 function rewriteSchemaPathMention(markdown) {
-  const schemaPath = 'packages/core/schema/command.schema.json';
+  const schemaPath = 'schema/command.schema.json';
   const linked = `[\`${schemaPath}\`](${toGithubBlobUrl(schemaPath)})`;
   return markdown.replaceAll(`\`${schemaPath}\``, linked);
 }
 
-const readmeSource = resolve(root, 'README.md');
-const licenseSource = resolve(root, 'LICENSE');
-const readmeTarget = resolve(packageDir, 'README.md');
-const licenseTarget = resolve(packageDir, 'LICENSE');
-
-const rawReadme = await readFile(readmeSource, 'utf8');
+const readmePath = resolve(root, 'README.md');
+const rawReadme = await readFile(readmePath, 'utf8');
 const npmReadme = rewriteSchemaPathMention(rewriteMarkdownLinks(rawReadme));
+await writeFile(readmePath, npmReadme);
 
-await writeFile(readmeTarget, npmReadme);
-await copyFile(licenseSource, licenseTarget);
-
-console.log(`Synced npm README and LICENSE into ${packageDir}`);
+console.log(`Rewrote npm README links in ${readmePath}`);

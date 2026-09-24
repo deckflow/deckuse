@@ -16,7 +16,7 @@ Deckuse is a local-first, schema-driven Office document automation engine for co
 The engine is built around format adapters. PPTX and DOCX are implemented. XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
-This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared packages here are the source of truth; the commercial edition is a private thin overlay (`deckuse-commercial`) that swaps `@deckflow/deckuse-edition-config`, registers a `PptxEditionExtension` for gated writes, and may add proprietary packages.
+This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared source here is the source of truth, published as `@deckflow/deckuse`; the commercial edition is a private thin overlay (`deckuse-commercial`) that registers a `PptxEditionExtension` for gated writes and may add proprietary packages.
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
@@ -379,7 +379,7 @@ Word uses the same workspace loop as PPTX (`new` / `init`, `list`, `apply`, `val
 
 `stroke` and `fill` accept a hexadecimal color string. Use `none`, `false`, or `null` for no stroke or fill. `stroke.width` is in points and defaults to `1`.
 
-The complete command schema is at `packages/core/schema/command.schema.json`. The TypeScript package entry points are `@deckflow/deckuse-core`, `@deckflow/deckuse-opc`, and `@deckflow/deckuse-pptx`.
+The complete command schema is at `schema/command.schema.json`. The TypeScript package entry point is `@deckflow/deckuse`.
 
 ## Limitations
 

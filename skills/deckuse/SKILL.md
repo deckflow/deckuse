@@ -277,7 +277,10 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
   {
     "type": "addTable",
     "name": "FinTable",
-    "rows": [["指标", "Q3"], ["营收", "120"]]
+    "rows": [
+      ["指标", "Q3"],
+      ["营收", "120"]
+    ]
   }
 ]
 ```
@@ -331,7 +334,10 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
   {
     "type": "addTable",
     "name": "FinTable",
-    "rows": [["指标", "Q3"], ["营收", "120"]]
+    "rows": [
+      ["指标", "Q3"],
+      ["营收", "120"]
+    ]
   }
 ]
 ```
