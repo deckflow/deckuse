@@ -1,25 +1,26 @@
 #!/usr/bin/env node
 /**
- * Integration harness: run every Deckuse write path against .pptx file(s).
+ * Integration harness: run every Deckuse write path against .pptx / .docx file(s).
  *
  * Usage:
- *   node scripts/integration-writes.mjs <dir>          # every .pptx under dir
- *   node scripts/integration-writes.mjs <file.pptx>    # single file (debug loop)
- *   pnpm test:integration-writes -- <dir|file.pptx>
+ *   node scripts/integration-writes.mjs <dir>               # every .pptx/.docx under dir
+ *   node scripts/integration-writes.mjs <file.pptx|.docx>   # single file (debug loop)
+ *   pnpm test:integration-writes -- <dir|file.pptx|.docx>
  *
- * For each `foo.pptx`, workspace is beside it as `foo/` (same basename).
- * Addressing is discovered per file via `list` / `query`, then the same write sequence
- * template is specialized with those targets.
+ * For each `foo.pptx` / `foo.docx`, workspace is beside it as `foo/` (same basename).
+ * Addressing is discovered per file via `list` / `query`, then a format-specific write
+ * sequence template is specialized with those targets.
  *
  * Options:
  *   --bin <path>           deckuse entry (default: dist/bin.js)
- *   --recursive            scan subdirectories for .pptx (dir mode only)
+ *   --recursive            scan subdirectories for packages (dir mode only)
  *   --force                remove existing workspace before init
  *   --continue-on-error    keep going after a failed step / file
  *                          (directory scans already continue past unreadable packages)
- *   --limit <n>            process at most n presentations (dir mode only)
+ *   --limit <n>            process at most n packages (dir mode only)
  *   --skip-export          omit final export
- *   --skip-new             omit the bundled-template `deckuse new` bootstrap case
+ *   --skip-new             omit bundled-template `deckuse new` bootstrap cases
+ *                          (PPTX blank + DOCX `--format docx`)
  *   --batch                merge consecutive writes into `apply` batch payloads;
  *                          skips undo/redo and other non-batchable steps
  *   --concurrency <n>      max parallel file workers (dir mode; default: cpus-2, min 1)
@@ -29,10 +30,10 @@
  * that case is skipped so a mid-run interrupt can continue. Delete the workspace
  * (or pass --force) to re-run a case.
  *
- * Also runs one `deckuse new` bootstrap case (unless --skip-new) to cover the
- * zero-source entry point and setSlideLayout / list layouts write paths.
+ * Also runs `deckuse new` bootstrap cases (unless --skip-new): PPTX blank template
+ * (setSlideLayout / list layouts) and DOCX `--format docx` (paragraph/table flow).
  *
- * Directory mode runs each .pptx in its own child process (concurrency =
+ * Directory mode runs each package in its own child process (concurrency =
  * availableParallelism()-2, minimum 1) so independent cases overlap.
  */
 
@@ -63,11 +64,11 @@ const PIXEL_PNG_2 = Buffer.from(
 const PREFIX = 'IT';
 
 const usage = () => {
-  process.stdout.write(`usage: node scripts/integration-writes.mjs <dir|file.pptx> [options]
+  process.stdout.write(`usage: node scripts/integration-writes.mjs <dir|file.pptx|.docx> [options]
 
 Run the full Deckuse write-operation sequence on:
-  <dir>         every .pptx under the directory
-  <file.pptx>   a single presentation (handy for re-debugging one case)
+  <dir>              every .pptx / .docx under the directory
+  <file.pptx|.docx>  a single package (handy for re-debugging one case)
 
 Workspace for each file is created beside it as <basename>/ (e.g. demo.pptx → demo/).
 If that workspace already exists, the case is skipped (resume-friendly). Delete it
@@ -75,12 +76,12 @@ manually, or pass --force, to re-run.
 
 Options:
   --bin <path>            deckuse bin.js (default: dist/bin.js)
-  --recursive             include .pptx in subdirectories (dir mode)
+  --recursive             include packages in subdirectories (dir mode)
   --force                 delete existing workspace before init
   --continue-on-error     do not stop on first failure
-  --limit <n>             max presentations to process (dir mode)
+  --limit <n>             max packages to process (dir mode)
   --skip-export           skip final export step
-  --skip-new              skip the deckuse new bootstrap case
+  --skip-new              skip deckuse new bootstrap cases (pptx + docx)
   --batch                 merge writes into apply batches (skip undo/redo/…)
   --concurrency <n>       parallel file workers (dir mode; default: cpus-2, min 1)
   --help                  show this help
@@ -120,7 +121,7 @@ const parseArgs = (argv) => {
   const workerResult = takeOption(args, '--worker-result');
   const input = args[0];
   if (!input || args.length > 1) {
-    return { error: 'Usage: node scripts/integration-writes.mjs <dir|file.pptx> [options]' };
+    return { error: 'Usage: node scripts/integration-writes.mjs <dir|file.pptx|.docx> [options]' };
   }
   if (limitRaw !== undefined && (!Number.isInteger(limit) || limit < 1)) {
     return { error: '--limit must be a positive integer' };
@@ -307,6 +308,44 @@ const cliToWriteCommand = (args) => {
           return null;
         }
       }
+      return command;
+    }
+    if (args[1] === 'paragraph') {
+      /** @type {Record<string, unknown>} */
+      const command = { type: 'addParagraph' };
+      if (opt('--after')) command.after = opt('--after');
+      if (opt('--style')) command.style = opt('--style');
+      if (opt('--level') !== undefined) command.level = Number(opt('--level'));
+      if (opt('--name')) command.name = opt('--name');
+      if (opt('--text') !== undefined) command.text = opt('--text');
+      const blocksRaw = opt('--blocks');
+      if (blocksRaw !== undefined) {
+        try {
+          command.blocks = JSON.parse(blocksRaw);
+        } catch {
+          return null;
+        }
+      }
+      return command;
+    }
+    if (args[1] === 'table') {
+      const rowsRaw = opt('--rows');
+      if (rowsRaw === undefined) return null;
+      /** @type {Record<string, unknown>} */
+      const command = { type: 'addTable' };
+      try {
+        command.rows = JSON.parse(rowsRaw);
+      } catch {
+        return null;
+      }
+      if (opt('--after')) command.after = opt('--after');
+      if (opt('--name')) command.name = opt('--name');
+      return command;
+    }
+    if (args[1] === 'break') {
+      /** @type {Record<string, unknown>} */
+      const command = { type: 'insertBreak', kind: 'page' };
+      if (opt('--after')) command.after = opt('--after');
       return command;
     }
     return null;
@@ -700,6 +739,36 @@ class Runner {
     return Array.isArray(items) ? items : [];
   }
 
+  async listParagraphs() {
+    const envelope = await this.step('list paragraphs', ['list', 'paragraphs', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
+  async listTables() {
+    const envelope = await this.step('list tables', ['list', 'tables', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
+  async listStyles() {
+    const envelope = await this.step('list styles', ['list', 'styles', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
+  async listBookmarks() {
+    const envelope = await this.step('list bookmarks', ['list', 'bookmarks', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
+  async listSections() {
+    const envelope = await this.step('list sections', ['list', 'sections', ...this.wsArgs()]);
+    const items = envelope?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }
+
   async query(selector, name) {
     const envelope = await this.step(name ?? `query ${selector}`, [
       'query',
@@ -751,7 +820,21 @@ class Runner {
   }
 }
 
-const isPptx = (name) => name.toLowerCase().endsWith('.pptx') && !name.startsWith('.');
+const PACKAGE_EXTS = new Set(['.pptx', '.docx']);
+
+/** @param {string} name */
+const packageFormat = (name) => {
+  const ext = extname(name).toLowerCase();
+  if (ext === '.pptx') return 'pptx';
+  if (ext === '.docx') return 'docx';
+  return undefined;
+};
+
+/** @param {string} name */
+const isOfficePackage = (name) => {
+  if (name.startsWith('.')) return false;
+  return PACKAGE_EXTS.has(extname(name).toLowerCase());
+};
 
 const isInsideWorkspace = async (filePath) => {
   let dir = dirname(filePath);
@@ -767,7 +850,7 @@ const isInsideWorkspace = async (filePath) => {
   }
 };
 
-const collectPptx = async (dir, recursive) => {
+const collectPackages = async (dir, recursive) => {
   /** @type {string[]} */
   const found = [];
   const walk = async (current) => {
@@ -782,8 +865,9 @@ const collectPptx = async (dir, recursive) => {
         } catch {
           if (recursive) await walk(full);
         }
-      } else if (entry.isFile() && isPptx(entry.name)) {
-        if (entry.name === 'package.pptx') continue;
+      } else if (entry.isFile() && isOfficePackage(entry.name)) {
+        const lower = entry.name.toLowerCase();
+        if (lower === 'package.pptx' || lower === 'package.docx') continue;
         if (await isInsideWorkspace(full)) continue;
         found.push(full);
       }
@@ -1560,12 +1644,304 @@ const runWriteSequence = async (runner, media, opts = {}) => {
   };
 };
 
-const processOne = async (pptxPath, options) => {
-  const base = basename(pptxPath, extname(pptxPath));
-  const workspace = join(dirname(pptxPath), base);
-  const label = basename(pptxPath);
+/**
+ * DOCX write sequence: paragraph/table/break flow (no slides/shapes/xfrm/z-order).
+ * @param {Runner} runner
+ * @param {{ skipExport?: boolean }} opts
+ */
+const runDocxWriteSequence = async (runner, opts = {}) => {
+  let paragraphs = await runner.listParagraphs();
+  let tables = await runner.listTables();
+  const styles = await runner.listStyles();
+  await runner.listBookmarks();
+  await runner.listSections();
 
-  process.stdout.write(`\n=== ${label} → ${workspace}\n`);
+  const styleIds = new Set();
+  for (const s of styles) {
+    if (typeof s?.target === 'string' && s.target.startsWith('style:')) {
+      styleIds.add(s.target.slice('style:'.length));
+    }
+  }
+  const headingStyle = styleIds.has('Heading1')
+    ? 'Heading1'
+    : [...styleIds].find((id) => /^Heading\d$/i.test(id));
+  const normalStyle = styleIds.has('Normal') ? 'Normal' : undefined;
+
+  const writableParagraph = paragraphs.find(
+    (p) => p?.target && p.protected !== true && typeof p.target === 'string',
+  );
+
+  if (writableParagraph?.target) {
+    const sample = (writableParagraph.textPreview ?? `${PREFIX}`).slice(0, 24);
+    await runner.step('set text (existing paragraph)', [
+      'set',
+      'text',
+      writableParagraph.target,
+      '--value',
+      `${PREFIX} existing text`,
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+    await runner.step('set properties (existing paragraph)', [
+      'set',
+      writableParagraph.target,
+      '--font.size',
+      '14',
+      '--font.weight',
+      'bold',
+      '--font.color',
+      '#1A1A1A',
+      '--paragraph.align',
+      'center',
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ]);
+    if (sample.trim()) {
+      await runner.step('replace-text (existing sample)', [
+        'replace-text',
+        '--source',
+        `${PREFIX} existing`,
+        '--target',
+        `${PREFIX} replaced`,
+        '--limit',
+        '20',
+        '--reason',
+        'integration-writes',
+        ...runner.wsArgs(),
+      ]);
+    }
+  } else {
+    runner.skip('mutate existing paragraph', 'no writable paragraph in document');
+  }
+
+  const existingTable = tables[0];
+  if (existingTable?.target) {
+    const cellTarget = `${existingTable.target}/row:1/cell:1/p:1`;
+    await runner.step(
+      'setText table cell (existing via apply)',
+      ['apply', runner.workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setText',
+        target: cellTarget,
+        value: `${PREFIX} cell`,
+      }),
+      { optional: true },
+    );
+  }
+
+  // Slide canvas commands must be rejected on DOCX.
+  await runner.step(
+    'add shape (expect UNSUPPORTED_CAPABILITY)',
+    [
+      'add',
+      'shape',
+      '--slide',
+      '1',
+      '--type',
+      'rect',
+      '--reason',
+      'integration-writes',
+      ...runner.wsArgs(),
+    ],
+    '',
+    { expectErrorCode: 'UNSUPPORTED_CAPABILITY' },
+  );
+
+  const afterAnchor = writableParagraph?.target ?? paragraphs[0]?.target;
+
+  /** @type {string[]} */
+  const addParagraphArgs = ['add', 'paragraph'];
+  if (headingStyle) {
+    addParagraphArgs.push('--style', headingStyle);
+  } else if (normalStyle) {
+    addParagraphArgs.push('--style', normalStyle);
+  }
+  if (afterAnchor) {
+    addParagraphArgs.push('--after', afterAnchor);
+  }
+  addParagraphArgs.push(
+    '--name',
+    `${PREFIX}-intro`,
+    '--text',
+    `${PREFIX} hello`,
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  );
+  await runner.step('add paragraph', addParagraphArgs);
+
+  await runner.step('add table', [
+    'add',
+    'table',
+    '--name',
+    `${PREFIX}-table`,
+    '--rows',
+    JSON.stringify([
+      ['A', 'B'],
+      ['1', '2'],
+    ]),
+    ...(afterAnchor ? ['--after', afterAnchor] : []),
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+
+  await runner.step('add break (page)', [
+    'add',
+    'break',
+    ...(afterAnchor ? ['--after', afterAnchor] : []),
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+
+  // Re-list after structural adds
+  paragraphs = await runner.listParagraphs();
+  tables = await runner.listTables();
+  const bookmarks = await runner.listBookmarks();
+
+  const introBookmark =
+    bookmarks.find((b) => b?.name === `${PREFIX}-intro`)?.target ?? `bookmark:${PREFIX}-intro`;
+  await runner.step('set text (added bookmark)', [
+    'set',
+    'text',
+    introBookmark,
+    '--value',
+    `${PREFIX} updated`,
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+  await runner.step('set font (added bookmark)', [
+    'set',
+    introBookmark,
+    '--font.size',
+    '16',
+    '--font.italic',
+    'true',
+    '--font.family',
+    'Arial',
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+
+  if (headingStyle) {
+    await runner.step(
+      'set paragraph.style (added via apply)',
+      ['apply', runner.workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setProperties',
+        target: introBookmark,
+        properties: { 'paragraph.style': headingStyle },
+      }),
+    );
+  } else {
+    runner.skip('set paragraph.style (added via apply)', 'no Heading* style in package');
+  }
+
+  const addedTable =
+    tables.find((t) => t?.name === `${PREFIX}-table`) ??
+    tables.find((t) => typeof t?.target === 'string' && t.target.startsWith('body/table:'));
+  if (addedTable?.target) {
+    const cellTarget = `${addedTable.target}/row:1/cell:1/p:1`;
+    await runner.step(
+      'setText table cell (added)',
+      ['apply', runner.workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setText',
+        target: cellTarget,
+        value: `${PREFIX} A`,
+      }),
+    );
+  }
+
+  await runner.step(
+    'apply batch setText+set',
+    ['apply', runner.workspace, '--input', '-', '--json'],
+    JSON.stringify([
+      { type: 'setText', target: introBookmark, value: `${PREFIX} batch` },
+      {
+        type: 'set',
+        target: introBookmark,
+        properties: { 'font.size': 12, bold: true },
+      },
+    ]),
+  );
+
+  // Low-level applyTransaction ops are PPTX-only on DOCX.
+  await runner.step(
+    'applyTransaction (expect UNSUPPORTED_CAPABILITY)',
+    ['apply', runner.workspace, '--input', '-', '--json'],
+    JSON.stringify({
+      operations: [{ op: 'set-text', target: introBookmark, value: `${PREFIX} txn` }],
+    }),
+    { expectErrorCode: 'UNSUPPORTED_CAPABILITY' },
+  );
+
+  // Disposable paragraph to remove (not the only body content if we can avoid it).
+  await runner.step('add paragraph (disposable)', [
+    'add',
+    'paragraph',
+    '--name',
+    `${PREFIX}-to-remove`,
+    '--text',
+    `${PREFIX} disposable`,
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+  const afterDisposable = await runner.listBookmarks();
+  const removable =
+    afterDisposable.find((b) => b?.name === `${PREFIX}-to-remove`)?.target ??
+    `bookmark:${PREFIX}-to-remove`;
+  // Prefer removing the paragraph body target after resolving via list.
+  paragraphs = await runner.listParagraphs();
+  const removableParagraph = paragraphs.find(
+    (p) =>
+      typeof p?.textPreview === 'string' &&
+      p.textPreview.includes(`${PREFIX} disposable`) &&
+      p.protected !== true,
+  );
+  await runner.step('remove paragraph (added disposable)', [
+    'remove',
+    removableParagraph?.target ?? removable,
+    '--reason',
+    'integration-writes',
+    ...runner.wsArgs(),
+  ]);
+
+  await runner.step('validate', ['validate', '--package', '--relationships', ...runner.wsArgs()]);
+  await runner.step('history', ['history', '--limit', '50', ...runner.wsArgs()]);
+
+  if (!opts.skipExport) {
+    const out = join(runner.workspace, 'out-integration.docx');
+    await runner.step('export', ['export', out, ...runner.wsArgs()]);
+  }
+
+  await runner.step('undo', ['undo', '--steps', '1', ...runner.wsArgs()]);
+  await runner.flushBatch();
+
+  const finalParagraphs = await runner.listParagraphs();
+  const finalTables = await runner.listTables();
+  return {
+    paragraphs: finalParagraphs.length,
+    tables: finalTables.length,
+  };
+};
+
+const processOne = async (packagePath, options) => {
+  const format = packageFormat(packagePath);
+  if (!format) {
+    throw new Error(`Unsupported package type: ${packagePath}`);
+  }
+  const base = basename(packagePath, extname(packagePath));
+  const workspace = join(dirname(packagePath), base);
+  const label = basename(packagePath);
+
+  process.stdout.write(`\n=== ${label} [${format}] → ${workspace}\n`);
 
   try {
     await access(options.bin);
@@ -1582,7 +1958,9 @@ const processOne = async (pptxPath, options) => {
         '  → SKIP  workspace already exists (delete it or pass --force to re-run)\n',
       );
       return {
-        pptx: pptxPath,
+        pptx: packagePath,
+        source: packagePath,
+        format,
         workspace,
         ok: true,
         skipped: true,
@@ -1594,8 +1972,6 @@ const processOne = async (pptxPath, options) => {
     }
   }
 
-  const mediaDir = join(workspace, '.integration-media');
-  const media = await ensureMedia(mediaDir);
   const runner = new Runner(options.bin, workspace, {
     continueOnError: options.continueOnError,
     batch: options.batch,
@@ -1605,7 +1981,7 @@ const processOne = async (pptxPath, options) => {
     process.stdout.write('  (batch mode: consecutive writes merged via apply)\n');
   }
 
-  const init = await runner.step('init', ['init', pptxPath, workspace, '--json']);
+  const init = await runner.step('init', ['init', packagePath, workspace, '--json']);
   if (!init?.ok) {
     const errCode =
       init && typeof init === 'object' && init.error && typeof init.error === 'object'
@@ -1616,7 +1992,9 @@ const processOne = async (pptxPath, options) => {
       process.stdout.write('  → SKIP  unreadable package (IO_ERROR); not a product regression\n');
     }
     return {
-      pptx: pptxPath,
+      pptx: packagePath,
+      source: packagePath,
+      format,
       workspace,
       ok: false,
       unreadable,
@@ -1627,7 +2005,13 @@ const processOne = async (pptxPath, options) => {
 
   let summary = {};
   try {
-    summary = await runWriteSequence(runner, media, { skipExport: options.skipExport });
+    if (format === 'docx') {
+      summary = await runDocxWriteSequence(runner, { skipExport: options.skipExport });
+    } else {
+      const mediaDir = join(workspace, '.integration-media');
+      const media = await ensureMedia(mediaDir);
+      summary = await runWriteSequence(runner, media, { skipExport: options.skipExport });
+    }
   } catch (cause) {
     runner.failed = true;
     const stepResult = {
@@ -1643,7 +2027,9 @@ const processOne = async (pptxPath, options) => {
   const ok = !runner.failed && runner.steps.every((s) => s.ok);
   const report = {
     ok,
-    pptx: pptxPath,
+    pptx: packagePath,
+    source: packagePath,
+    format,
     workspace,
     startedAt: new Date().toISOString(),
     summary,
@@ -1669,18 +2055,18 @@ const processOne = async (pptxPath, options) => {
 };
 
 /**
- * Run one presentation in a child process; buffer its logs until it finishes
+ * Run one package in a child process; buffer its logs until it finishes
  * so concurrent cases do not interleave stdout.
- * @param {string} pptxPath
+ * @param {string} packagePath
  * @param {ReturnType<typeof parseArgs>} options
  */
-const processOneInWorker = (pptxPath, options) =>
+const processOneInWorker = (packagePath, options) =>
   new Promise((done) => {
     const resultPath = join(tmpdir(), `integration-writes-worker-${randomUUID()}.json`);
     /** @type {string[]} */
     const args = [
       SCRIPT_PATH,
-      pptxPath,
+      packagePath,
       '--bin',
       options.bin,
       '--skip-new',
@@ -1717,11 +2103,13 @@ const processOneInWorker = (pptxPath, options) =>
           cause instanceof Error
             ? cause.message
             : `worker exited ${String(code)} without a result file`;
-        process.stdout.write(`\n=== ${basename(pptxPath)}\n  → FAIL  ${message}\n`);
+        process.stdout.write(`\n=== ${basename(packagePath)}\n  → FAIL  ${message}\n`);
         done({
           ok: false,
-          pptx: pptxPath,
-          workspace: join(dirname(pptxPath), basename(pptxPath, extname(pptxPath))),
+          pptx: packagePath,
+          source: packagePath,
+          format: packageFormat(packagePath),
+          workspace: join(dirname(packagePath), basename(packagePath, extname(packagePath))),
           error: message,
           steps: [],
           failedSteps: [],
@@ -1765,9 +2153,10 @@ const mapPool = async (items, concurrency, fn, opts = {}) => {
 };
 
 const NEW_CASE_DIR = '_IT-from-new';
+const NEW_DOCX_CASE_DIR = '_IT-from-new-docx';
 
 /**
- * Bootstrap via `deckuse new` (bundled blank template) and run the same write sequence.
+ * Bootstrap via `deckuse new` (bundled blank PPTX) and run the PPTX write sequence.
  * @param {string} parentDir
  * @param {ReturnType<typeof parseArgs>} options
  */
@@ -1793,6 +2182,8 @@ const processNewBootstrap = async (parentDir, options) => {
       );
       return {
         pptx: '(deckuse new)',
+        source: '(deckuse new)',
+        format: 'pptx',
         workspace,
         ok: true,
         skipped: true,
@@ -1820,6 +2211,8 @@ const processNewBootstrap = async (parentDir, options) => {
   if (!created?.ok) {
     return {
       pptx: '(deckuse new)',
+      source: '(deckuse new)',
+      format: 'pptx',
       workspace,
       ok: false,
       fromNew: true,
@@ -1847,6 +2240,118 @@ const processNewBootstrap = async (parentDir, options) => {
   const report = {
     ok,
     pptx: '(deckuse new)',
+    source: '(deckuse new)',
+    format: 'pptx',
+    workspace,
+    fromNew: true,
+    startedAt: new Date().toISOString(),
+    summary,
+    steps: runner.steps,
+    failedSteps: runner.steps.filter((s) => !s.ok),
+  };
+  await mkdir(workspace, { recursive: true });
+  await writeFile(
+    join(workspace, 'integration-writes-report.json'),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+
+  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
+  const skipped = runner.steps.filter((s) => s.skipped).length;
+  const failed = runner.steps.filter((s) => !s.ok).length;
+  process.stdout.write(
+    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
+  );
+  for (const step of runner.steps.filter((s) => !s.ok)) {
+    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
+  }
+  return report;
+};
+
+/**
+ * Bootstrap via `deckuse new --format docx` and run the DOCX write sequence.
+ * @param {string} parentDir
+ * @param {ReturnType<typeof parseArgs>} options
+ */
+const processNewDocxBootstrap = async (parentDir, options) => {
+  const workspace = join(parentDir, NEW_DOCX_CASE_DIR);
+  const label = `${NEW_DOCX_CASE_DIR} (deckuse new --format docx)`;
+
+  process.stdout.write(`\n=== ${label} → ${workspace}\n`);
+
+  try {
+    await access(options.bin);
+  } catch {
+    throw new Error(`deckuse bin not found: ${options.bin} (run pnpm build first)`);
+  }
+
+  if (options.force) {
+    await rm(workspace, { recursive: true, force: true });
+  } else {
+    try {
+      await access(join(workspace, '.deckuse', 'manifest.json'));
+      process.stdout.write(
+        '  → SKIP  workspace already exists (delete it or pass --force to re-run)\n',
+      );
+      return {
+        pptx: '(deckuse new --format docx)',
+        source: '(deckuse new --format docx)',
+        format: 'docx',
+        workspace,
+        ok: true,
+        skipped: true,
+        fromNew: true,
+        steps: [],
+        failedSteps: [],
+      };
+    } catch {
+      // workspace does not exist yet — proceed
+    }
+  }
+
+  const runner = new Runner(options.bin, workspace, {
+    continueOnError: options.continueOnError,
+    batch: options.batch,
+  });
+
+  if (options.batch) {
+    process.stdout.write('  (batch mode: consecutive writes merged via apply)\n');
+  }
+
+  const created = await runner.step('new', ['new', workspace, '--format', 'docx', '--json']);
+  if (!created?.ok) {
+    return {
+      pptx: '(deckuse new --format docx)',
+      source: '(deckuse new --format docx)',
+      format: 'docx',
+      workspace,
+      ok: false,
+      fromNew: true,
+      steps: runner.steps,
+      failedSteps: runner.steps.filter((s) => !s.ok),
+    };
+  }
+
+  let summary = {};
+  try {
+    summary = await runDocxWriteSequence(runner, { skipExport: options.skipExport });
+  } catch (cause) {
+    runner.failed = true;
+    const stepResult = {
+      name: 'sequence',
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+      ms: 0,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult);
+  }
+
+  const ok = !runner.failed && runner.steps.every((s) => s.ok);
+  const report = {
+    ok,
+    pptx: '(deckuse new --format docx)',
+    source: '(deckuse new --format docx)',
+    format: 'docx',
     workspace,
     fromNew: true,
     startedAt: new Date().toISOString(),
@@ -1894,13 +2399,13 @@ const main = async () => {
 
   /** @type {string[]} */
   let files;
-  /** Directory used for the batch summary file (parent of a single .pptx, or the scan root). */
+  /** Directory used for the batch summary file (parent of a single package, or the scan root). */
   let summaryDir;
   /** @type {'file' | 'dir'} */
   let mode;
   if (st.isFile()) {
-    if (!isPptx(basename(options.input))) {
-      process.stderr.write(`Not a .pptx file: ${options.input}\n`);
+    if (!isOfficePackage(basename(options.input))) {
+      process.stderr.write(`Not a .pptx or .docx file: ${options.input}\n`);
       process.exitCode = 2;
       return;
     }
@@ -1921,14 +2426,14 @@ const main = async () => {
     }
   } else if (st.isDirectory()) {
     if (options.workerResult) {
-      process.stderr.write('--worker-result requires a single .pptx file\n');
+      process.stderr.write('--worker-result requires a single .pptx or .docx file\n');
       process.exitCode = 2;
       return;
     }
-    files = await collectPptx(options.input, options.recursive);
+    files = await collectPackages(options.input, options.recursive);
     if (options.limit !== undefined) files = files.slice(0, options.limit);
     if (files.length === 0) {
-      process.stderr.write(`No .pptx files found under ${options.input}\n`);
+      process.stderr.write(`No .pptx/.docx files found under ${options.input}\n`);
       process.exitCode = 1;
       return;
     }
@@ -1963,6 +2468,8 @@ const main = async () => {
           return {
             ok: false,
             pptx: file,
+            source: file,
+            format: packageFormat(file),
             workspace: join(dirname(file), basename(file, extname(file))),
             error: message,
             steps: [],
@@ -1990,6 +2497,8 @@ const main = async () => {
         reports.push({
           ok: false,
           pptx: file,
+          source: file,
+          format: packageFormat(file),
           workspace: join(dirname(file), basename(file, extname(file))),
           error: message,
           steps: [],
@@ -2004,6 +2513,8 @@ const main = async () => {
     const report = reports[0] ?? {
       ok: false,
       pptx: options.input,
+      source: options.input,
+      format: packageFormat(options.input),
       workspace: join(dirname(options.input), basename(options.input, extname(options.input))),
       error: 'worker produced no report',
       steps: [],
@@ -2027,7 +2538,26 @@ const main = async () => {
       reports.push({
         ok: false,
         pptx: '(deckuse new)',
+        source: '(deckuse new)',
+        format: 'pptx',
         workspace: join(summaryDir, NEW_CASE_DIR),
+        fromNew: true,
+        error: message,
+        steps: [],
+      });
+    }
+    try {
+      const newDocxReport = await processNewDocxBootstrap(summaryDir, options);
+      reports.push(newDocxReport);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      process.stdout.write(`  → FAIL  ${message}\n`);
+      reports.push({
+        ok: false,
+        pptx: '(deckuse new --format docx)',
+        source: '(deckuse new --format docx)',
+        format: 'docx',
+        workspace: join(summaryDir, NEW_DOCX_CASE_DIR),
         fromNew: true,
         error: message,
         steps: [],
@@ -2049,6 +2579,8 @@ const main = async () => {
     failed: reports.filter((r) => !r.ok).length,
     files: reports.map((r) => ({
       pptx: r.pptx,
+      source: r.source ?? r.pptx,
+      format: r.format,
       workspace: r.workspace,
       ok: r.ok,
       skipped: r.skipped || undefined,
