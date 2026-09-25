@@ -9,6 +9,7 @@ import {
   formatXmlBytes,
   normalizePartName,
   parseXml,
+  partExistsIgnoreCase,
   prettyPrintXml,
   resolveRelationshipTarget,
   serializeXml,
@@ -120,6 +121,9 @@ describe('OPC archive', () => {
     expect(archive.getPart('/ppt/media/media1.mp4')).toBeUndefined();
     expect(archive.hasPartIgnoreCase('/ppt/media/media1.mp4')).toBe(true);
     expect(archive.hasPartIgnoreCase('/ppt/media/media2.mp4')).toBe(false);
+    // Free function used by media allocators — works from parts alone.
+    expect(partExistsIgnoreCase(archive.parts, '/ppt/media/media1.mp4')).toBe(true);
+    expect(partExistsIgnoreCase(archive.parts, '/ppt/media/media2.mp4')).toBe(false);
   });
   it('enforces entry count', async () => {
     const archive = new OpcArchive();

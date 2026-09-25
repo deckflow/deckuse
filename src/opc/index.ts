@@ -68,6 +68,23 @@ export const normalizePartName = (name: string): string => {
     throw new Error('OPC part name cannot escape package root');
   return `/${segments.filter((segment) => segment && segment !== '.').join('/')}`;
 };
+
+/**
+ * True if any part path in `parts` matches `name` ignoring case.
+ * Prefer this free function over `archive.hasPartIgnoreCase` when allocating
+ * media names — it only needs a `parts` map, so it stays safe across opc
+ * package versions that predate the instance method (npm pptx@1.2.x + opc@1.1.0).
+ */
+export const partExistsIgnoreCase = (
+  parts: ReadonlyMap<string, unknown> | { keys(): IterableIterator<string> },
+  name: string,
+): boolean => {
+  const needle = normalizePartName(name).toLowerCase();
+  for (const key of parts.keys()) {
+    if (key.toLowerCase() === needle) return true;
+  }
+  return false;
+};
 export type XmlDocument = Document & { documentElement: Element };
 export const parseXml = (input: string | Uint8Array): XmlDocument => {
   const xml = stripBomChar(typeof input === 'string' ? input : decodeXmlBytes(input));
@@ -407,11 +424,7 @@ export class OpcArchive {
    * prompt to repair when the ZIP entries collide on extract.
    */
   hasPartIgnoreCase(name: string): boolean {
-    const needle = normalizePartName(name).toLowerCase();
-    for (const key of this.parts.keys()) {
-      if (key.toLowerCase() === needle) return true;
-    }
-    return false;
+    return partExistsIgnoreCase(this.parts, name);
   }
   readXml(name: string): Document {
     const part = this.getPart(name);

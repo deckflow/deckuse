@@ -815,13 +815,22 @@ describe('pptx adapter', () => {
     expect(persisted.elements.length).toBeGreaterThan(0);
   });
 
-  it('addShape creates text, table, chart, video, and audio', async () => {
+  it('addShape creates text, table, chart, image, video, and audio', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-addshape-'));
     const source = join(root, 'source.pptx'),
       workspace = join(root, 'workspace');
     await fixture(source);
+    const imagePath = join(root, 'logo.png');
     const videoPath = join(root, 'clip.mp4');
     const audioPath = join(root, 'track.mp3');
+    // Minimal valid 1×1 PNG
+    await writeFile(
+      imagePath,
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
     await writeFile(videoPath, Buffer.from('fake-mp4-bytes'));
     await writeFile(audioPath, Buffer.from('fake-mp3-bytes'));
     const init = await pptxAdapter.init(
@@ -889,6 +898,16 @@ describe('pptx adapter', () => {
             workspaceId: workspace,
             transactionId: revision,
             slide: 1,
+            shapeType: 'image',
+            name: 'Logo',
+            file: imagePath,
+          },
+          {
+            version: '2.0',
+            type: 'addShape',
+            workspaceId: workspace,
+            transactionId: revision,
+            slide: 1,
             shapeType: 'video',
             name: 'Clip',
             file: videoPath,
@@ -932,12 +951,26 @@ describe('pptx adapter', () => {
     const revenue = elements.find((item) => item.name === 'Revenue');
     expect(revenue?.kind).toBe('chart');
     expect(revenue?.payload?.chartPart).toMatch(/\/ppt\/charts\/chart\d+\.xml/);
+    const logo = elements.find((item) => item.name === 'Logo');
+    expect(logo?.kind).toBe('picture');
+    expect(logo?.payload?.mediaPart).toMatch(/\/ppt\/media\/image\d+\.png/);
     const clip = elements.find((item) => item.name === 'Clip');
     expect(clip?.kind).toBe('video');
     expect(clip?.payload?.mediaPart).toMatch(/\/ppt\/media\/media\d+\.mp4/);
     const track = elements.find((item) => item.name === 'Track');
     expect(track?.kind).toBe('audio');
     expect(track?.payload?.mediaPart).toMatch(/\/ppt\/media\/media\d+\.mp3/);
+
+    // Media bytes must land in source/ (not only slide XML relationships).
+    const packed = await OpcArchive.openDirectory(join(workspace, 'source'));
+    expect(packed.getPart(logo!.payload!.mediaPart!)).toBeTruthy();
+    expect(packed.getPart(clip!.payload!.mediaPart!)).toBeTruthy();
+    expect(packed.getPart(track!.payload!.mediaPart!)).toBeTruthy();
+    expect(
+      Buffer.from(packed.getPart(clip!.payload!.mediaPart!)!.data).equals(
+        Buffer.from('fake-mp4-bytes'),
+      ),
+    ).toBe(true);
 
     // Chart literals must be OOXML-valid (no nested strCache/numCache under *Lit).
     const chartPart = revenue?.payload?.chartPart;
@@ -1320,6 +1353,66 @@ describe('pptx adapter', () => {
       {},
     );
     expect(validated.ok).toBe(true);
+  });
+
+  it('addPicturePart/addMediaPart work when archive.hasPartIgnoreCase is missing (opc@1.1.0 skew)', async () => {
+    // Regression: published pptx@1.2.x called archive.hasPartIgnoreCase while
+    // opc@1.1.0 lacked the method → IO_ERROR "is not a function" for image/video/audio.
+    const { addPicturePart } = await import('../../src/pptx/picture.js');
+    const { addMediaPart } = await import('../../src/pptx/media.js');
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-media-skew-'));
+    const imagePath = join(root, 'logo.png');
+    const videoPath = join(root, 'clip.mp4');
+    const audioPath = join(root, 'track.mp3');
+    await writeFile(
+      imagePath,
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    await writeFile(videoPath, Buffer.from('fake-mp4'));
+    await writeFile(audioPath, Buffer.from('fake-mp3'));
+
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/[Content_Types].xml',
+      e.encode(
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>`,
+      ),
+      'application/xml',
+    );
+    archive.setPart('/ppt/slides/slide1.xml', e.encode('<p:sld/>'), 'application/xml');
+    archive.setRelationships('/ppt/slides/slide1.xml', []);
+    // Simulate opc@1.1.0: method absent / non-callable on the instance.
+    Object.defineProperty(archive, 'hasPartIgnoreCase', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    expect(typeof archive.hasPartIgnoreCase).not.toBe('function');
+
+    const pic = await addPicturePart(archive, '/ppt/slides/slide1.xml', { path: imagePath });
+    expect(pic.ok).toBe(true);
+    if (!pic.ok) return;
+    expect(pic.value.target).toBe('/ppt/media/image1.png');
+    expect(archive.getPart('/ppt/media/image1.png')).toBeTruthy();
+
+    const video = await addMediaPart(archive, '/ppt/slides/slide1.xml', {
+      path: videoPath,
+      kind: 'video',
+    });
+    expect(video.ok).toBe(true);
+    if (!video.ok) return;
+    expect(video.value.mediaPart).toBe('/ppt/media/media1.mp4');
+
+    const audio = await addMediaPart(archive, '/ppt/slides/slide1.xml', {
+      path: audioPath,
+      kind: 'audio',
+    });
+    expect(audio.ok).toBe(true);
+    if (!audio.ok) return;
+    expect(audio.value.mediaPart).toBe('/ppt/media/media1.mp3');
   });
 
   it('init and setText heal stale app.xml Slides count (pre-existing mismatch)', async () => {

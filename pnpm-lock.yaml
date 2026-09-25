@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@deckflow/office2html':
-        specifier: ^0.3.3
-        version: 0.3.3
+        specifier: ^0.3.5
+        version: 0.3.5
       '@xmldom/xmldom':
         specifier: ^0.9.10
         version: 0.9.12
@@ -257,6 +257,11 @@ packages:
     cpu: [arm64]
     os: [darwin]
 
+  '@deckflow/office2html-darwin-arm64@0.3.5':
+    resolution: {integrity: sha512-CRAU0sln8O5aHfWHEJZj8Xp14+CRX7SowpXnaP7Osab/JVptOfY7CR2Ho1YuwvT0PKbWeg605AS8Y63kxRNrSw==}
+    cpu: [arm64]
+    os: [darwin]
+
   '@deckflow/office2html-darwin-x64@0.3.3':
     resolution: {integrity: sha512-41XZ5qTzr61EXQkkG43xFolkpmexYMx3Lq8aUoGM5pS7myClXtgRORDx7qkvQCZ2CYijMHesO0O+AWpc6KEFqg==}
     cpu: [x64]
@@ -267,13 +272,27 @@ packages:
     cpu: [x64]
     os: [linux]
 
+  '@deckflow/office2html-linux-x64@0.3.5':
+    resolution: {integrity: sha512-OFJ4LxEZOby69tuzomSMb5rloTsSvA5v1Tz5VnJIa9tKKmCWFrpJPZkZdE6/Na+ixjiFQNIu7Wr49lDoFyHqsw==}
+    cpu: [x64]
+    os: [linux]
+
   '@deckflow/office2html-win32-x64@0.3.3':
     resolution: {integrity: sha512-PY1zMlSw0/kUHZ+7MHFQ6Qge5RMz8erduqUvjcX1j5SQkzemvX+uqJpgMGV4Nt0mMXLxygAFj09az4IRH2drjQ==}
     cpu: [x64]
     os: [win32]
 
+  '@deckflow/office2html-win32-x64@0.3.5':
+    resolution: {integrity: sha512-sMfLhbylQxffPCl0C7rCAqhUuZRzDsJr4lUrLQLJBbl7V8fIzCkQTU+NaWnBp85lFw1/a4hhfCoj6w+x64VGmg==}
+    cpu: [x64]
+    os: [win32]
+
   '@deckflow/office2html@0.3.3':
     resolution: {integrity: sha512-mp8h5eFH5+vKYK1jQMi4OiMPBCjLKqTNGKz8KIRdGhV3OGZv5f4xlbRVIuMAtZWBBhNRKA58UdhTSuGvd6nc+A==}
+    hasBin: true
+
+  '@deckflow/office2html@0.3.5':
+    resolution: {integrity: sha512-3SDuAnDdMBMlvStvJu+Hc91j+NHQ2Rp0lGq0SaC5L6u6+Pvyg/H+1g6HLG6sxauUf7vQRsGhWZwkZeloZaNxVA==}
     hasBin: true
 
   '@eslint-community/eslint-utils@4.10.1':
@@ -1462,13 +1481,22 @@ snapshots:
   '@deckflow/office2html-darwin-arm64@0.3.3':
     optional: true
 
+  '@deckflow/office2html-darwin-arm64@0.3.5':
+    optional: true
+
   '@deckflow/office2html-darwin-x64@0.3.3':
     optional: true
 
   '@deckflow/office2html-linux-x64@0.3.3':
     optional: true
 
+  '@deckflow/office2html-linux-x64@0.3.5':
+    optional: true
+
   '@deckflow/office2html-win32-x64@0.3.3':
+    optional: true
+
+  '@deckflow/office2html-win32-x64@0.3.5':
     optional: true
 
   '@deckflow/office2html@0.3.3':
@@ -1477,6 +1505,12 @@ snapshots:
       '@deckflow/office2html-darwin-x64': 0.3.3
       '@deckflow/office2html-linux-x64': 0.3.3
       '@deckflow/office2html-win32-x64': 0.3.3
+
+  '@deckflow/office2html@0.3.5':
+    optionalDependencies:
+      '@deckflow/office2html-darwin-arm64': 0.3.5
+      '@deckflow/office2html-linux-x64': 0.3.5
+      '@deckflow/office2html-win32-x64': 0.3.5
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.9.1)':
     dependencies:

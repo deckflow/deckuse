@@ -46,7 +46,7 @@
     "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore"
   },
   "dependencies": {
-    "@deckflow/office2html": "^0.3.3",
+    "@deckflow/office2html": "^0.3.5",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
     "isomorphic-git": "latest",

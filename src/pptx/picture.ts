@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { extname, posix } from 'node:path';
 import { err, ok, type Result } from '../core/index.js';
-import { OpcArchive, type OpcRelationship } from '../opc/index.js';
+import { OpcArchive, partExistsIgnoreCase, type OpcRelationship } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import { NS, REL, attr, descendants, first } from './xml.js';
 
@@ -16,8 +16,9 @@ const mediaType = (extension: string) =>
 
 const nextMedia = (archive: OpcArchive, ext: string) => {
   let n = 1;
-  // Case-insensitive: existing `image1.PNG` must block `image1.png`.
-  while (archive.hasPartIgnoreCase(`/ppt/media/image${String(n)}${ext}`)) n++;
+  // Case-insensitive via free function (not archive.hasPartIgnoreCase): stays
+  // compatible when an older opc instance lacks that method.
+  while (partExistsIgnoreCase(archive.parts, `/ppt/media/image${String(n)}${ext}`)) n++;
   return `/ppt/media/image${String(n)}${ext}`;
 };
 
