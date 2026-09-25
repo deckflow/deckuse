@@ -5,3 +5,5 @@
 !README.md
 !.gitignore
 integration-writes-summary.json
+# Office lock files created while a fixture is open
+~$*

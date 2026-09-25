@@ -1053,9 +1053,16 @@ const packageFormat = (name) => {
   return undefined;
 };
 
+/**
+ * Office writes `~$name.pptx` / `~$name.docx` lock files beside an open package.
+ * They share the extension but are not OOXML packages.
+ * @param {string} name
+ */
+const isOfficeLockFile = (name) => name.startsWith('~$');
+
 /** @param {string} name */
 const isOfficePackage = (name) => {
-  if (name.startsWith('.')) return false;
+  if (name.startsWith('.') || isOfficeLockFile(name)) return false;
   return PACKAGE_EXTS.has(extname(name).toLowerCase());
 };
 

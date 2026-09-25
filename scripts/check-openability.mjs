@@ -79,6 +79,8 @@ const collectPackages = async (input) => {
   if (!st.isDirectory()) throw new Error(`Not a file or directory: ${input}`);
   const found = [];
   for (const name of await readdir(input)) {
+    // `~$…` is an Office lock file, not a package.
+    if (name.startsWith('~$') || name.startsWith('.')) continue;
     if (PACKAGE_EXTS.has(extname(name).toLowerCase())) {
       found.push(join(input, name));
     }

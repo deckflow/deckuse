@@ -5,6 +5,7 @@ coverage/
 .tmp/
 *.tsbuildinfo
 .DS_Store
+~$*
 benchmark
 .test
 __temps__
