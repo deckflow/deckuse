@@ -399,3 +399,17 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+Integration write smoke (curated fixtures, default `--batch`, semantic gate):
+
+```sh
+pnpm build
+pnpm test:integration-writes:smoke
+```
+
+Large corpus scans (optional / nightly):
+
+```sh
+pnpm test:integration-writes:corpus -- /path/to/pptx-docx-dir
+pnpm test:openability -- ./path/to/package.pptx   # LibreOffice; or --osascript on macOS
+```

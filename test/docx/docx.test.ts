@@ -286,4 +286,115 @@ describe('docx adapter', () => {
     if (denied.ok) return;
     expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
   });
+
+  it('validates, reopens package.docx, and read-backs IT markers after batch writes', async () => {
+    const { workspace, source } = await fixture();
+    const created = await docxAdapter.init({
+      version: '2.0',
+      type: 'init',
+      workspaceId: workspace,
+      format: 'docx',
+      source,
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const marker = 'IT-docx';
+    const batched = await docxAdapter.execute({
+      ...base(workspace),
+      type: 'batch',
+      commands: [
+        {
+          ...base(workspace),
+          type: 'addParagraph',
+          name: `${marker}-intro`,
+          style: 'Heading1',
+          text: `${marker} heading`,
+        },
+        {
+          ...base(workspace),
+          type: 'addParagraph',
+          name: `${marker}-body`,
+          text: `${marker} body text`,
+        },
+        {
+          ...base(workspace),
+          type: 'addTable',
+          name: `${marker}-table`,
+          rows: [
+            [`${marker}-A`, 'B'],
+            ['1', '2'],
+          ],
+        },
+        {
+          ...base(workspace),
+          type: 'setText',
+          target: `bookmark:${marker}-body`,
+          value: `${marker} body updated`,
+        },
+      ],
+    });
+    expect(batched, JSON.stringify(batched)).toMatchObject({ ok: true });
+
+    const validated = await docxAdapter.execute({
+      version: '2.0',
+      type: 'validate',
+      workspaceId: workspace,
+    });
+    expect(validated.ok).toBe(true);
+
+    const intro = await docxAdapter.execute({
+      version: '2.0',
+      type: 'get',
+      workspaceId: workspace,
+      target: `bookmark:${marker}-intro`,
+    });
+    expect(intro.ok).toBe(true);
+    if (!intro.ok) return;
+    expect((intro.value as { text: string }).text).toBe(`${marker} heading`);
+
+    const body = await docxAdapter.execute({
+      version: '2.0',
+      type: 'get',
+      workspaceId: workspace,
+      target: `bookmark:${marker}-body`,
+    });
+    expect(body.ok).toBe(true);
+    if (!body.ok) return;
+    expect((body.value as { text: string }).text).toBe(`${marker} body updated`);
+
+    const paragraphs = await docxAdapter.execute({
+      version: '2.0',
+      type: 'list',
+      workspaceId: workspace,
+      resource: 'paragraphs',
+    });
+    expect(paragraphs.ok).toBe(true);
+    if (!paragraphs.ok) return;
+    const previews = (
+      paragraphs.value as { items: Array<{ textPreview?: string }> }
+    ).items.map((item) => item.textPreview ?? '');
+    expect(previews.some((text) => text.includes(marker))).toBe(true);
+
+    const bookmarks = await docxAdapter.execute({
+      version: '2.0',
+      type: 'list',
+      workspaceId: workspace,
+      resource: 'bookmarks',
+    });
+    expect(bookmarks.ok).toBe(true);
+    if (!bookmarks.ok) return;
+    const names = (bookmarks.value as { items: Array<{ name?: string }> }).items.map(
+      (item) => item.name ?? '',
+    );
+    expect(names).toEqual(expect.arrayContaining([`${marker}-intro`, `${marker}-body`]));
+
+    const packed = await OpcArchive.openFile(join(workspace, 'package.docx'));
+    expect(packed.getPart('/[Content_Types].xml')).toBeDefined();
+    expect(packed.getPart('/word/document.xml')).toBeDefined();
+    const docXml = new TextDecoder().decode(packed.getPart('/word/document.xml')!.data);
+    expect(docXml).toContain(`${marker} heading`);
+    expect(docXml).toContain(`${marker} body updated`);
+    expect(docXml).toContain(`${marker}-A`);
+  });
 });

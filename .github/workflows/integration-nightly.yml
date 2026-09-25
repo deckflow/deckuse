@@ -1,0 +1,47 @@
+name: Integration nightly
+on:
+  schedule:
+    - cron: '0 16 * * *' # 00:00 CST
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.6.3 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:integration-writes:smoke
+      # Optional openability when LibreOffice is present on the runner image.
+      # Exit 2 = backend missing (tolerate); exit 1 = probe failure.
+      - name: Openability probe (LibreOffice if available)
+        run: |
+          set +e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libreoffice-impress libreoffice-writer
+          pnpm test:openability -- test/fixtures/integration
+          code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "openability backend unavailable — skipping"
+            exit 0
+          fi
+          exit "$code"
+
+  corpus:
+    if: ${{ vars.INTEGRATION_CORPUS_PATH != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.6.3 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Corpus scan
+        run: pnpm test:integration-writes:corpus -- "${{ vars.INTEGRATION_CORPUS_PATH }}" --limit 20 --continue-on-error

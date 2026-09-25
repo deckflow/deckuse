@@ -21,8 +21,9 @@
  *   --skip-export          omit final export
  *   --skip-new             omit bundled-template `deckuse new` bootstrap cases
  *                          (PPTX blank + DOCX `--format docx`)
- *   --batch                merge consecutive writes into `apply` batch payloads;
- *                          skips undo/redo and other non-batchable steps
+ *   --batch                merge consecutive writes into `apply` batch payloads
+ *                          (default; skips undo/redo and other non-batchable steps)
+ *   --no-batch             disable batching (one CLI write = one revision)
  *   --concurrency <n>      max parallel file workers (dir mode; default: cpus-2, min 1)
  *   --help
  *
@@ -42,12 +43,18 @@ import { randomUUID } from 'node:crypto';
 import { access, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEFAULT_BIN = join(ROOT, 'dist/bin.js');
+const OPC_MODULE = pathToFileURL(join(ROOT, 'dist/opc/index.js')).href;
 
+/** Lazy-load compiled OpcArchive (requires `pnpm build`). */
+const loadOpcArchive = async () => {
+  const mod = await import(OPC_MODULE);
+  return mod.OpcArchive;
+};
 /** Default parallel file workers for directory scans. */
 const defaultConcurrency = () => Math.max(1, availableParallelism() - 2);
 
@@ -62,6 +69,219 @@ const PIXEL_PNG_2 = Buffer.from(
 );
 
 const PREFIX = 'IT';
+
+/**
+ * Post-sequence semantic gate: package must reopen as OPC, validate clean,
+ * and IT-* markers from this harness must still be discoverable via list.
+ * @param {Runner} runner
+ * @param {'pptx' | 'docx'} format
+ */
+const runSemanticGate = async (runner, format) => {
+  const packageName = format === 'docx' ? 'package.docx' : 'package.pptx';
+  const packagePath = join(runner.workspace, packageName);
+  const started = Date.now();
+
+  // 1) OPC reopen — closest automated substitute for "does Office unzip this?"
+  try {
+    const OpcArchive = await loadOpcArchive();
+    const archive = await OpcArchive.openFile(packagePath);
+    if (!archive.getPart('/[Content_Types].xml')) {
+      throw new Error('missing /[Content_Types].xml');
+    }
+    if (format === 'pptx' && !archive.getPart('/ppt/presentation.xml')) {
+      throw new Error('missing /ppt/presentation.xml');
+    }
+    if (format === 'docx' && !archive.getPart('/word/document.xml')) {
+      throw new Error('missing /word/document.xml');
+    }
+    const stepResult = {
+      name: 'semantic: opc reopen',
+      ok: true,
+      command: `OpcArchive.openFile(${packageName})`,
+      ms: Date.now() - started,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult, stepResult.command);
+  } catch (cause) {
+    runner.failed = true;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const stepResult = {
+      name: 'semantic: opc reopen',
+      ok: false,
+      command: `OpcArchive.openFile(${packageName})`,
+      error: message,
+      ms: Date.now() - started,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult, stepResult.command);
+    return;
+  }
+
+  // 2) validate must still succeed after the full sequence (incl. undo).
+  const validated = await runner.executeStep('semantic: validate', [
+    'validate',
+    '--package',
+    '--relationships',
+    ...runner.wsArgs(),
+  ]);
+  if (!validated?.ok) return;
+
+  // 3) IT-* / PREFIX markers must appear in list inventory (semantic write-back).
+  const markerStarted = Date.now();
+  /** @type {string[]} */
+  const hits = [];
+  try {
+    if (format === 'pptx') {
+      const slidesEnv = await runner.executeStep('semantic: list slides', [
+        'list',
+        'slides',
+        ...runner.wsArgs(),
+      ]);
+      if (!slidesEnv?.ok) return;
+      const slides = Array.isArray(slidesEnv?.data?.items) ? slidesEnv.data.items : [];
+      const indexes = slides
+        .map((s) => (typeof s.index === 'number' ? s.index : undefined))
+        .filter((n) => typeof n === 'number');
+      const scan = indexes.length > 0 ? indexes : [1];
+      for (const slide of scan) {
+        const shapesEnv = await runner.executeStep(`semantic: list shapes slide:${String(slide)}`, [
+          'list',
+          'shapes',
+          '--slide',
+          String(slide),
+          ...runner.wsArgs(),
+        ]);
+        if (!shapesEnv?.ok) return;
+        const shapes = Array.isArray(shapesEnv?.data?.items) ? shapesEnv.data.items : [];
+        for (const shape of shapes) {
+          const name = typeof shape?.name === 'string' ? shape.name : '';
+          const text = typeof shape?.textPreview === 'string' ? shape.textPreview : '';
+          const target = typeof shape?.target === 'string' ? shape.target : '';
+          if (name.includes(PREFIX) || text.includes(PREFIX) || target.includes(PREFIX)) {
+            hits.push(name || target || text.slice(0, 40));
+          }
+        }
+      }
+    } else {
+      const paragraphsEnv = await runner.executeStep('semantic: list paragraphs', [
+        'list',
+        'paragraphs',
+        ...runner.wsArgs(),
+      ]);
+      if (!paragraphsEnv?.ok) return;
+      const paragraphs = Array.isArray(paragraphsEnv?.data?.items) ? paragraphsEnv.data.items : [];
+      for (const p of paragraphs) {
+        const text = typeof p?.textPreview === 'string' ? p.textPreview : '';
+        if (text.includes(PREFIX)) hits.push(text.slice(0, 48));
+      }
+      const bookmarksEnv = await runner.executeStep('semantic: list bookmarks', [
+        'list',
+        'bookmarks',
+        ...runner.wsArgs(),
+      ]);
+      if (!bookmarksEnv?.ok) return;
+      const bookmarks = Array.isArray(bookmarksEnv?.data?.items) ? bookmarksEnv.data.items : [];
+      for (const b of bookmarks) {
+        const name = typeof b?.name === 'string' ? b.name : '';
+        if (name.includes(PREFIX)) hits.push(name);
+      }
+    }
+  } catch (cause) {
+    runner.failed = true;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const stepResult = {
+      name: 'semantic: IT marker read-back',
+      ok: false,
+      error: message,
+      ms: Date.now() - markerStarted,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult);
+    return;
+  }
+
+  // Require markers when this run performed successful mutable writes that introduce IT content.
+  // In --batch mode, individual adds are queued (not in steps); look for flush / apply / batched.
+  const wroteIt = runner.steps.some((s) => {
+    if (!s.ok || s.skipped) return false;
+    if (Array.isArray(s.batched) && s.batched.length > 0) return true;
+    if (typeof s.name !== 'string') return false;
+    return /^(add |set |apply |xfrm |replace|duplicate|remove |batch apply)/i.test(s.name);
+  });
+  if (wroteIt && hits.length === 0) {
+    runner.failed = true;
+    const stepResult = {
+      name: 'semantic: IT marker read-back',
+      ok: false,
+      error: `no ${PREFIX}-* name/text found after writes (list returned zero markers)`,
+      ms: Date.now() - markerStarted,
+    };
+    runner.steps.push(stepResult);
+    runner.logStep(stepResult);
+    return;
+  }
+
+  const stepResult = {
+    name: 'semantic: IT marker read-back',
+    ok: true,
+    reason: hits.length === 0 ? 'no mutable IT writes in this run' : `hits=${String(hits.length)}`,
+    ms: Date.now() - markerStarted,
+  };
+  runner.steps.push(stepResult);
+  runner.logStep(stepResult);
+};
+
+/**
+ * Run semantic gate (unless prior failure and not continue-on-error), write report, log summary.
+ * @param {Runner} runner
+ * @param {'pptx' | 'docx'} format
+ * @param {Record<string, unknown>} baseReport fields besides ok/steps/failedSteps
+ * @param {unknown} summary
+ */
+const finalizeCase = async (runner, format, baseReport, summary) => {
+  if (!runner.failed || runner.continueOnError) {
+    try {
+      await runSemanticGate(runner, format);
+    } catch (cause) {
+      runner.failed = true;
+      const stepResult = {
+        name: 'semantic-gate',
+        ok: false,
+        error: cause instanceof Error ? cause.message : String(cause),
+        ms: 0,
+      };
+      runner.steps.push(stepResult);
+      runner.logStep(stepResult);
+    }
+  }
+
+  const ok = !runner.failed && runner.steps.every((s) => s.ok);
+  const report = {
+    ...baseReport,
+    ok,
+    format,
+    startedAt: new Date().toISOString(),
+    summary,
+    steps: runner.steps,
+    failedSteps: runner.steps.filter((s) => !s.ok),
+  };
+  await mkdir(runner.workspace, { recursive: true });
+  await writeFile(
+    join(runner.workspace, 'integration-writes-report.json'),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+
+  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
+  const skipped = runner.steps.filter((s) => s.skipped).length;
+  const failed = runner.steps.filter((s) => !s.ok).length;
+  process.stdout.write(
+    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
+  );
+  for (const step of runner.steps.filter((s) => !s.ok)) {
+    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
+  }
+  return report;
+};
 
 const usage = () => {
   process.stdout.write(`usage: node scripts/integration-writes.mjs <dir|file.pptx|.docx> [options]
@@ -82,7 +302,8 @@ Options:
   --limit <n>             max packages to process (dir mode)
   --skip-export           skip final export step
   --skip-new              skip deckuse new bootstrap cases (pptx + docx)
-  --batch                 merge writes into apply batches (skip undo/redo/…)
+  --batch                 merge writes into apply batches (default)
+  --no-batch              one CLI write per revision (disable batching)
   --concurrency <n>       parallel file workers (dir mode; default: cpus-2, min 1)
   --help                  show this help
 `);
@@ -112,7 +333,9 @@ const parseArgs = (argv) => {
   const continueOnError = takeFlag(args, '--continue-on-error');
   const skipExport = takeFlag(args, '--skip-export');
   const skipNew = takeFlag(args, '--skip-new');
-  const batch = takeFlag(args, '--batch');
+  // Default batch on; --batch kept for backward compat; --no-batch disables.
+  takeFlag(args, '--batch');
+  const batch = !takeFlag(args, '--no-batch');
   const limitRaw = takeOption(args, '--limit');
   const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
   const concurrencyRaw = takeOption(args, '--concurrency');
@@ -2024,34 +2247,16 @@ const processOne = async (packagePath, options) => {
     runner.logStep(stepResult);
   }
 
-  const ok = !runner.failed && runner.steps.every((s) => s.ok);
-  const report = {
-    ok,
-    pptx: packagePath,
-    source: packagePath,
+  return finalizeCase(
+    runner,
     format,
-    workspace,
-    startedAt: new Date().toISOString(),
+    {
+      pptx: packagePath,
+      source: packagePath,
+      workspace,
+    },
     summary,
-    steps: runner.steps,
-    failedSteps: runner.steps.filter((s) => !s.ok),
-  };
-  await mkdir(workspace, { recursive: true });
-  await writeFile(
-    join(workspace, 'integration-writes-report.json'),
-    `${JSON.stringify(report, null, 2)}\n`,
   );
-
-  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
-  const skipped = runner.steps.filter((s) => s.skipped).length;
-  const failed = runner.steps.filter((s) => !s.ok).length;
-  process.stdout.write(
-    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
-  );
-  for (const step of runner.steps.filter((s) => !s.ok)) {
-    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
-  }
-  return report;
 };
 
 /**
@@ -2077,6 +2282,7 @@ const processOneInWorker = (packagePath, options) =>
     if (options.continueOnError) args.push('--continue-on-error');
     if (options.skipExport) args.push('--skip-export');
     if (options.batch) args.push('--batch');
+    else args.push('--no-batch');
 
     const child = spawn(process.execPath, args, {
       cwd: ROOT,
@@ -2236,35 +2442,17 @@ const processNewBootstrap = async (parentDir, options) => {
     runner.logStep(stepResult);
   }
 
-  const ok = !runner.failed && runner.steps.every((s) => s.ok);
-  const report = {
-    ok,
-    pptx: '(deckuse new)',
-    source: '(deckuse new)',
-    format: 'pptx',
-    workspace,
-    fromNew: true,
-    startedAt: new Date().toISOString(),
+  return finalizeCase(
+    runner,
+    'pptx',
+    {
+      pptx: '(deckuse new)',
+      source: '(deckuse new)',
+      workspace,
+      fromNew: true,
+    },
     summary,
-    steps: runner.steps,
-    failedSteps: runner.steps.filter((s) => !s.ok),
-  };
-  await mkdir(workspace, { recursive: true });
-  await writeFile(
-    join(workspace, 'integration-writes-report.json'),
-    `${JSON.stringify(report, null, 2)}\n`,
   );
-
-  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
-  const skipped = runner.steps.filter((s) => s.skipped).length;
-  const failed = runner.steps.filter((s) => !s.ok).length;
-  process.stdout.write(
-    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
-  );
-  for (const step of runner.steps.filter((s) => !s.ok)) {
-    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
-  }
-  return report;
 };
 
 /**
@@ -2346,35 +2534,17 @@ const processNewDocxBootstrap = async (parentDir, options) => {
     runner.logStep(stepResult);
   }
 
-  const ok = !runner.failed && runner.steps.every((s) => s.ok);
-  const report = {
-    ok,
-    pptx: '(deckuse new --format docx)',
-    source: '(deckuse new --format docx)',
-    format: 'docx',
-    workspace,
-    fromNew: true,
-    startedAt: new Date().toISOString(),
+  return finalizeCase(
+    runner,
+    'docx',
+    {
+      pptx: '(deckuse new --format docx)',
+      source: '(deckuse new --format docx)',
+      workspace,
+      fromNew: true,
+    },
     summary,
-    steps: runner.steps,
-    failedSteps: runner.steps.filter((s) => !s.ok),
-  };
-  await mkdir(workspace, { recursive: true });
-  await writeFile(
-    join(workspace, 'integration-writes-report.json'),
-    `${JSON.stringify(report, null, 2)}\n`,
   );
-
-  const passed = runner.steps.filter((s) => s.ok && !s.skipped).length;
-  const skipped = runner.steps.filter((s) => s.skipped).length;
-  const failed = runner.steps.filter((s) => !s.ok).length;
-  process.stdout.write(
-    `  → ${ok ? 'PASS' : 'FAIL'}  passed=${String(passed)} skipped=${String(skipped)} failed=${String(failed)}\n`,
-  );
-  for (const step of runner.steps.filter((s) => !s.ok)) {
-    process.stdout.write(`     ✗ ${step.name}: ${step.error ?? step.reason ?? 'failed'}\n`);
-  }
-  return report;
 };
 
 const main = async () => {
