@@ -1,5 +1,17 @@
 # @deckflow/deckuse
 
+## 1.3.0
+
+### Minor Changes
+
+- 01cc29f: Add `deckuse new <workspace/>` to bootstrap a workspace from the bundled blank PPTX template (equivalent to `init` with `assets/default.pptx`).
+- 1470c1f: Add a DOCX adapter with the same workspace loop as PPTX: paragraph addressing, cross-run text edits, and batch create commands.
+- 8673e60: Add `setSlideLayout` to rebind slides by index or slide ref to a different layout.
+
+### Patch Changes
+
+- 8673e60: Fix image/video/audio media allocation when an older `@deckflow/deckuse` opc build lacks `archive.hasPartIgnoreCase`, and bump `@deckflow/office2html` to 0.3.5.
+
 ## 1.2.1
 
 ### Patch Changes
