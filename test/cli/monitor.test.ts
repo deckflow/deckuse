@@ -232,7 +232,10 @@ describe('monitor', () => {
     await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
     expect(convertedInputs[0]).toBe('pptx');
 
-    await writeFile(join(workspace, '.deckuse', 'write.lock'), '');
+    await writeFile(
+      join(workspace, '.deckuse', 'write.lock'),
+      `${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`,
+    );
     await writeFile(
       join(workspace, '.deckuse', 'operations.jsonl'),
       `${JSON.stringify({ revision: 'undone', slides: [1], operation: { type: 'undo' } })}\n`,
@@ -796,7 +799,10 @@ describe('monitor', () => {
     expect(convertedInputs[0]).toBe('pptx');
     await eventually(() => expect(client.events.join('')).toContain('event: ready'));
 
-    await writeFile(join(workspace, '.deckuse', 'write.lock'), '');
+    await writeFile(
+      join(workspace, '.deckuse', 'write.lock'),
+      `${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`,
+    );
     await writeFile(join(workspace, 'package.pptx'), 'stale-before-pack');
     onPackageChange?.('rename', 'package.pptx');
     await new Promise((done) => setTimeout(done, 40));

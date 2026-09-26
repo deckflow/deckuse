@@ -7,7 +7,7 @@ import office2html from '@deckflow/office2html';
 import {
   ensureGitignore,
   indexPath,
-  lockPath,
+  isWriteLockHeld,
   monitorDir,
   operationsPath,
   previewDir,
@@ -118,15 +118,7 @@ const summarizeRecord = (record: OperationRecord | undefined, page: number): str
   return `${type}${slides}`;
 };
 
-const isWriteLocked = async (workspace: string): Promise<boolean> => {
-  try {
-    await stat(lockPath(workspace));
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
-  }
-};
+const isWriteLocked = (workspace: string): Promise<boolean> => isWriteLockHeld(workspace);
 
 /** mtime+size of package.pptx so undo/repack with the same ops still re-converts. */
 const packageFingerprint = async (workspace: string): Promise<string> => {

@@ -19,7 +19,7 @@ export {
   resetGit,
   operationCommitMessage,
 } from './git.js';
-export { acquireWriteLock, withWriteLock } from './lock.js';
+export { acquireWriteLock, isWriteLockHeld, withWriteLock } from './lock.js';
 export {
   type OperationRecord,
   readOperations,
