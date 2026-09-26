@@ -544,13 +544,13 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
     );
     expect(readBack.ok).toBe(true);
     if (readBack.ok) {
-      const properties = (
-        readBack.value as {
-          properties: Record<string, { effective?: unknown; source?: { scope?: string } }>;
-        }
-      ).properties;
-      expect(properties['text.value']?.effective).toBe('H1');
-      expect(properties['paragraph.align']?.effective).toBe('l');
+      const value = readBack.value as {
+        properties: Record<string, { effective?: unknown; source?: { scope?: string } }>;
+        warnings?: string[];
+      };
+      expect(value.warnings ?? []).toEqual([]);
+      expect(value.properties['text.value']?.effective).toBe('H1');
+      expect(value.properties['paragraph.align']?.effective).toBe('l');
     }
 
     const unsupported = await pptxAdapter.execute(
@@ -559,7 +559,7 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
         type: 'get',
         workspaceId: workspace,
         target: 'slide:1/shape:3/cell:0:0',
-        props: ['font.size'],
+        props: ['rotation'],
       },
       {},
     );

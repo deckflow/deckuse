@@ -28,7 +28,21 @@ const TABLE_CELL_GET_KEYS = new Set([
   'fill',
   'fill.color',
   'fill.kind',
+  'font.size',
+  'font.family',
+  'font.color',
+  'font.weight',
+  'font.italic',
+  'line.color',
+  'line.width',
+  'line.kind',
+  'padding.left',
+  'padding.right',
+  'padding.top',
+  'padding.bottom',
 ]);
+
+const TABLE_CELL_BORDER_SIDES = ['lnL', 'lnR', 'lnT', 'lnB'] as const;
 
 const prop = (
   effective: unknown,
@@ -366,7 +380,7 @@ const resolveTableCellProperties = (
       [],
       {
         target: resolved.target,
-        hint: 'Table cells support text, text.value, paragraph.align, fill, fill.color, and fill.kind.',
+        hint: 'Table cells support text, paragraph.align, fill, font.*, line.*, and padding.*.',
       },
     );
   }
@@ -390,6 +404,7 @@ const resolveTableCellProperties = (
   );
   const chain = resolveStyleChain(archive, resolved.item.partUri);
   const themeColors = loadThemeColors(archive, chain.themePart);
+  const themeFonts = loadThemeFonts(archive, chain.themePart);
   const tcPr = children(node).find((child) => child.localName === 'tcPr') ?? first(node, 'tcPr');
   const fill = readFillColor(tcPr, themeColors);
   const fillKind = prop(
@@ -413,6 +428,67 @@ const resolveTableCellProperties = (
       ? { scope: 'local', target: resolved.target, path: 'fill' }
       : { scope: 'default', target: resolved.target, path: 'fill' },
   );
+
+  const directRPr = firstRunRPr(node);
+  const directFont = readFontFromRPr(directRPr, themeFonts, themeColors);
+  const fontProp = <K extends keyof typeof directFont>(
+    key: K,
+    propName: string,
+    unit?: string,
+  ): PropertyValue => {
+    const value = directFont[key] ?? null;
+    return prop(
+      value,
+      value,
+      value !== null && value !== undefined
+        ? { scope: 'local', target: resolved.target, path: propName }
+        : { scope: 'default', target: resolved.target, path: propName },
+      unit,
+    );
+  };
+
+  const borderSides = TABLE_CELL_BORDER_SIDES.map((side) =>
+    tcPr ? children(tcPr).find((child) => child.localName === side) : undefined,
+  );
+  const presentBorders = borderSides.filter((side): side is Element => side !== undefined);
+  let lineKind: string | null = null;
+  let lineColor: string | null = null;
+  let lineWidth: number | null = null;
+  let lineScope: 'local' | 'default' = 'default';
+  if (presentBorders.length > 0) {
+    lineScope = 'local';
+    const fills = presentBorders.map((ln) => readFillColor(ln, themeColors));
+    const widths = presentBorders.map((ln) => {
+      const w = attr(ln, 'w');
+      return w !== undefined ? Number(w) / EMU_PER_PT : null;
+    });
+    const allNone = fills.every((f) => f?.kind === 'none');
+    const colors = fills.map((f) => f?.color ?? null);
+    const sameColor = colors.every((c) => c === colors[0]);
+    const sameWidth = widths.every((w) => w === widths[0]);
+    if (allNone) {
+      lineKind = 'none';
+      lineColor = null;
+      lineWidth = null;
+    } else {
+      lineKind = 'solid';
+      lineColor = sameColor ? (colors[0] ?? null) : null;
+      lineWidth = sameWidth ? (widths[0] ?? null) : null;
+    }
+  }
+  const lineSource = (path: string): PropertyValue['source'] =>
+    lineScope === 'local'
+      ? { scope: 'local', target: resolved.target, path }
+      : { scope: 'default', target: resolved.target, path };
+
+  const readPadding = (attrName: string, path: string): PropertyValue => {
+    const raw = attr(tcPr, attrName);
+    if (raw === undefined)
+      return prop(null, null, { scope: 'default', target: resolved.target, path }, 'pt');
+    const pt = Number(raw) / EMU_PER_PT;
+    return prop(pt, pt, { scope: 'local', target: resolved.target, path }, 'pt');
+  };
+
   const all: Record<string, PropertyValue> = {
     text: textValue,
     'text.value': textValue,
@@ -420,6 +496,18 @@ const resolveTableCellProperties = (
     fill: fillAlias,
     'fill.kind': fillKind,
     'fill.color': fillColor,
+    'font.size': fontProp('size', 'font.size', 'pt'),
+    'font.family': fontProp('family', 'font.family'),
+    'font.color': fontProp('color', 'font.color'),
+    'font.weight': fontProp('weight', 'font.weight'),
+    'font.italic': fontProp('italic', 'font.italic'),
+    'line.kind': prop(lineKind, lineKind, lineSource('line.kind')),
+    'line.color': prop(lineColor, lineColor, lineSource('line.color')),
+    'line.width': prop(lineWidth, lineWidth, lineSource('line.width'), 'pt'),
+    'padding.left': readPadding('marL', 'padding.left'),
+    'padding.right': readPadding('marR', 'padding.right'),
+    'padding.top': readPadding('marT', 'padding.top'),
+    'padding.bottom': readPadding('marB', 'padding.bottom'),
   };
   return ok({
     target: resolved.target,

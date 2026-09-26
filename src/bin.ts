@@ -279,10 +279,6 @@ const canonicalPath = async (p: string): Promise<string> => {
   }
 };
 
-/** Selector tokens (`*`, `all`, `text=...`) are not workspace paths. */
-const isSelectorToken = (token: string): boolean =>
-  token === '*' || token === 'all' || token.includes('=');
-
 const isDirectory = async (p: string): Promise<boolean> => {
   try {
     return (await stat(p)).isDirectory();
@@ -1195,9 +1191,9 @@ const main = async (): Promise<void> => {
         }
       } else if (action === 'query') {
         // With `--workspace`, positionals are the selector. Without it, the
-        // first positional is the workspace and the next is the selector.
-        // A repeated path to the same workspace is ignored. A second, different
-        // directory is a conflict, not a filter.
+        // first positional is the workspace and the rest are the selector.
+        // Canonical-same paths are ignored (even when they contain `=`).
+        // A second, different directory is CONFLICTING_WORKSPACE, not a filter.
         const positionals = positionalArgs(clean);
         const workspace = await findWorkspace(workspaceOpt ?? positionals[0]);
         const selectorTokens = workspaceOpt ? positionals : positionals.slice(1);
@@ -1205,13 +1201,11 @@ const main = async (): Promise<void> => {
         const selectors: string[] = [];
         let conflict: string | undefined;
         for (const token of selectorTokens) {
-          if (!isSelectorToken(token)) {
-            const key = await canonicalPath(token);
-            if (key === workspaceKey) continue;
-            if (await isDirectory(token)) {
-              conflict = token;
-              break;
-            }
+          const key = await canonicalPath(token);
+          if (key === workspaceKey) continue;
+          if (await isDirectory(token)) {
+            conflict = token;
+            break;
           }
           selectors.push(token);
         }
@@ -1227,13 +1221,27 @@ const main = async (): Promise<void> => {
           });
           ok = false;
         } else {
-          ok = await execute('deckuse query', {
-            version: PROTOCOL_VERSION,
-            type: 'query',
-            workspaceId: workspace,
-            selector: selectors[0] ?? '*',
-            limit: Number(optionFrom(clean, '--limit') ?? 100),
-          });
+          const selector = selectors.length > 0 ? selectors.join(' ') : '*';
+          if (selector !== '*' && selector !== 'all' && (await isDirectory(selector))) {
+            outputEnvelope({
+              ok: false,
+              command: 'deckuse query',
+              error: {
+                code: 'CONFLICTING_WORKSPACE',
+                message: `Selector ${selector} looks like a directory path, not a filter`,
+                hint: 'Pass the workspace once, via --workspace or as the first positional path.',
+              },
+            });
+            ok = false;
+          } else {
+            ok = await execute('deckuse query', {
+              version: PROTOCOL_VERSION,
+              type: 'query',
+              workspaceId: workspace,
+              selector,
+              limit: Number(optionFrom(clean, '--limit') ?? 100),
+            });
+          }
         }
       } else {
         throw new Error(`Unknown command: ${action}`);

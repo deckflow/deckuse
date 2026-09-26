@@ -790,10 +790,17 @@ ${WRITE_GLOBALS}`,
     example: "deckuse query ./workspace 'text=FY2025' --limit 100 --json",
     details: `Arguments:
   <workspace>               Optional workspace path when not using --workspace
-  <selector>                Selector string (default: *)
+  <selector>                Selector string (default: *); multiple tokens are joined with spaces
 
-Repeating the same workspace path is ignored. A second, different directory is
-CONFLICTING_WORKSPACE, not a selector. JSON data is { items, total, truncated }.
+Three equivalent workspace forms (same hits):
+  deckuse query --workspace ./ws 'text=FY2025'
+  deckuse query ./ws 'text=FY2025'
+  deckuse query ./ws 'text=FY2025' --workspace ./ws
+
+Repeating the same workspace path (relative, absolute, or trailing slash) is
+ignored. A second, different directory is CONFLICTING_WORKSPACE, not a selector.
+A leftover token that is itself an existing directory is also rejected.
+JSON data is { items, total, truncated }.
 
 Options:
   --limit <n>               Max results (default: 100)

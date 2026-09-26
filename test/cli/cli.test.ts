@@ -117,10 +117,11 @@ async function fixture(path: string) {
 const run = (
   args: string[],
   stdin = '',
+  options: { cwd?: string } = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> =>
   new Promise((done) => {
     const child = spawn(process.execPath, [resolve('dist/bin.js'), ...args], {
-      cwd: resolve('.'),
+      cwd: options.cwd ?? resolve('.'),
     });
     let stdout = '',
       stderr = '';
@@ -403,18 +404,30 @@ describe('deckuse CLI', () => {
     await fixture(source);
     expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
 
+    type QueryData = { data: { items: unknown[]; total: number; truncated: boolean } };
+    const parseQuery = (stdout: string): QueryData => JSON.parse(stdout) as QueryData;
+
     const viaFlag = await run(['query', '--workspace', workspace, 'text=Hello', '--json']);
     const viaPos = await run(['query', workspace, 'text=Hello', '--json']);
+    // Regression: redundant workspace (positional + --workspace) used by older wrappers.
+    const viaBoth = await run([
+      'query',
+      workspace,
+      'text=Hello',
+      '--workspace',
+      workspace,
+      '--json',
+    ]);
     expect(viaFlag.code, viaFlag.stderr || viaFlag.stdout).toBe(0);
     expect(viaPos.code, viaPos.stderr || viaPos.stdout).toBe(0);
-    const flagData = JSON.parse(viaFlag.stdout) as {
-      data: { items: unknown[]; total: number; truncated: boolean };
-    };
-    const posData = JSON.parse(viaPos.stdout) as {
-      data: { items: unknown[]; total: number; truncated: boolean };
-    };
+    expect(viaBoth.code, viaBoth.stderr || viaBoth.stdout).toBe(0);
+    const flagData = parseQuery(viaFlag.stdout);
+    const posData = parseQuery(viaPos.stdout);
+    const bothData = parseQuery(viaBoth.stdout);
     expect(flagData.data.items.length).toBe(posData.data.items.length);
     expect(flagData.data.total).toBe(posData.data.total);
+    expect(bothData.data.total).toBe(flagData.data.total);
+    expect(bothData.data.items.length).toBe(flagData.data.items.length);
     expect(flagData.data.truncated).toBe(false);
     expect(flagData.data.items.length).toBeGreaterThan(0);
     expect(flagData.data.items.length).toBeLessThan(20);
@@ -430,14 +443,45 @@ describe('deckuse CLI', () => {
     const repeatedPos = await run(['query', workspace, workspace, 'text=Hello', '--json']);
     expect(repeatedFlag.code, repeatedFlag.stderr || repeatedFlag.stdout).toBe(0);
     expect(repeatedPos.code, repeatedPos.stderr || repeatedPos.stdout).toBe(0);
-    const repeatedFlagData = JSON.parse(repeatedFlag.stdout) as {
-      data: { items: unknown[]; total: number };
-    };
-    const repeatedPosData = JSON.parse(repeatedPos.stdout) as {
-      data: { items: unknown[]; total: number };
-    };
+    const repeatedFlagData = parseQuery(repeatedFlag.stdout);
+    const repeatedPosData = parseQuery(repeatedPos.stdout);
     expect(repeatedFlagData.data.total).toBe(flagData.data.total);
     expect(repeatedPosData.data.items.length).toBe(flagData.data.items.length);
+
+    // Relative path, absolute path, and trailing slash must canonicalize to the same workspace.
+    const trailing = `${workspace}/`;
+    const relative = 'workspace';
+    const viaTrailing = await run([
+      'query',
+      trailing,
+      'text=Hello',
+      '--workspace',
+      workspace,
+      '--json',
+    ]);
+    const viaRelative = await run(
+      ['query', relative, 'text=Hello', '--workspace', relative, '--json'],
+      '',
+      { cwd: root },
+    );
+    expect(viaTrailing.code, viaTrailing.stderr || viaTrailing.stdout).toBe(0);
+    expect(viaRelative.code, viaRelative.stderr || viaRelative.stdout).toBe(0);
+    expect(parseQuery(viaTrailing.stdout).data.total).toBe(flagData.data.total);
+    expect(parseQuery(viaRelative.stdout).data.total).toBe(flagData.data.total);
+
+    // Multiple selector tokens are joined (AND semantics via matchesSelector).
+    const multi = await run([
+      'query',
+      '--workspace',
+      workspace,
+      'text=Hello',
+      'kind=textbox',
+      '--json',
+    ]);
+    expect(multi.code, multi.stderr || multi.stdout).toBe(0);
+    const multiData = parseQuery(multi.stdout);
+    expect(multiData.data.total).toBeGreaterThan(0);
+    expect(multiData.data.total).toBeLessThanOrEqual(flagData.data.total);
 
     const other = join(root, 'other-workspace');
     await mkdir(other);
@@ -452,12 +496,95 @@ describe('deckuse CLI', () => {
 
     const limited = await run(['query', '--workspace', workspace, '--limit', '1', '--json']);
     expect(limited.code, limited.stderr || limited.stdout).toBe(0);
-    const limitedData = JSON.parse(limited.stdout) as {
-      data: { items: unknown[]; total: number; truncated: boolean };
-    };
+    const limitedData = parseQuery(limited.stdout);
     expect(limitedData.data.items).toHaveLength(1);
     expect(limitedData.data.total).toBeGreaterThan(1);
     expect(limitedData.data.truncated).toBe(true);
+  });
+
+  it('query ignores a redundant workspace path that contains "="', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-query-eq-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'ws=name');
+    await mkdir(workspace);
+    await fixture(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+
+    const viaBoth = await run([
+      'query',
+      workspace,
+      'text=Hello',
+      '--workspace',
+      workspace,
+      '--json',
+    ]);
+    expect(viaBoth.code, viaBoth.stderr || viaBoth.stdout).toBe(0);
+    const data = JSON.parse(viaBoth.stdout) as { data: { items: unknown[]; total: number } };
+    expect(data.data.total).toBeGreaterThan(0);
+    expect(data.data.items.length).toBeGreaterThan(0);
+  });
+
+  it('query kind=tableCell with redundant workspace returns cells', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-query-cell-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/[Content_Types].xml',
+      encoder.encode(
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
+      ),
+      'application/xml',
+    );
+    archive.setPart(
+      '/ppt/presentation.xml',
+      encoder.encode(
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldSz cx="12192000" cy="6858000"/><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>',
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+    );
+    archive.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      encoder.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="2000000" cy="800000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="1000000"/><a:gridCol w="1000000"/></a:tblGrid><a:tr h="400000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>A</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>B</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    archive.setRelationships('/ppt/slides/slide1.xml', []);
+    archive.setPart(
+      '/docProps/app.xml',
+      encoder.encode(
+        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides></Properties>',
+      ),
+      'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+    );
+    await archive.writeFile(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+
+    const viaFlag = await run(['query', '--workspace', workspace, 'kind=tableCell', '--json']);
+    const viaBoth = await run([
+      'query',
+      workspace,
+      'kind=tableCell',
+      '--workspace',
+      workspace,
+      '--json',
+    ]);
+    expect(viaFlag.code, viaFlag.stderr || viaFlag.stdout).toBe(0);
+    expect(viaBoth.code, viaBoth.stderr || viaBoth.stdout).toBe(0);
+    const flagData = JSON.parse(viaFlag.stdout) as { data: { items: unknown[]; total: number } };
+    const bothData = JSON.parse(viaBoth.stdout) as { data: { items: unknown[]; total: number } };
+    expect(flagData.data.total).toBe(2);
+    expect(bothData.data.total).toBe(2);
+    expect(bothData.data.items.length).toBe(flagData.data.items.length);
   });
 
   it('apply accepts a top-level setTableLayout command', async () => {

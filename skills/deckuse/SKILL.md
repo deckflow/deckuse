@@ -27,7 +27,7 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
    - `slide:1/shape:2`, `slide:1/shape:Title 1`, `slide:1/placeholder:title`
    - `slide:1/shape:2/run:0` for single-run `setProperties` (intra-paragraph styling)
    - `slide:1/notes` is the **speaker-notes body** only (header / slide-number placeholders are ignored)
-   - `slide:1/shape:3/cell:0:0` addresses a table cell; cell `setProperties` accepts `paragraph.align`
+   - `slide:1/shape:3/cell:0:0` addresses a table cell; cell `setProperties` / `get` support `text`, `paragraph.align`, `fill`, `font.size`/`font.family`/`font.color`/`font.weight`/`font.italic`, `stroke`/`border` (`line.color`/`line.width` on get), and `padding.left|right|top|bottom` (pt)
    - **Same-batch forward refs**: after `addShape` with `"name": "HeaderTitle"`, later ops in the **same** `apply` may target `slide:N/shape:HeaderTitle`. Cross-apply dry-runs cannot see uncommitted shapes — that is expected.
 4. **Intuitive Unit System**:
    `px` (96 DPI), `pt`, `cm`, `mm`, `in`, `%` (of slide). Bare numbers = EMU. Example: `"x": "5%"`, `"y": "120px"`.

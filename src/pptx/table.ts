@@ -452,7 +452,53 @@ const TABLE_STRUCTURAL_KEYS = new Set([
   'name',
 ]);
 
-const TABLE_CELL_KEYS = new Set(['text', 'fill', 'paragraph.align']);
+const TABLE_CELL_STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
+const TABLE_CELL_PADDING_KEYS = [
+  'padding.left',
+  'padding.right',
+  'padding.top',
+  'padding.bottom',
+] as const;
+const TABLE_CELL_PADDING_ATTR: Record<(typeof TABLE_CELL_PADDING_KEYS)[number], string> = {
+  'padding.left': 'marL',
+  'padding.right': 'marR',
+  'padding.top': 'marT',
+  'padding.bottom': 'marB',
+};
+const TABLE_CELL_FONT_KEYS = new Set([
+  'fontSize',
+  'fontFamily',
+  'textColor',
+  'bold',
+  'italic',
+  'font',
+  'typeface',
+  'size',
+  'fontColor',
+]);
+const TABLE_CELL_KEYS = new Set([
+  'text',
+  'fill',
+  'paragraph.align',
+  ...TABLE_CELL_STROKE_ALIASES,
+  ...TABLE_CELL_PADDING_KEYS,
+  ...TABLE_CELL_FONT_KEYS,
+]);
+
+const setTableCellPadding = (cell: Element, properties: Record<string, unknown>): string[] => {
+  const applied: string[] = [];
+  const present = TABLE_CELL_PADDING_KEYS.filter((key) => key in properties);
+  if (present.length === 0) return applied;
+  const tcPr = ensureTcPr(cell);
+  for (const key of present) {
+    const value = properties[key];
+    if (typeof value !== 'number' || !(value >= 0) || !Number.isFinite(value))
+      throw new Error(`${key} must be a non-negative number (pt)`);
+    tcPr.setAttribute(TABLE_CELL_PADDING_ATTR[key], String(Math.round(value * EMU_PER_PT)));
+    applied.push(key);
+  }
+  return applied;
+};
 
 export function applyTableProperties(
   node: Element,
@@ -559,10 +605,25 @@ export function applyTableCellProperties(
       setTableCellFill(node, properties['fill']);
       applied.push('fill');
     }
-    if ('paragraph.align' in properties) {
-      const styled = applyShapeProperties(node, {
-        'paragraph.align': properties['paragraph.align'],
-      });
+
+    const strokeKeys = TABLE_CELL_STROKE_ALIASES.filter((key) => key in properties);
+    if (strokeKeys.length > 1)
+      throw new Error(`Use only one stroke alias; found: ${strokeKeys.join(', ')}`);
+    if (strokeKeys[0]) {
+      setTableCellBorders(node, properties[strokeKeys[0]]);
+      applied.push(strokeKeys[0]);
+    }
+
+    applied.push(...setTableCellPadding(node, properties));
+
+    const styleProps: Record<string, unknown> = {};
+    if ('paragraph.align' in properties)
+      styleProps['paragraph.align'] = properties['paragraph.align'];
+    for (const key of TABLE_CELL_FONT_KEYS) {
+      if (key in properties) styleProps[key] = properties[key];
+    }
+    if (Object.keys(styleProps).length > 0) {
+      const styled = applyShapeProperties(node, styleProps);
       if (!styled.ok) return styled;
       applied.push(...styled.value.applied);
     }

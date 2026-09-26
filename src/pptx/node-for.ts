@@ -1,7 +1,7 @@
 import type { Document, Element } from '@xmldom/xmldom';
 import { cNvPrIdOf } from './addressing.js';
 import type { IndexedElement } from './types.js';
-import { attr, cNvPr, descendants, notesBodyShape, root } from './xml.js';
+import { attr, children, cNvPr, descendants, first, notesBodyShape, root } from './xml.js';
 
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 
@@ -13,7 +13,13 @@ export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =
       attr(cNvPr(node), 'id') === id,
   );
 
-/** Locate the XML node for an indexed element. Table cells use tableId/row/column. */
+const directChildren = (node: Element, localName: string): Element[] =>
+  children(node).filter((c) => c.localName === localName);
+
+/**
+ * Locate the XML node for an indexed element. Table cells use tableId/row/column
+ * with the same direct-child tr/tc walk as the indexer (not recursive descendants).
+ */
 export const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
   if (item.kind === 'notes') return notesBodyShape(doc) ?? undefined;
   if (['slide', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
@@ -26,8 +32,10 @@ export const nodeFor = (doc: Document, item: IndexedElement): Element | undefine
     if (!tableTail) return undefined;
     const table = shapeByCNvPrId(doc, tableTail);
     if (!table) return undefined;
-    const row = descendants(table, 'tr')[Number(item.location?.['row'])];
-    return row ? descendants(row, 'tc')[Number(item.location?.['column'])] : undefined;
+    const tbl = first(table, 'tbl');
+    if (!tbl) return undefined;
+    const row = directChildren(tbl, 'tr')[Number(item.location?.['row'])];
+    return row ? directChildren(row, 'tc')[Number(item.location?.['column'])] : undefined;
   }
   const id = cNvPrIdOf(item);
   return id ? shapeByCNvPrId(doc, id) : undefined;
