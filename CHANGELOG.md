@@ -1,5 +1,11 @@
 # @deckflow/deckuse
 
+## 1.4.0
+
+### Minor Changes
+
+- Harden PPTX/DOCX agent edit reliability: reclaim stale write locks, restore notes/undo/table fidelity, and fix query dedupe, cell style round-trips, and silent mismatches in query/cell reads/table height.
+
 ## 1.3.0
 
 ### Minor Changes
