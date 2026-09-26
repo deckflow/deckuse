@@ -1,10 +1,11 @@
-import { err, ok, type Result } from '../core/index.js';
+import { err, ok, type Diagnostic, type Result } from '../core/index.js';
 import type { Element } from '@xmldom/xmldom';
 import {
   applyShapeProperties,
   shapePropertyKeys,
   type ShapePropertyContext,
 } from './properties.js';
+import { readSlideSize } from './slide-size.js';
 import {
   estimateTableHeightEmu,
   estimateTableRowHeightEmu,
@@ -106,9 +107,93 @@ const makeCell = (doc: NonNullable<Element['ownerDocument']>, text = ''): Elemen
   r.appendChild(t);
   p.appendChild(r);
   txBody.appendChild(p);
-  tc.appendChild(txBody);
   tc.appendChild(doc.createElementNS(NS.a, 'a:tcPr'));
   return tc;
+};
+
+/** Clone a cell's formatting (tcPr, bodyPr, lstStyle, pPr, rPr) and set plain text. */
+const cloneCellWithText = (template: Element, text: string): Element => {
+  const doc = template.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  const tc = template.cloneNode(true) as Element;
+  // Drop a16 / extLst unique ids that must not be duplicated on the new cell.
+  for (const extLst of [...descendants(tc, 'extLst')]) extLst.parentNode?.removeChild(extLst);
+  setNodeText(tc, text);
+  return tc;
+};
+
+const growFrame = (graphicFrame: Element, deltaCx: number, deltaCy: number): void => {
+  const xfrm = first(graphicFrame, 'xfrm');
+  const ext = xfrm ? first(xfrm, 'ext') : undefined;
+  if (!ext) return;
+  if (deltaCx !== 0) {
+    const cx = Number(attr(ext, 'cx') ?? 0);
+    ext.setAttribute('cx', String(Math.max(1, Math.round(cx + deltaCx))));
+  }
+  if (deltaCy !== 0) {
+    const cy = Number(attr(ext, 'cy') ?? 0);
+    ext.setAttribute('cy', String(Math.max(1, Math.round(cy + deltaCy))));
+  }
+};
+
+type FrameBox = { x: number; y: number; cx: number; cy: number };
+
+const frameBoxOf = (node: Element): FrameBox | undefined => {
+  const xfrm = first(node, 'xfrm');
+  const off = xfrm ? first(xfrm, 'off') : undefined;
+  const ext = xfrm ? first(xfrm, 'ext') : undefined;
+  if (!off || !ext) return undefined;
+  const x = Number(attr(off, 'x') ?? 0);
+  const y = Number(attr(off, 'y') ?? 0);
+  const cx = Number(attr(ext, 'cx') ?? 0);
+  const cy = Number(attr(ext, 'cy') ?? 0);
+  if (![x, y, cx, cy].every(Number.isFinite)) return undefined;
+  return { x, y, cx, cy };
+};
+
+const boxesIntersect = (a: FrameBox, b: FrameBox): boolean =>
+  a.x < b.x + b.cx && a.x + a.cx > b.x && a.y < b.y + b.cy && a.y + a.cy > b.y;
+
+const SHAPE_FRAME_LOCAL = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
+
+/** Warn when a grown table overlaps peers or extends past the slide bottom. */
+export const tableLayoutWarnings = (
+  graphicFrame: Element,
+  context?: ShapePropertyContext,
+): Diagnostic[] => {
+  const box = frameBoxOf(graphicFrame);
+  if (!box) return [];
+  const diagnostics: Diagnostic[] = [];
+  if (context?.archive) {
+    const { heightEmu } = readSlideSize(context.archive);
+    if (box.y + box.cy > heightEmu) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'TABLE_EXTENDS_PAST_SLIDE',
+        message: `Table bottom (${String(box.y + box.cy)} EMU) extends past slide height (${String(heightEmu)} EMU)`,
+        details: { bottomEmu: box.y + box.cy, slideHeightEmu: heightEmu },
+      });
+    }
+  }
+  const doc = graphicFrame.ownerDocument;
+  if (!doc) return diagnostics;
+  for (const peer of descendants(doc)) {
+    if (peer === graphicFrame) continue;
+    if (!peer.localName || !SHAPE_FRAME_LOCAL.has(peer.localName)) continue;
+    const other = frameBoxOf(peer);
+    if (!other || other.cx <= 0 || other.cy <= 0) continue;
+    if (boxesIntersect(box, other)) {
+      const name = attr(first(peer, 'cNvPr'), 'name') ?? peer.localName;
+      diagnostics.push({
+        severity: 'warning',
+        code: 'TABLE_OVERLAPS_SHAPE',
+        message: `Table frame overlaps shape "${name}" after structural edit; consider setTableLayout to reflow`,
+        details: { peer: name },
+      });
+      break;
+    }
+  }
+  return diagnostics;
 };
 
 /** True when any gridCol already carries a16:colId (PowerPoint modern table). */
@@ -178,15 +263,24 @@ export function insertTableRow(node: Element, spec: unknown): void {
       ? directChildren(rows[0], 'tc').length
       : 1;
   const texts = cellsFromSpec(spec) ?? Array.from({ length: colCount }, () => '');
+  // Inherit from the row at the insert point, or the last row when appending.
+  const templateRow = rows[index] ?? rows[rows.length - 1];
+  const templateCells = templateRow ? directChildren(templateRow, 'tc') : [];
+  const rowH = templateRow ? (attr(templateRow, 'h') ?? DEFAULT_ROW_H) : DEFAULT_ROW_H;
   const tr = doc.createElementNS(NS.a, 'a:tr');
-  tr.setAttribute('h', DEFAULT_ROW_H);
-  for (let i = 0; i < colCount; i++) tr.appendChild(makeCell(doc, texts[i] ?? ''));
+  tr.setAttribute('h', rowH);
+  for (let i = 0; i < colCount; i++) {
+    const text = texts[i] ?? '';
+    const template = templateCells[i];
+    tr.appendChild(template ? cloneCellWithText(template, text) : makeCell(doc, text));
+  }
   // Keep a16:rowId complete when the source table already uses them — partial
   // coverage makes PowerPoint prompt to repair the package.
   if (tableUsesRowIds(tbl)) attachA16Id(tr, 'rowId', nextTableUniqueId(tbl, 'rowId'));
   const anchor = rows[index];
   if (anchor) tbl.insertBefore(tr, anchor);
   else tbl.appendChild(tr);
+  growFrame(node, 0, Number(rowH) || Number(DEFAULT_ROW_H));
 }
 
 export function deleteTableRow(node: Element, spec: unknown): void {
@@ -212,8 +306,10 @@ export function insertTableColumn(node: Element, spec: unknown): void {
     else tbl.appendChild(grid);
   }
   const cols = directChildren(grid, 'gridCol');
+  const templateCol = cols[index] ?? cols[cols.length - 1];
+  const colW = templateCol ? (attr(templateCol, 'w') ?? DEFAULT_COL_W) : DEFAULT_COL_W;
   const gridCol = doc.createElementNS(NS.a, 'a:gridCol');
-  gridCol.setAttribute('w', cols[0] ? (attr(cols[0], 'w') ?? DEFAULT_COL_W) : DEFAULT_COL_W);
+  gridCol.setAttribute('w', colW);
   if (tableUsesColIds(tbl)) attachA16Id(gridCol, 'colId', nextTableUniqueId(tbl, 'colId'));
   const colAnchor = cols[index];
   if (colAnchor) grid.insertBefore(gridCol, colAnchor);
@@ -221,11 +317,13 @@ export function insertTableColumn(node: Element, spec: unknown): void {
 
   for (const row of directChildren(tbl, 'tr')) {
     const cells = directChildren(row, 'tc');
-    const cell = makeCell(doc, '');
+    const template = cells[index] ?? cells[cells.length - 1];
+    const cell = template ? cloneCellWithText(template, '') : makeCell(doc, '');
     const cellAnchor = cells[index];
     if (cellAnchor) row.insertBefore(cell, cellAnchor);
     else row.appendChild(cell);
   }
+  growFrame(node, Number(colW) || Number(DEFAULT_COL_W), 0);
 }
 
 export function deleteTableColumn(node: Element, spec: unknown): void {
@@ -352,13 +450,13 @@ const TABLE_STRUCTURAL_KEYS = new Set([
   'name',
 ]);
 
-const TABLE_CELL_KEYS = new Set(['text', 'fill']);
+const TABLE_CELL_KEYS = new Set(['text', 'fill', 'paragraph.align']);
 
 export function applyTableProperties(
   node: Element,
   properties: Record<string, unknown>,
   context?: ShapePropertyContext,
-): Result<{ applied: string[] }> {
+): Result<{ applied: string[]; diagnostics: Diagnostic[] }> {
   const structural: Record<string, unknown> = {};
   const visual: Record<string, unknown> = {};
   const unexpected: string[] = [];
@@ -371,10 +469,13 @@ export function applyTableProperties(
     return err('INVALID_COMMAND', `Unsupported table setProperties keys: ${unexpected.join(', ')}`);
 
   const applied: string[] = [];
+  const diagnostics: Diagnostic[] = [];
+  let structureGrew = false;
   try {
     if ('insertRow' in structural) {
       insertTableRow(node, structural['insertRow']);
       applied.push('insertRow');
+      structureGrew = true;
     }
     if ('deleteRow' in structural) {
       deleteTableRow(node, structural['deleteRow']);
@@ -383,6 +484,7 @@ export function applyTableProperties(
     if ('insertColumn' in structural) {
       insertTableColumn(node, structural['insertColumn']);
       applied.push('insertColumn');
+      structureGrew = true;
     }
     if ('deleteColumn' in structural) {
       deleteTableColumn(node, structural['deleteColumn']);
@@ -425,13 +527,14 @@ export function applyTableProperties(
       if (!styled.ok) return styled;
       applied.push(...styled.value.applied);
     }
+    if (structureGrew) diagnostics.push(...tableLayoutWarnings(node, context));
   } catch (cause) {
     return err(
       'INVALID_COMMAND',
       cause instanceof Error ? cause.message : 'Invalid table properties',
     );
   }
-  return ok({ applied });
+  return ok({ applied, diagnostics });
 }
 
 export function applyTableCellProperties(
@@ -453,6 +556,13 @@ export function applyTableCellProperties(
     if ('fill' in properties) {
       setTableCellFill(node, properties['fill']);
       applied.push('fill');
+    }
+    if ('paragraph.align' in properties) {
+      const styled = applyShapeProperties(node, {
+        'paragraph.align': properties['paragraph.align'],
+      });
+      if (!styled.ok) return styled;
+      applied.push(...styled.value.applied);
     }
   } catch (cause) {
     return err(

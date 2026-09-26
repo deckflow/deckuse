@@ -1,7 +1,7 @@
 import fs from 'node:fs';
-import { access, unlink, writeFile } from 'node:fs/promises';
+import { access, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { add, checkout, commit, currentBranch, init, log } from 'isomorphic-git';
+import { add, checkout, commit, currentBranch, init, log, statusMatrix } from 'isomorphic-git';
 import { gitignorePath } from './paths.js';
 
 const WORKSPACE_GITIGNORE = `package.*
@@ -81,6 +81,40 @@ export const resetGit = async (workspace: string, steps: number): Promise<void> 
   }
 
   await checkout({ ...opts, ref: branch, force: true });
+
+  // isomorphic-git checkout does not remove untracked files created by later
+  // commits (e.g. duplicated slide/notes parts). Drop them so undo does not
+  // re-pack orphans into package.pptx.
+  const matrix = await statusMatrix(opts);
+  for (const [filepath, head, workdir, stage] of matrix) {
+    // Untracked: absent in HEAD and STAGE, present in workdir.
+    if (head === 0 && workdir === 2 && stage === 0) {
+      await rm(join(dir, filepath), { force: true });
+    }
+  }
+  await removeEmptyDirs(join(dir, 'source'));
+};
+
+const removeEmptyDirs = async (root: string): Promise<void> => {
+  try {
+    await access(root);
+  } catch {
+    return;
+  }
+  const walk = async (dir: string): Promise<boolean> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    let empty = true;
+    for (const entry of entries) {
+      const child = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const childEmpty = await walk(child);
+        if (childEmpty) await rm(child, { recursive: true, force: true });
+        else empty = false;
+      } else empty = false;
+    }
+    return empty;
+  };
+  await walk(root);
 };
 
 export const operationCommitMessage = (operation: unknown): string => {

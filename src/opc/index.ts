@@ -299,6 +299,21 @@ export class OpcArchive {
   readonly relationships = new Map<string, OpcRelationship[]>();
   readonly contentTypes: ContentTypes = { defaults: new Map(), overrides: new Map() };
   readonly originalDigests = new Map<string, string>();
+  private readonly dirtyParts = new Set<string>();
+
+  /** Clear the set of parts mutated since the last markClean (used for changedParts). */
+  markClean(): void {
+    this.dirtyParts.clear();
+  }
+
+  /** Part names touched by setPart / deletePart / setRelationships since markClean. */
+  getDirtyParts(): string[] {
+    return [...this.dirtyParts].sort();
+  }
+
+  private touch(name: string): void {
+    this.dirtyParts.add(normalizePartName(name));
+  }
 
   static async openDirectory(
     path: string,
@@ -441,6 +456,7 @@ export class OpcArchive {
   }
   setPart(name: string, data: Uint8Array, mediaType = 'application/octet-stream'): void {
     const normalized = normalizePartName(name);
+    const beforeOverride = this.contentTypes.overrides.get(normalized);
     this.parts.set(normalized, { name: normalized, mediaType, data });
     // Prefer Default Extension over per-part Override when they already match
     // (e.g. .rels). Promoting Defaults into Overrides makes some Office builds
@@ -454,13 +470,23 @@ export class OpcArchive {
     } else {
       this.contentTypes.overrides.set(normalized, mediaType);
     }
+    this.touch(normalized);
+    const afterOverride = this.contentTypes.overrides.get(normalized);
+    if (beforeOverride !== afterOverride) this.touch('/[Content_Types].xml');
   }
   deletePart(name: string): boolean {
     const normalized = normalizePartName(name);
+    const hadOverride = this.contentTypes.overrides.has(normalized);
+    const relsName = relationshipPartName(normalized);
+    const hadRels = this.parts.has(relsName);
     this.contentTypes.overrides.delete(normalized);
     this.relationships.delete(normalized);
-    this.parts.delete(relationshipPartName(normalized));
-    return this.parts.delete(normalized);
+    this.parts.delete(relsName);
+    const removed = this.parts.delete(normalized);
+    if (removed) this.touch(normalized);
+    if (hadRels) this.touch(relsName);
+    if (hadOverride) this.touch('/[Content_Types].xml');
+    return removed;
   }
   originalDigest(name: string): string | undefined {
     return this.originalDigests.get(normalizePartName(name));

@@ -37,7 +37,7 @@ import {
   undoWrites,
   withWriteLock,
 } from './workspace.js';
-import { NS, descendants } from './xml.js';
+import { NS, REL, descendants } from './xml.js';
 
 const VERSION = '0.5.0';
 const WRITE_TYPES = new Set([
@@ -264,6 +264,36 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
       });
     }
   }
+
+  // notesSlide ↔ slide relationships must point at each other.
+  for (const [source, rels] of archive.relationships) {
+    if (!source.startsWith('/ppt/slides/slide') || source.includes('/_rels/')) continue;
+    for (const rel of rels) {
+      if (rel.type !== REL.notes || !rel.resolvedTarget) continue;
+      const notesRels = archive.getRelationships(rel.resolvedTarget);
+      const back = notesRels.find((r) => r.type === REL.slide);
+      if (!back?.resolvedTarget) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'NOTES_SLIDE_MISMATCH',
+          message: `Notes part ${rel.resolvedTarget} has no slide relationship back to ${source}`,
+          details: { slide: source, notes: rel.resolvedTarget },
+        });
+      } else if (back.resolvedTarget !== source) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'NOTES_SLIDE_MISMATCH',
+          message: `Notes part ${rel.resolvedTarget} points at ${back.resolvedTarget} instead of owning slide ${source}`,
+          details: {
+            slide: source,
+            notes: rel.resolvedTarget,
+            notesPointsTo: back.resolvedTarget,
+          },
+        });
+      }
+    }
+  }
+
   return diagnostics;
 };
 
@@ -829,7 +859,7 @@ export const pptxAdapter: FormatAdapter = {
           const diagnostics: Diagnostic[] = [];
           const slidePages: number[] = [];
           const changedTargets: string[] = [];
-          const changedParts: string[] = [];
+          working.markClean();
           for (const nested of nestedCommands) {
             const result = await mutate(nested, working, currentIndex);
             diagnostics.push(...result.diagnostics);
@@ -837,7 +867,6 @@ export const pptxAdapter: FormatAdapter = {
             results.push(result.value);
             slidePages.push(...slidesFromOutcome(result.value));
             if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
-            if (result.value.changedParts) changedParts.push(...result.value.changedParts);
             if (STRUCTURAL_TYPES.has(nested.type)) {
               currentIndex = buildIndex(
                 working,
@@ -848,6 +877,7 @@ export const pptxAdapter: FormatAdapter = {
           }
           // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
           syncAppSlideCounts(working);
+          const changedParts = working.getDirtyParts();
           const validation = validateArchive(working);
           if (validation.length)
             return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
@@ -858,7 +888,7 @@ export const pptxAdapter: FormatAdapter = {
                 revision: currentManifest.revision,
                 dryRun: true,
                 changedTargets: [...new Set(changedTargets)],
-                changedParts: [...new Set(changedParts)],
+                changedParts,
                 affectedSlides: mergeSlides(slidePages),
               },
               diagnostics,
@@ -878,7 +908,7 @@ export const pptxAdapter: FormatAdapter = {
               results,
               revision: saved.revision,
               changedTargets: [...new Set(changedTargets)],
-              changedParts: [...new Set(changedParts)],
+              changedParts,
               affectedSlides: mergeSlides(slidePages),
             },
             diagnostics,
@@ -899,10 +929,12 @@ export const pptxAdapter: FormatAdapter = {
           return runBatch(command.commands, command.dryRun, command);
         }
 
+        working.markClean();
         const result = await mutate(command as AtomicCommand, working, currentIndex);
         if (!result.ok) return result;
         // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
         syncAppSlideCounts(working);
+        const changedParts = working.getDirtyParts();
         const validation = validateArchive(working);
         if (validation.length)
           return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
@@ -912,6 +944,7 @@ export const pptxAdapter: FormatAdapter = {
               ...result.value,
               revision: currentManifest.revision,
               dryRun: true,
+              changedParts,
               affectedSlides: slidesFromOutcome(result.value),
             },
             result.diagnostics,
@@ -930,6 +963,7 @@ export const pptxAdapter: FormatAdapter = {
           {
             ...result.value,
             revision: saved.revision,
+            changedParts,
             affectedSlides: slidesFromOutcome(result.value),
           },
           result.diagnostics,

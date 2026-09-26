@@ -124,13 +124,24 @@ const cloneMutableTargets = (
     if (childRels.length)
       archive.setRelationships(
         fresh,
-        childRels.map((child) => ({
-          ...child,
-          target:
-            child.external || !child.resolvedTarget
-              ? child.target
-              : relativeTarget(fresh, child.resolvedTarget),
-        })),
+        childRels.map((child) => {
+          // Notes slides point back at their owning slide — retarget to the clone.
+          if (rel.type === REL.notes && child.type === REL.slide) {
+            return {
+              ...child,
+              target: relativeTarget(fresh, newPart),
+              resolvedTarget: newPart,
+            };
+          }
+          return {
+            ...child,
+            target:
+              child.external || !child.resolvedTarget
+                ? child.target
+                : relativeTarget(fresh, child.resolvedTarget),
+            ...(child.resolvedTarget ? { resolvedTarget: child.resolvedTarget } : {}),
+          };
+        }),
       );
     return { ...rel, target: relativeTarget(newPart, fresh), resolvedTarget: fresh };
   });

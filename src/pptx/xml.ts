@@ -45,6 +45,37 @@ export const textOf = (node: Node): string =>
   descendants(node, 't')
     .map((item) => item.textContent ?? '')
     .join('');
+
+/** Placeholder types that are never speaker-note body content. */
+const NOTES_NON_BODY_PH = new Set(['hdr', 'ftr', 'dt', 'sldNum', 'sldImg']);
+
+/**
+ * Locate the speaker-notes body shape under a notes slide root.
+ * Prefers `p:ph type="body"`; otherwise the first shape that is not a
+ * header/footer/date/slide-number placeholder. Never returns hdr/sldNum/etc.
+ */
+export const notesBodyShape = (notesRoot: Node): Element | undefined => {
+  const shapes = descendants(notesRoot, 'sp');
+  let fallback: Element | undefined;
+  for (const sp of shapes) {
+    const ph = first(sp, 'ph');
+    if (!ph) {
+      fallback ??= sp;
+      continue;
+    }
+    const type = attr(ph, 'type') ?? 'body';
+    if (type === 'body') return sp;
+    if (!NOTES_NON_BODY_PH.has(type)) fallback ??= sp;
+  }
+  return fallback;
+};
+
+/** Speaker-note body text only (excludes header / slide number placeholders). */
+export const notesBodyText = (notesRoot: Node): string => {
+  const body = notesBodyShape(notesRoot);
+  return body ? textOf(body) : '';
+};
+
 const textContainer = (text: Element, boundary: Node): Element | undefined => {
   let current: Node | null = text.parentNode;
   while (current && current !== boundary) {
@@ -73,7 +104,7 @@ const cloneRPr = (doc: Document, source: Element | undefined): Element | undefin
   return source.cloneNode(true) as Element;
 };
 
-/** Replace text under a node. Newlines become separate `a:p` paragraphs; first-run `rPr` is preserved. */
+/** Replace text under a node. Newlines become separate `a:p` paragraphs; first-run `rPr` and paragraph `pPr` are preserved. */
 export const setNodeText = (node: Node, text: string): void => {
   const doc = node.ownerDocument;
   if (!doc) throw new Error('Node has no document');
@@ -91,10 +122,16 @@ export const setNodeText = (node: Node, text: string): void => {
 
   const container = paragraphContainer(node);
   if (container) {
+    const oldParagraphs = children(container).filter((c) => c.localName === 'p');
+    const pPrTemplates = oldParagraphs.map((p) => children(p).find((c) => c.localName === 'pPr'));
     for (const child of [...children(container)])
       if (child.localName === 'p') container.removeChild(child);
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
       const paragraph = doc.createElementNS(NS.a, 'a:p');
+      const pPrSource =
+        pPrTemplates[i] ?? pPrTemplates[pPrTemplates.length - 1] ?? pPrTemplates[0];
+      if (pPrSource) paragraph.appendChild(pPrSource.cloneNode(true));
       const run = doc.createElementNS(NS.a, 'a:r');
       if (rPrTemplate) run.appendChild(rPrTemplate.cloneNode(true));
       const value = doc.createElementNS(NS.a, 'a:t');

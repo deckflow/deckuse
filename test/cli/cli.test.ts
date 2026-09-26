@@ -396,6 +396,85 @@ describe('deckuse CLI', () => {
     expect((await run(['export', exportPath, '--workspace', workspace, '--json'])).code).toBe(0);
     await expect(stat(exportPath)).resolves.toMatchObject({ size: expect.any(Number) });
   });
+  it('query --workspace and positional workspace use the same selector', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-query-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    await fixture(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+
+    const viaFlag = await run(['query', '--workspace', workspace, 'text=Hello', '--json']);
+    const viaPos = await run(['query', workspace, 'text=Hello', '--json']);
+    expect(viaFlag.code, viaFlag.stderr || viaFlag.stdout).toBe(0);
+    expect(viaPos.code, viaPos.stderr || viaPos.stdout).toBe(0);
+    const flagData = JSON.parse(viaFlag.stdout) as { data: unknown[] };
+    const posData = JSON.parse(viaPos.stdout) as { data: unknown[] };
+    expect(Array.isArray(flagData.data)).toBe(true);
+    expect(flagData.data.length).toBe(posData.data.length);
+    expect(flagData.data.length).toBeGreaterThan(0);
+    expect(flagData.data.length).toBeLessThan(20);
+  });
+
+  it('apply accepts a top-level setTableLayout command', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-stl-')),
+      source = join(root, 'source.pptx'),
+      workspace = join(root, 'workspace');
+    // Minimal table slide for setTableLayout.
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/[Content_Types].xml',
+      encoder.encode(
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>',
+      ),
+      'application/xml',
+    );
+    archive.setPart(
+      '/ppt/presentation.xml',
+      encoder.encode(
+        '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldSz cx="12192000" cy="6858000"/><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>',
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml',
+    );
+    archive.setRelationships('/ppt/presentation.xml', [
+      {
+        id: 'rId1',
+        type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+        target: 'slides/slide1.xml',
+        external: false,
+      },
+    ]);
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      encoder.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="2000000" cy="800000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="2000000"/></a:tblGrid><a:tr h="400000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>A</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr><a:tr h="400000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>B</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      ),
+      'application/vnd.openxmlformats-officedocument.presentationml.slide+xml',
+    );
+    archive.setRelationships('/ppt/slides/slide1.xml', []);
+    archive.setPart(
+      '/docProps/app.xml',
+      encoder.encode(
+        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides></Properties>',
+      ),
+      'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+    );
+    await archive.writeFile(source);
+    expect((await run(['init', source, workspace, '--json'])).code).toBe(0);
+
+    const apply = await run(
+      ['apply', workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setTableLayout',
+        target: 'slide:1/shape:3',
+        redistribute: 'equal',
+        height: 900000,
+      }),
+    );
+    expect(apply.code, apply.stderr || apply.stdout).toBe(0);
+    const envelope = JSON.parse(apply.stdout) as { ok: boolean };
+    expect(envelope.ok).toBe(true);
+  });
+
   it('supports replace-text with --source and --target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-replace-')),
       source = join(root, 'source.pptx'),

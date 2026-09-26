@@ -6,7 +6,18 @@ import { classifyChartPart } from './chart-classify.js';
 import { readSeriesColor } from './chart.js';
 import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
-import { NS, REL, attr, cNvPr, children, descendants, first, root, textOf } from './xml.js';
+import {
+  NS,
+  REL,
+  attr,
+  cNvPr,
+  children,
+  descendants,
+  first,
+  notesBodyText,
+  root,
+  textOf,
+} from './xml.js';
 
 const directChild = (node: Element, localName: string): Element | undefined =>
   children(node).find((child) => child.localName === localName);
@@ -218,6 +229,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
     const notes = archive.getRelationships(partUri).find((r) => r.type === REL.notes);
     if (notes?.resolvedTarget) {
       const nd = archive.readXml(notes.resolvedTarget);
+      const bodyText = notesBodyText(nd);
       elements.push({
         ref: {
           documentId,
@@ -228,7 +240,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
         kind: 'notes',
         partUri: notes.resolvedTarget,
         slideId,
-        text: textOf(nd),
+        ...(bodyText ? { text: bodyText } : {}),
         location: { slideId, partUri: notes.resolvedTarget, region: 'speakerNotes' },
       });
     }

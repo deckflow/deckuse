@@ -272,6 +272,7 @@ const APPLY_WRITE_TYPES = new Set([
   'setProperties',
   'set',
   'setSlideLayout',
+  'setTableLayout',
   'xfrmSet',
   'zMove',
   'add',
@@ -1159,13 +1160,15 @@ const main = async (): Promise<void> => {
           ok = false;
         }
       } else if (action === 'query') {
-        // Back-compat shim
+        // Back-compat shim. With `--workspace`, the first positional is the
+        // selector; with a positional workspace path, the selector is clean[2].
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+        const selector = (workspaceOpt ? positionalArg(clean) : clean[2]) ?? '*';
         ok = await execute('deckuse query', {
           version: PROTOCOL_VERSION,
           type: 'query',
           workspaceId: workspace,
-          selector: clean[2] ?? '*',
+          selector,
           limit: Number(optionFrom(clean, '--limit') ?? 100),
         });
       } else {

@@ -58,6 +58,14 @@ async function fixture(path: string) {
     ),
     'application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml',
   );
+  a.setRelationships('/ppt/notesSlides/notesSlide1.xml', [
+    {
+      id: 'rId1',
+      type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+      target: '../slides/slide1.xml',
+      external: false,
+    },
+  ]);
   a.setPart(
     '/ppt/charts/chart1.xml',
     e.encode(

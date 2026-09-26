@@ -34,6 +34,7 @@ import {
   cNvPr,
   descendants,
   first,
+  notesBodyShape,
   root,
   setNodeText,
   setNodeTextBlocks,
@@ -122,7 +123,8 @@ export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =
       attr(cNvPr(node), 'id') === id,
   );
 export const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
-  if (['slide', 'notes', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
+  if (item.kind === 'notes') return notesBodyShape(doc) ?? undefined;
+  if (['slide', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
   if (item.kind === 'tableCell') {
     const rawTableId = item.location?.['tableId'],
       tableId = typeof rawTableId === 'string' ? rawTableId : '';
@@ -1140,6 +1142,7 @@ export async function mutate(
       if (!applied.ok) return applied;
       if (applied.value.applied.length === 0)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
+      diagnostics.push(...applied.value.diagnostics);
     } else if (liveItem.kind === 'tableCell') {
       const applied = applyTableCellProperties(node, properties);
       if (!applied.ok) return applied;

@@ -4,7 +4,19 @@ import type { Document, Element } from '@xmldom/xmldom';
 import type { ResolvedTarget } from './addressing.js';
 import { cNvPrIdOf } from './addressing.js';
 import type { IndexedElement } from './types.js';
-import { NS, REL, attr, children, cNvPr, descendants, first, root, textOf } from './xml.js';
+import {
+  NS,
+  REL,
+  attr,
+  children,
+  cNvPr,
+  descendants,
+  first,
+  notesBodyShape,
+  notesBodyText,
+  root,
+  textOf,
+} from './xml.js';
 
 const EMU_PER_PT = 12700;
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
@@ -21,7 +33,8 @@ const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
   );
 
 const nodeForItem = (doc: Document, item: IndexedElement): Element | undefined => {
-  if (['slide', 'notes', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
+  if (item.kind === 'notes') return notesBodyShape(doc) ?? undefined;
+  if (['slide', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
   const id = cNvPrIdOf(item);
   return id ? shapeByCNvPrId(doc, id) : undefined;
 };
@@ -353,10 +366,45 @@ export function resolveProperties(
   const includeProvenance = options.provenance !== false;
   const warnings: string[] = [];
   const item = resolved.item;
+
+  // Synthetic notes (no part yet): return empty text without reading an empty path.
+  if (item.kind === 'notes' && (!item.partUri || !archive.getPart(item.partUri))) {
+    const properties: Record<string, PropertyValue> = {
+      'text.value': prop(null, null, {
+        scope: 'default',
+        target: resolved.target,
+        path: 'text.value',
+      }),
+    };
+    return {
+      target: resolved.target,
+      uid: resolved.uid,
+      ...(item.name ? { name: item.name } : {}),
+      properties: filterProps(properties, options.props, mode, includeProvenance),
+      warnings,
+    };
+  }
+
   const doc = archive.readXml(item.partUri);
   const node = nodeForItem(doc, item);
 
   if (!node) {
+    if (item.kind === 'notes') {
+      const properties: Record<string, PropertyValue> = {
+        'text.value': prop(null, null, {
+          scope: 'default',
+          target: resolved.target,
+          path: 'text.value',
+        }),
+      };
+      return {
+        target: resolved.target,
+        uid: resolved.uid,
+        ...(item.name ? { name: item.name } : {}),
+        properties: filterProps(properties, options.props, mode, includeProvenance),
+        warnings,
+      };
+    }
     warnings.push('Element XML node was not found; returning empty properties');
     return {
       target: resolved.target,
@@ -375,6 +423,24 @@ export function resolveProperties(
   ) {
     const properties: Record<string, PropertyValue> = {
       name: prop(item.name ?? null, item.name ?? null, { scope: 'local', target: resolved.target }),
+    };
+    return {
+      target: resolved.target,
+      uid: resolved.uid,
+      ...(item.name ? { name: item.name } : {}),
+      properties: filterProps(properties, options.props, mode, includeProvenance),
+      warnings,
+    };
+  }
+
+  if (item.kind === 'notes') {
+    const text = notesBodyText(doc).replace(/\s+/g, ' ').trim();
+    const properties: Record<string, PropertyValue> = {
+      'text.value': prop(text || null, text || null, {
+        scope: 'local',
+        target: resolved.target,
+        path: 'text.value',
+      }),
     };
     return {
       target: resolved.target,

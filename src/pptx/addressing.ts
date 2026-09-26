@@ -15,7 +15,8 @@ export type TargetKind =
   | 'notes'
   | 'text'
   | 'paragraph'
-  | 'run';
+  | 'run'
+  | 'tableCell';
 
 export interface ParsedTarget {
   raw: string;
@@ -28,7 +29,9 @@ export interface ParsedTarget {
   master?: string;
   paragraph?: number;
   run?: number;
-  focus?: 'text' | 'paragraph' | 'run';
+  cellRow?: number;
+  cellCol?: number;
+  focus?: 'text' | 'paragraph' | 'run' | 'cell';
 }
 
 export interface ResolvedTarget {
@@ -178,6 +181,25 @@ export function parseTargetPath(raw: string): Result<ParsedTarget> {
       diagnostics: [],
     };
   }
+  if (third.startsWith('cell:')) {
+    const rest = third.slice('cell:'.length);
+    const [rowRaw, colRaw] = rest.split(':');
+    const row = Number(rowRaw);
+    const col = Number(colRaw);
+    if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0)
+      return err('INVALID_COMMAND', `Invalid cell address: ${trimmed}`, [], { target: trimmed });
+    return {
+      ok: true,
+      value: {
+        ...parsed,
+        kind: 'tableCell',
+        cellRow: row,
+        cellCol: col,
+        focus: 'cell',
+      },
+      diagnostics: [],
+    };
+  }
   return err('INVALID_COMMAND', `Unrecognized target path: ${trimmed}`, [], { target: trimmed });
 }
 
@@ -229,6 +251,16 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
         ? pages.get(item.location['slidePart'])
         : undefined);
     return page ? `slide:${page}/notes` : (item.ref.elementId ?? 'notes');
+  }
+  if (item.kind === 'tableCell') {
+    const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
+    const tableId = typeof item.location?.['tableId'] === 'string' ? item.location['tableId'] : '';
+    const afterSlide = tableId.includes(':') ? tableId.slice(tableId.indexOf(':') + 1) : tableId;
+    const shapeId = afterSlide.split('.').at(-1) ?? afterSlide;
+    const row = item.location?.['row'];
+    const col = item.location?.['column'];
+    if (page && shapeId && typeof row === 'number' && typeof col === 'number')
+      return `slide:${page}/shape:${shapeId}/cell:${row}:${col}`;
   }
   if (item.slideId || item.partUri) {
     const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
@@ -470,6 +502,39 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
       target: raw,
       hint: `Run deckuse list shapes --slide ${parsed.slide} --json.`,
     });
+  }
+
+  if (parsed.kind === 'tableCell' && parsed.cellRow !== undefined && parsed.cellCol !== undefined) {
+    if (item.kind !== 'table')
+      return err('TARGET_NOT_FOUND', `shape:${cNvPrIdOf(item) ?? '?'} is not a table`, [], {
+        target: raw,
+      });
+    const cell = index.elements.find(
+      (el) =>
+        el.kind === 'tableCell' &&
+        el.parentId === item.ref.elementId &&
+        el.location?.['row'] === parsed.cellRow &&
+        el.location?.['column'] === parsed.cellCol,
+    );
+    if (!cell)
+      return err(
+        'TARGET_NOT_FOUND',
+        `cell:${parsed.cellRow}:${parsed.cellCol} does not exist on slide:${parsed.slide}/shape:${cNvPrIdOf(item) ?? '?'}`,
+        [],
+        { target: raw },
+      );
+    const canonical = targetPathForItem(index, cell);
+    return {
+      ok: true,
+      value: {
+        target: canonical,
+        uid: uidForItem(cell),
+        item: cell,
+        slidePage: parsed.slide,
+        parsed,
+      },
+      diagnostics: [],
+    };
   }
 
   const id = cNvPrIdOf(item) ?? '?';

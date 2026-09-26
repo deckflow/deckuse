@@ -26,6 +26,8 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
 3. **Derived Index & Stable Addressing**:
    - `slide:1/shape:2`, `slide:1/shape:Title 1`, `slide:1/placeholder:title`
    - `slide:1/shape:2/run:0` for single-run `setProperties` (intra-paragraph styling)
+   - `slide:1/notes` is the **speaker-notes body** only (header / slide-number placeholders are ignored)
+   - `slide:1/shape:3/cell:0:0` addresses a table cell; cell `setProperties` accepts `paragraph.align`
    - **Same-batch forward refs**: after `addShape` with `"name": "HeaderTitle"`, later ops in the **same** `apply` may target `slide:N/shape:HeaderTitle`. Cross-apply dry-runs cannot see uncommitted shapes — that is expected.
 4. **Intuitive Unit System**:
    `px` (96 DPI), `pt`, `cm`, `mm`, `in`, `%` (of slide). Bare numbers = EMU. Example: `"x": "5%"`, `"y": "120px"`.
@@ -143,7 +145,7 @@ CLI: `deckuse set slide-layout --slide 1 --layout 2` or `--layout slide:3`.
 
 ### C. Financial table
 
-`height: "auto"` is a **heuristic** (wrap + padding); still `render` and watch `TABLE_HEIGHT_MAY_CLIP`. If the frame was resized with `xfrmSet` only, follow with `setTableLayout` (`height: "auto"` or `redistribute: "content"|"equal"`) — do not keep bumping `xfrm --height`.
+`height: "auto"` is a **heuristic** (wrap + padding); still `render` and watch `TABLE_HEIGHT_MAY_CLIP`. If the frame was resized with `xfrmSet` only, follow with `setTableLayout` (`height: "auto"` or `redistribute: "content"|"equal"`) — do not keep bumping `xfrm --height`. `setTableLayout` is a first-class `apply` / `runCommand` type (not batch-only).
 
 ```json
 {

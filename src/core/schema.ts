@@ -748,6 +748,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   setPropertiesCommandSchema,
   setCommandSchema,
   xfrmSetCommandSchema,
+  setTableLayoutCommandSchema,
   zMoveCommandSchema,
   alignElementsCommandSchema,
   addCommandSchema,

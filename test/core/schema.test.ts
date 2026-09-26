@@ -26,6 +26,19 @@ describe('command schema', () => {
       true,
     );
   });
+  it('parses setTableLayout at the top-level commandSchema', () => {
+    expect(
+      commandSchema.parse({
+        version: '2.0',
+        type: 'setTableLayout',
+        workspaceId: 'w',
+        transactionId: 'tx',
+        target: 'slide:1/shape:3',
+        height: 'auto',
+        redistribute: 'content',
+      }).type,
+    ).toBe('setTableLayout');
+  });
   it('parses replaceText, undo, and history', () => {
     expect(
       commandSchema.parse({
