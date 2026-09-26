@@ -9,7 +9,9 @@ import { readSlideSize } from './slide-size.js';
 import {
   estimateTableHeightEmu,
   estimateTableRowHeightEmu,
+  layoutTableFrame,
   measureTableLayout,
+  type TableFrameLayout,
 } from './table-measure.js';
 import { NS, attr, children, descendants, first, setNodeText } from './xml.js';
 
@@ -596,7 +598,12 @@ export function applyTableLayout(
     height?: 'auto' | number;
     redistribute?: 'equal' | 'content';
   },
-): Result<{ applied: string[]; totalHeightEmu: number; estimatedEmu?: number }> {
+): Result<{
+  applied: string[];
+  totalHeightEmu: number;
+  estimatedEmu?: number;
+  layout: TableFrameLayout;
+}> {
   if (graphicFrame.localName !== 'graphicFrame')
     return err('INVALID_COMMAND', 'setTableLayout target must be a table graphicFrame');
   const tbl = first(graphicFrame, 'tbl');
@@ -618,17 +625,19 @@ export function applyTableLayout(
   let totalHeightEmu: number;
   let estimatedEmu: number | undefined;
 
+  let layout: TableFrameLayout;
   if (redistribute === 'content' || options.height === 'auto') {
-    const layout = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
-    estimatedEmu = layout.totalHeightEmu;
+    const measured = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
+    layout = layoutTableFrame({
+      contentRowHeightsEmu: measured.rowHeightsEmu,
+      contentEmu: measured.totalHeightEmu,
+      ...(typeof options.height === 'number' ? { frameEmu: options.height } : {}),
+    });
+    estimatedEmu = layout.contentEmu;
+    totalHeightEmu = layout.frameEmu;
     for (let i = 0; i < rows.length; i++) {
       const h = layout.rowHeightsEmu[i] ?? estimateTableRowHeightEmu(11);
       rows[i]!.setAttribute('h', String(h));
-    }
-    if (typeof options.height === 'number') {
-      totalHeightEmu = options.height;
-    } else {
-      totalHeightEmu = layout.totalHeightEmu;
     }
     applied.push('redistribute:content');
   } else {
@@ -636,13 +645,24 @@ export function applyTableLayout(
       typeof options.height === 'number'
         ? options.height
         : Number(attr(ext, 'cy') ?? estimateTableHeightEmu(rows.length));
+    const measured = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
     const rowH = Math.max(1, Math.floor(totalHeightEmu / rows.length));
+    const rowHeightsEmu: number[] = [];
     let assigned = 0;
     for (let i = 0; i < rows.length; i++) {
       const h = i === rows.length - 1 ? Math.max(1, totalHeightEmu - assigned) : rowH;
       rows[i]!.setAttribute('h', String(h));
+      rowHeightsEmu.push(h);
       assigned += h;
     }
+    layout = {
+      mode: 'fixed',
+      status: totalHeightEmu < measured.totalHeightEmu ? 'overflow' : 'complete',
+      frameEmu: Math.round(totalHeightEmu),
+      contentEmu: measured.totalHeightEmu,
+      rowHeightsEmu,
+    };
+    estimatedEmu = measured.totalHeightEmu;
     applied.push('redistribute:equal');
   }
 
@@ -652,5 +672,6 @@ export function applyTableLayout(
     applied,
     totalHeightEmu,
     ...(estimatedEmu !== undefined ? { estimatedEmu } : {}),
+    layout,
   });
 }

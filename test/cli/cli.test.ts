@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, readFile, stat } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -407,12 +407,57 @@ describe('deckuse CLI', () => {
     const viaPos = await run(['query', workspace, 'text=Hello', '--json']);
     expect(viaFlag.code, viaFlag.stderr || viaFlag.stdout).toBe(0);
     expect(viaPos.code, viaPos.stderr || viaPos.stdout).toBe(0);
-    const flagData = JSON.parse(viaFlag.stdout) as { data: unknown[] };
-    const posData = JSON.parse(viaPos.stdout) as { data: unknown[] };
-    expect(Array.isArray(flagData.data)).toBe(true);
-    expect(flagData.data.length).toBe(posData.data.length);
-    expect(flagData.data.length).toBeGreaterThan(0);
-    expect(flagData.data.length).toBeLessThan(20);
+    const flagData = JSON.parse(viaFlag.stdout) as {
+      data: { items: unknown[]; total: number; truncated: boolean };
+    };
+    const posData = JSON.parse(viaPos.stdout) as {
+      data: { items: unknown[]; total: number; truncated: boolean };
+    };
+    expect(flagData.data.items.length).toBe(posData.data.items.length);
+    expect(flagData.data.total).toBe(posData.data.total);
+    expect(flagData.data.truncated).toBe(false);
+    expect(flagData.data.items.length).toBeGreaterThan(0);
+    expect(flagData.data.items.length).toBeLessThan(20);
+
+    const repeatedFlag = await run([
+      'query',
+      '--workspace',
+      workspace,
+      workspace,
+      'text=Hello',
+      '--json',
+    ]);
+    const repeatedPos = await run(['query', workspace, workspace, 'text=Hello', '--json']);
+    expect(repeatedFlag.code, repeatedFlag.stderr || repeatedFlag.stdout).toBe(0);
+    expect(repeatedPos.code, repeatedPos.stderr || repeatedPos.stdout).toBe(0);
+    const repeatedFlagData = JSON.parse(repeatedFlag.stdout) as {
+      data: { items: unknown[]; total: number };
+    };
+    const repeatedPosData = JSON.parse(repeatedPos.stdout) as {
+      data: { items: unknown[]; total: number };
+    };
+    expect(repeatedFlagData.data.total).toBe(flagData.data.total);
+    expect(repeatedPosData.data.items.length).toBe(flagData.data.items.length);
+
+    const other = join(root, 'other-workspace');
+    await mkdir(other);
+    const conflict = await run(['query', '--workspace', workspace, other, 'text=Hello', '--json']);
+    expect(conflict.code).not.toBe(0);
+    const conflictBody = JSON.parse(conflict.stdout) as {
+      ok: boolean;
+      error?: { code?: string };
+    };
+    expect(conflictBody.ok).toBe(false);
+    expect(conflictBody.error?.code).toBe('CONFLICTING_WORKSPACE');
+
+    const limited = await run(['query', '--workspace', workspace, '--limit', '1', '--json']);
+    expect(limited.code, limited.stderr || limited.stdout).toBe(0);
+    const limitedData = JSON.parse(limited.stdout) as {
+      data: { items: unknown[]; total: number; truncated: boolean };
+    };
+    expect(limitedData.data.items).toHaveLength(1);
+    expect(limitedData.data.total).toBeGreaterThan(1);
+    expect(limitedData.data.truncated).toBe(true);
   });
 
   it('apply accepts a top-level setTableLayout command', async () => {

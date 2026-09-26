@@ -6,6 +6,11 @@ import { OpcArchive } from '../../src/opc/index.js';
 import { pptxAdapter } from '../../src/pptx/index.js';
 const e = new TextEncoder();
 const CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
+const queryItems = <T>(value: unknown): T[] => {
+  const page = value as { items?: T[] };
+  if (!Array.isArray(page.items)) throw new Error('query result missing items');
+  return page.items;
+};
 async function fixture(path: string) {
   const a = new OpcArchive();
   a.setPart(
@@ -344,10 +349,10 @@ describe('pptx adapter', () => {
     );
     expect(pictures.ok).toBe(true);
     if (pictures.ok) {
-      const list = pictures.value as Array<{
+      const list = queryItems<{
         name?: string;
         payload?: { href?: string; mediaPart?: string; fileName?: string };
-      }>;
+      }>(pictures.value);
       expect(list).toHaveLength(1);
       expect(list[0]?.name).toBe('Pixel');
       expect(list[0]?.payload?.mediaPart).toMatch(/^\/ppt\/media\/image\d+\./);
@@ -368,7 +373,7 @@ describe('pptx adapter', () => {
       {},
     );
     expect(queried.ok).toBe(true);
-    if (queried.ok) expect(queried.value).toHaveLength(1);
+    if (queried.ok) expect(queryItems(queried.value)).toHaveLength(1);
     const archive = await OpcArchive.openFile(join(workspace, 'package.pptx'));
     expect([...archive.parts.keys()].some((name) => name.startsWith('/ppt/media/image'))).toBe(
       true,
@@ -396,7 +401,7 @@ describe('pptx adapter', () => {
     );
     expect(all.ok).toBe(true);
     if (!all.ok) return;
-    expect((all.value as unknown[]).length).toBeGreaterThan(3);
+    expect(queryItems(all.value).length).toBeGreaterThan(3);
     const withText = await pptxAdapter.execute(
       {
         version: '2.0',
@@ -409,7 +414,7 @@ describe('pptx adapter', () => {
     );
     expect(withText.ok).toBe(true);
     if (!withText.ok) return;
-    const textItems = withText.value as Array<{ text?: string }>;
+    const textItems = queryItems<{ text?: string }>(withText.value);
     expect(textItems.length).toBeGreaterThan(0);
     expect(textItems.every((item) => Boolean(item.text?.length))).toBe(true);
     const hello = await pptxAdapter.execute(
@@ -424,7 +429,7 @@ describe('pptx adapter', () => {
     );
     expect(hello.ok).toBe(true);
     if (!hello.ok) return;
-    expect(hello.value).toHaveLength(1);
+    expect(queryItems(hello.value)).toHaveLength(1);
     const rev = (
       (
         await pptxAdapter.execute(
@@ -661,13 +666,11 @@ describe('pptx adapter', () => {
     );
     expect(pictures.ok).toBe(true);
     if (!pictures.ok) return;
-    const picture = (
-      pictures.value as Array<{
-        ref: { documentId: string; elementId?: string };
-        location?: { cNvPrId?: string };
-        payload?: { mediaPart?: string };
-      }>
-    )[0];
+    const picture = queryItems<{
+      ref: { documentId: string; elementId?: string };
+      location?: { cNvPrId?: string };
+      payload?: { mediaPart?: string };
+    }>(pictures.value)[0];
     expect(picture?.payload?.mediaPart).toBeTruthy();
     const mediaPart = picture!.payload!.mediaPart!;
     const before = await OpcArchive.openFile(join(workspace, 'package.pptx'));
@@ -698,13 +701,11 @@ describe('pptx adapter', () => {
     );
     expect(afterReplace.ok).toBe(true);
     if (!afterReplace.ok) return;
-    const nextPicture = (
-      afterReplace.value as Array<{
-        ref: { documentId: string; elementId?: string };
-        location?: { cNvPrId?: string };
-        payload?: { mediaPart?: string };
-      }>
-    )[0];
+    const nextPicture = queryItems<{
+      ref: { documentId: string; elementId?: string };
+      location?: { cNvPrId?: string };
+      payload?: { mediaPart?: string };
+    }>(afterReplace.value)[0];
     expect(nextPicture?.ref.elementId).toBe(picture!.ref.elementId);
     expect(nextPicture?.location?.cNvPrId).toBe(picture!.location?.cNvPrId);
     expect(nextPicture?.payload?.mediaPart).toBe(mediaPart);
@@ -740,10 +741,10 @@ describe('pptx adapter', () => {
     );
     expect(both.ok).toBe(true);
     if (!both.ok) return;
-    const list = both.value as Array<{
+    const list = queryItems<{
       ref: { documentId: string; elementId?: string };
       payload?: { mediaPart?: string };
-    }>;
+    }>(both.value);
     expect(list).toHaveLength(2);
     expect(list.every((item) => item.payload?.mediaPart === mediaPart)).toBe(true);
     const firstRef = {

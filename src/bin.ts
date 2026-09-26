@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -243,8 +243,7 @@ const optionFrom = (list: string[], name: string): string | undefined => {
   return i >= 0 ? list[i + 1] : undefined;
 };
 
-/** First positional argument after the command, skipping `--flag value` pairs. */
-const positionalArg = (list: string[]): string | undefined => {
+const flagValueIndexes = (list: string[]): Set<number> => {
   const flagValues = new Set<number>();
   for (let index = 0; index < list.length; index += 1) {
     const token = list[index];
@@ -252,9 +251,44 @@ const positionalArg = (list: string[]): string | undefined => {
     const next = list[index + 1];
     if (next !== undefined && !next.startsWith('--')) flagValues.add(index + 1);
   }
+  return flagValues;
+};
+
+/** First positional argument after the command, skipping `--flag value` pairs. */
+const positionalArg = (list: string[]): string | undefined => {
+  const flagValues = flagValueIndexes(list);
   return list.find(
     (token, index) => index > 0 && !token.startsWith('--') && !flagValues.has(index),
   );
+};
+
+/** Every positional argument after the command, skipping `--flag value` pairs. */
+const positionalArgs = (list: string[]): string[] => {
+  const flagValues = flagValueIndexes(list);
+  return list.filter(
+    (token, index) => index > 0 && !token.startsWith('--') && !flagValues.has(index),
+  );
+};
+
+const canonicalPath = async (p: string): Promise<string> => {
+  const resolved = resolve(p);
+  try {
+    return await realpath(resolved);
+  } catch {
+    return resolved;
+  }
+};
+
+/** Selector tokens (`*`, `all`, `text=...`) are not workspace paths. */
+const isSelectorToken = (token: string): boolean =>
+  token === '*' || token === 'all' || token.includes('=');
+
+const isDirectory = async (p: string): Promise<boolean> => {
+  try {
+    return (await stat(p)).isDirectory();
+  } catch {
+    return false;
+  }
 };
 
 /** Pass through bare numbers as number; keep unit strings for protocol parseLength. */
@@ -1160,17 +1194,47 @@ const main = async (): Promise<void> => {
           ok = false;
         }
       } else if (action === 'query') {
-        // Back-compat shim. With `--workspace`, the first positional is the
-        // selector; with a positional workspace path, the selector is clean[2].
-        const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
-        const selector = (workspaceOpt ? positionalArg(clean) : clean[2]) ?? '*';
-        ok = await execute('deckuse query', {
-          version: PROTOCOL_VERSION,
-          type: 'query',
-          workspaceId: workspace,
-          selector,
-          limit: Number(optionFrom(clean, '--limit') ?? 100),
-        });
+        // With `--workspace`, positionals are the selector. Without it, the
+        // first positional is the workspace and the next is the selector.
+        // A repeated path to the same workspace is ignored. A second, different
+        // directory is a conflict, not a filter.
+        const positionals = positionalArgs(clean);
+        const workspace = await findWorkspace(workspaceOpt ?? positionals[0]);
+        const selectorTokens = workspaceOpt ? positionals : positionals.slice(1);
+        const workspaceKey = await canonicalPath(workspace);
+        const selectors: string[] = [];
+        let conflict: string | undefined;
+        for (const token of selectorTokens) {
+          if (!isSelectorToken(token)) {
+            const key = await canonicalPath(token);
+            if (key === workspaceKey) continue;
+            if (await isDirectory(token)) {
+              conflict = token;
+              break;
+            }
+          }
+          selectors.push(token);
+        }
+        if (conflict) {
+          outputEnvelope({
+            ok: false,
+            command: 'deckuse query',
+            error: {
+              code: 'CONFLICTING_WORKSPACE',
+              message: `Workspace path ${conflict} does not match ${workspace}`,
+              hint: 'Pass the workspace once, via --workspace or as the first positional path.',
+            },
+          });
+          ok = false;
+        } else {
+          ok = await execute('deckuse query', {
+            version: PROTOCOL_VERSION,
+            type: 'query',
+            workspaceId: workspace,
+            selector: selectors[0] ?? '*',
+            limit: Number(optionFrom(clean, '--limit') ?? 100),
+          });
+        }
       } else {
         throw new Error(`Unknown command: ${action}`);
       }

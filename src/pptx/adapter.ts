@@ -686,7 +686,8 @@ export const pptxAdapter: FormatAdapter = {
           ...(command.props ? { props: command.props } : {}),
           provenance: command.provenance ?? true,
         });
-        return ok(details);
+        if (!details.ok) return details;
+        return ok(details.value);
       }
 
       if (command.type === 'search') {
@@ -730,6 +731,7 @@ export const pptxAdapter: FormatAdapter = {
             resolve: 'both',
             provenance: true,
           });
+          if (!details.ok) return details;
           return ok({
             target: resolved.value.target,
             uid: resolved.value.uid,
@@ -746,8 +748,8 @@ export const pptxAdapter: FormatAdapter = {
                     name: item.name,
                   }))
               : undefined,
-            properties: details.properties,
-            warnings: details.warnings,
+            properties: details.value.properties,
+            warnings: details.value.warnings,
           });
         }
         if (command.ref) {
@@ -760,12 +762,14 @@ export const pptxAdapter: FormatAdapter = {
         });
       }
 
-      if (command.type === 'query')
-        return ok(
-          index.elements
-            .filter((item) => matchesSelector(item, command.selector))
-            .slice(0, command.limit),
-        );
+      if (command.type === 'query') {
+        const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+        return ok({
+          items: matched.slice(0, command.limit),
+          total: matched.length,
+          truncated: matched.length > command.limit,
+        });
+      }
 
       if (command.type === 'getText') {
         const item = findIndexed(index, command.ref);

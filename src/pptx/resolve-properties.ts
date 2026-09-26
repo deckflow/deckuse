@@ -1,9 +1,8 @@
-import type { PropertyValue, ResolveMode } from '../core/index.js';
+import { err, ok, type PropertyValue, type ResolveMode, type Result } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import type { ResolvedTarget } from './addressing.js';
-import { cNvPrIdOf } from './addressing.js';
-import type { IndexedElement } from './types.js';
+import { nodeFor } from './node-for.js';
 import {
   NS,
   REL,
@@ -12,9 +11,7 @@ import {
   cNvPr,
   descendants,
   first,
-  notesBodyShape,
   notesBodyText,
-  root,
   textOf,
 } from './xml.js';
 
@@ -24,20 +21,14 @@ const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp'
 const directChild = (node: Element, localName: string): Element | undefined =>
   children(node).find((child) => child.localName === localName);
 
-const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
-  descendants(doc).find(
-    (node) =>
-      node.localName != null &&
-      SHAPE_LOCAL_NAMES.has(node.localName) &&
-      attr(cNvPr(node), 'id') === id,
-  );
-
-const nodeForItem = (doc: Document, item: IndexedElement): Element | undefined => {
-  if (item.kind === 'notes') return notesBodyShape(doc) ?? undefined;
-  if (['slide', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
-  const id = cNvPrIdOf(item);
-  return id ? shapeByCNvPrId(doc, id) : undefined;
-};
+const TABLE_CELL_GET_KEYS = new Set([
+  'text',
+  'text.value',
+  'paragraph.align',
+  'fill',
+  'fill.color',
+  'fill.kind',
+]);
 
 const prop = (
   effective: unknown,
@@ -347,6 +338,98 @@ const filterProps = (
   return out;
 };
 
+type ResolvedProperties = {
+  target: string;
+  uid: string;
+  name?: string;
+  properties: Record<string, PropertyValue | unknown>;
+  warnings: string[];
+};
+
+const resolveTableCellProperties = (
+  archive: OpcArchive,
+  resolved: ResolvedTarget,
+  node: Element,
+  options: {
+    resolve?: ResolveMode;
+    props?: string[];
+    provenance?: boolean;
+  },
+  mode: ResolveMode,
+  includeProvenance: boolean,
+): Result<ResolvedProperties> => {
+  const unexpected = (options.props ?? []).filter((key) => !TABLE_CELL_GET_KEYS.has(key));
+  if (unexpected.length) {
+    return err(
+      'UNSUPPORTED_PROPERTY',
+      `Unsupported tableCell properties: ${unexpected.join(', ')}`,
+      [],
+      {
+        target: resolved.target,
+        hint: 'Table cells support text, text.value, paragraph.align, fill, fill.color, and fill.kind.',
+      },
+    );
+  }
+
+  const text = textOf(node).replace(/\s+/g, ' ').trim();
+  const textValue = prop(
+    text || null,
+    text || null,
+    text
+      ? { scope: 'local', target: resolved.target, path: 'text.value' }
+      : { scope: 'default', target: resolved.target, path: 'text.value' },
+  );
+  const pPr = first(descendants(node, 'p')[0] ?? node, 'pPr');
+  const align = attr(pPr, 'algn') ?? null;
+  const alignValue = prop(
+    align,
+    align,
+    align
+      ? { scope: 'local', target: resolved.target, path: 'paragraph.align' }
+      : { scope: 'default', target: resolved.target, path: 'paragraph.align' },
+  );
+  const chain = resolveStyleChain(archive, resolved.item.partUri);
+  const themeColors = loadThemeColors(archive, chain.themePart);
+  const tcPr = children(node).find((child) => child.localName === 'tcPr') ?? first(node, 'tcPr');
+  const fill = readFillColor(tcPr, themeColors);
+  const fillKind = prop(
+    fill?.kind ?? null,
+    fill?.kind ?? null,
+    fill
+      ? { scope: 'local', target: resolved.target, path: 'fill.kind' }
+      : { scope: 'default', target: resolved.target, path: 'fill.kind' },
+  );
+  const fillColor = prop(
+    fill?.color ?? null,
+    fill?.color ?? null,
+    fill?.color
+      ? { scope: 'local', target: resolved.target, path: 'fill.color' }
+      : { scope: 'default', target: resolved.target, path: 'fill.color' },
+  );
+  const fillAlias = prop(
+    fill?.kind === 'none' ? 'none' : (fill?.color ?? null),
+    fill?.kind === 'none' ? 'none' : (fill?.color ?? null),
+    fill
+      ? { scope: 'local', target: resolved.target, path: 'fill' }
+      : { scope: 'default', target: resolved.target, path: 'fill' },
+  );
+  const all: Record<string, PropertyValue> = {
+    text: textValue,
+    'text.value': textValue,
+    'paragraph.align': alignValue,
+    fill: fillAlias,
+    'fill.kind': fillKind,
+    'fill.color': fillColor,
+  };
+  return ok({
+    target: resolved.target,
+    uid: resolved.uid,
+    ...(resolved.item.name ? { name: resolved.item.name } : {}),
+    properties: filterProps(all, options.props, mode, includeProvenance),
+    warnings: [],
+  });
+};
+
 export function resolveProperties(
   archive: OpcArchive,
   resolved: ResolvedTarget,
@@ -355,13 +438,7 @@ export function resolveProperties(
     props?: string[];
     provenance?: boolean;
   } = {},
-): {
-  target: string;
-  uid: string;
-  name?: string;
-  properties: Record<string, PropertyValue | unknown>;
-  warnings: string[];
-} {
+): Result<ResolvedProperties> {
   const mode = options.resolve ?? 'both';
   const includeProvenance = options.provenance !== false;
   const warnings: string[] = [];
@@ -376,17 +453,27 @@ export function resolveProperties(
         path: 'text.value',
       }),
     };
-    return {
+    return ok({
       target: resolved.target,
       uid: resolved.uid,
       ...(item.name ? { name: item.name } : {}),
       properties: filterProps(properties, options.props, mode, includeProvenance),
       warnings,
-    };
+    });
   }
 
   const doc = archive.readXml(item.partUri);
-  const node = nodeForItem(doc, item);
+  const node = nodeFor(doc, item);
+
+  if (item.kind === 'tableCell') {
+    if (!node) {
+      return err('ELEMENT_NOT_FOUND', 'Element XML node was not found', [], {
+        target: resolved.target,
+        hint: 'The indexed table cell has no matching tc in the slide XML.',
+      });
+    }
+    return resolveTableCellProperties(archive, resolved, node, options, mode, includeProvenance);
+  }
 
   if (!node) {
     if (item.kind === 'notes') {
@@ -397,22 +484,22 @@ export function resolveProperties(
           path: 'text.value',
         }),
       };
-      return {
+      return ok({
         target: resolved.target,
         uid: resolved.uid,
         ...(item.name ? { name: item.name } : {}),
         properties: filterProps(properties, options.props, mode, includeProvenance),
         warnings,
-      };
+      });
     }
     warnings.push('Element XML node was not found; returning empty properties');
-    return {
+    return ok({
       target: resolved.target,
       uid: resolved.uid,
       ...(item.name ? { name: item.name } : {}),
       properties: {},
       warnings,
-    };
+    });
   }
 
   if (
@@ -424,13 +511,13 @@ export function resolveProperties(
     const properties: Record<string, PropertyValue> = {
       name: prop(item.name ?? null, item.name ?? null, { scope: 'local', target: resolved.target }),
     };
-    return {
+    return ok({
       target: resolved.target,
       uid: resolved.uid,
       ...(item.name ? { name: item.name } : {}),
       properties: filterProps(properties, options.props, mode, includeProvenance),
       warnings,
-    };
+    });
   }
 
   if (item.kind === 'notes') {
@@ -442,13 +529,13 @@ export function resolveProperties(
         path: 'text.value',
       }),
     };
-    return {
+    return ok({
       target: resolved.target,
       uid: resolved.uid,
       ...(item.name ? { name: item.name } : {}),
       properties: filterProps(properties, options.props, mode, includeProvenance),
       warnings,
-    };
+    });
   }
 
   const chain = resolveStyleChain(archive, item.partUri);
@@ -678,13 +765,13 @@ export function resolveProperties(
       : { scope: 'default' },
   );
 
-  return {
+  return ok({
     target: resolved.target,
     uid: resolved.uid,
     ...(name ? { name } : {}),
     properties: filterProps(all, options.props, mode, includeProvenance),
     warnings,
-  };
+  });
 }
 
 /** Map Phase-1 dotted property names to legacy setProperties keys. */

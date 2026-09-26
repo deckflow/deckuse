@@ -17,6 +17,7 @@ export const errorCodeSchema = z.enum([
   'VALIDATION_FAILED',
   'TRANSACTION_CONFLICT',
   'UNSUPPORTED_CAPABILITY',
+  'UNSUPPORTED_PROPERTY',
   'IO_ERROR',
   'INTERNAL_ERROR',
 ]);

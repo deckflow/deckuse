@@ -11,14 +11,21 @@ import { addMediaPart, mediaPicXml } from './media.js';
 import { addPicturePart } from './picture.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
 import { lengthContextFor } from './slide-size.js';
-import { estimateTableRowHeightEmu, measureTableLayout } from './table-measure.js';
+import {
+  estimateTableRowHeightEmu,
+  layoutTableFrame,
+  measureTableLayout,
+  type TableFrameLayout,
+} from './table-measure.js';
 import { NS, REL, allocateShapeIds, attr, descendants, nextShapeId } from './xml.js';
 
 export {
   estimateTableHeightEmu,
   estimateTableRowHeightEmu,
+  layoutTableFrame,
   measureTableLayout,
 } from './table-measure.js';
+export type { TableFrameLayout } from './table-measure.js';
 const esc = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 const value = (obj: Record<string, unknown>, key: string, fallback: string): string =>
@@ -111,19 +118,33 @@ export const normalizeTableRows = (raw: unknown): string[][] => {
   );
 };
 
+export function resolveTableFrame(
+  e: Record<string, unknown>,
+  archive?: OpcArchive,
+): TableFrameLayout {
+  const rows = normalizeTableRows(e['rows']);
+  const cols = Math.max(1, ...rows.map((r) => r.length));
+  const width = resolveEmu(e['width'], 914400 * cols, 'x', archive);
+  const measured = measureTableLayout({ rows, widthEmu: width, fontPt: 11 });
+  const heightRaw = e['height'];
+  return layoutTableFrame({
+    contentRowHeightsEmu: measured.rowHeightsEmu,
+    contentEmu: measured.totalHeightEmu,
+    ...(heightRaw === 'auto' || heightRaw === undefined
+      ? {}
+      : { frameEmu: resolveEmu(heightRaw, measured.totalHeightEmu, 'y', archive) }),
+  });
+}
+
 const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
   const rows = normalizeTableRows(e['rows']);
   const cols = Math.max(1, ...rows.map((r) => r.length));
   const width = resolveEmu(e['width'], 914400 * cols, 'x', archive);
-  const layout = measureTableLayout({ rows, widthEmu: width, fontPt: 11 });
-  const colW = String(layout.colWidthEmu);
-  const heightRaw = e['height'];
-  const height =
-    heightRaw === 'auto' || heightRaw === undefined
-      ? layout.totalHeightEmu
-      : resolveEmu(heightRaw, layout.totalHeightEmu, 'y', archive);
+  const frame = resolveTableFrame(e, archive);
+  const colW = String(Math.floor(width / Math.max(1, cols)));
   const theme = typeof e['theme'] === 'string' ? e['theme'] : 'minimal';
   const alignColumns = Array.isArray(e['alignColumns']) ? (e['alignColumns'] as string[]) : [];
+  const height = frame.frameEmu;
   const sized = { ...e, width, height };
   const cellXml = (text: string, header: boolean, colIndex: number, rowIndex: number) => {
     let fill = 'FFFFFF';
@@ -152,13 +173,13 @@ const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
   };
   const body = rows
     .map((row, rowIndex) => {
-      const rowH = layout.rowHeightsEmu[rowIndex] ?? estimateTableRowHeightEmu(11);
-      return `<a:tr h="${String(rowH)}">${Array.from({ length: layout.cols }, (_, i) =>
+      const rowH = frame.rowHeightsEmu[rowIndex] ?? estimateTableRowHeightEmu(11);
+      return `<a:tr h="${String(rowH)}">${Array.from({ length: cols }, (_, i) =>
         cellXml(typeof row[i] === 'string' ? row[i]! : '', rowIndex === 0, i, rowIndex),
       ).join('')}</a:tr>`;
     })
     .join('');
-  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(sized, archive)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: layout.cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+  return `<p:graphicFrame xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvGraphicFramePr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Table ${String(id)}`))}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>${graphicFrameXfrm(sized, archive)}<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblPr firstRow="1"/><a:tblGrid>${Array.from({ length: cols }, () => `<a:gridCol w="${colW}"/>`).join('')}</a:tblGrid>${body}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
 };
 async function pictureXml(
   archive: OpcArchive,

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { OpcArchive } from '../../src/opc/index.js';
 import { pptxAdapter } from '../../src/pptx/index.js';
+import { resolveProperties } from '../../src/pptx/resolve-properties.js';
 import { REL } from '../../src/pptx/xml.js';
 
 const e = new TextEncoder();
@@ -106,9 +107,8 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
     );
     expect(got.ok).toBe(true);
     if (got.ok) {
-      const text = (got.value as { properties: Record<string, { effective?: unknown }> }).properties[
-        'text.value'
-      ]?.effective;
+      const text = (got.value as { properties: Record<string, { effective?: unknown }> })
+        .properties['text.value']?.effective;
       expect(text).toBe('青蛙的一生');
       expect(text).not.toBe('3');
       expect(String(text)).not.toContain('HeaderOnly');
@@ -216,9 +216,8 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
     );
     expect(got.ok).toBe(true);
     if (got.ok) {
-      const text = (got.value as { properties: Record<string, { effective?: unknown }> }).properties[
-        'text.value'
-      ]?.effective;
+      const text = (got.value as { properties: Record<string, { effective?: unknown }> })
+        .properties['text.value']?.effective;
       expect(text).toBeNull();
     }
   });
@@ -532,6 +531,222 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
     expect(cellAlign.ok).toBe(true);
     const after = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
     expect(after).toContain('algn="l"');
+
+    const readBack = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'get',
+        workspaceId: workspace,
+        target: 'slide:1/shape:3/cell:0:0',
+        props: ['text.value', 'paragraph.align'],
+      },
+      {},
+    );
+    expect(readBack.ok).toBe(true);
+    if (readBack.ok) {
+      const properties = (
+        readBack.value as {
+          properties: Record<string, { effective?: unknown; source?: { scope?: string } }>;
+        }
+      ).properties;
+      expect(properties['text.value']?.effective).toBe('H1');
+      expect(properties['paragraph.align']?.effective).toBe('l');
+    }
+
+    const unsupported = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'get',
+        workspaceId: workspace,
+        target: 'slide:1/shape:3/cell:0:0',
+        props: ['font.size'],
+      },
+      {},
+    );
+    expect(unsupported.ok).toBe(false);
+    if (!unsupported.ok) expect(unsupported.error.code).toBe('UNSUPPORTED_PROPERTY');
+  });
+
+  it('get of a table cell whose XML node is missing is an error', async () => {
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+      ),
+      SLIDE_CT,
+    );
+    const details = resolveProperties(
+      archive,
+      {
+        target: 'slide:1/shape:3/cell:0:0',
+        uid: 'missing-cell',
+        item: {
+          ref: { documentId: 'doc', elementId: '256:3:cell:0:0' },
+          kind: 'tableCell',
+          partUri: '/ppt/slides/slide1.xml',
+          location: { tableId: '256:3', row: 0, column: 0 },
+        },
+        parsed: { raw: 'slide:1/shape:3/cell:0:0', kind: 'tableCell' },
+      },
+      { props: ['text.value'] },
+    );
+    expect(details.ok).toBe(false);
+    if (!details.ok) expect(details.error.code).toBe('ELEMENT_NOT_FOUND');
+  });
+
+  it('unset table cell paragraph.align reads back as null default', async () => {
+    const archive = new OpcArchive();
+    archive.setPart(
+      '/ppt/slides/slide1.xml',
+      e.encode(
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="100"/></a:tblGrid><a:tr h="100"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Plain</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame></p:spTree></p:cSld></p:sld>`,
+      ),
+      SLIDE_CT,
+    );
+    const details = resolveProperties(
+      archive,
+      {
+        target: 'slide:1/shape:3/cell:0:0',
+        uid: 'plain-cell',
+        item: {
+          ref: { documentId: 'doc', elementId: '256:3:cell:0:0' },
+          kind: 'tableCell',
+          partUri: '/ppt/slides/slide1.xml',
+          location: { tableId: '256:3', row: 0, column: 0 },
+        },
+        parsed: { raw: 'slide:1/shape:3/cell:0:0', kind: 'tableCell' },
+      },
+      { props: ['paragraph.align', 'text.value'] },
+    );
+    expect(details.ok).toBe(true);
+    if (!details.ok) return;
+    const align = details.value.properties['paragraph.align'] as {
+      effective?: unknown;
+      source?: { scope?: string };
+    };
+    expect(align.effective).toBeNull();
+    expect(align.source?.scope).toBe('default');
+    expect((details.value.properties['text.value'] as { effective?: unknown }).effective).toBe(
+      'Plain',
+    );
+  });
+
+  it('fixed 600x200px table row heights sum to the frame', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-table-frame-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await writeArchive(source, (a) => {
+      a.setPart(
+        '/[Content_Types].xml',
+        e.encode(
+          `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/ppt/presentation.xml" ContentType="${CT}"/><Override PartName="/ppt/slides/slide1.xml" ContentType="${SLIDE_CT}"/></Types>`,
+        ),
+        'application/xml',
+      );
+      a.setPart(
+        '/ppt/presentation.xml',
+        e.encode(
+          `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldSz cx="12192000" cy="6858000"/><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+        ),
+        CT,
+      );
+      a.setRelationships('/ppt/presentation.xml', [
+        {
+          id: 'rId1',
+          type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
+          target: 'slides/slide1.xml',
+          external: false,
+        },
+      ]);
+      a.setPart(
+        '/ppt/slides/slide1.xml',
+        e.encode(
+          `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+        ),
+        SLIDE_CT,
+      );
+      a.setPart(
+        '/docProps/app.xml',
+        e.encode(
+          `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Slides>1</Slides></Properties>`,
+        ),
+        'application/vnd.openxmlformats-officedocument.extended-properties+xml',
+      );
+    });
+    const init = await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    expect(init.ok).toBe(true);
+    const revision = init.ok ? String((init.value as { revision: string }).revision) : '1';
+    const created = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: revision,
+        slide: 1,
+        shapeType: 'table',
+        name: 'Sized',
+        x: '0px',
+        y: '0px',
+        width: '600px',
+        height: '200px',
+        rows: [
+          ['A', 'B'],
+          ['C', 'D'],
+          ['E', 'F'],
+        ],
+      },
+      {},
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const layout = (
+      created.value as {
+        layout: {
+          mode: string;
+          status: string;
+          frameEmu: number;
+          rowHeightsEmu: number[];
+        };
+      }
+    ).layout;
+    expect(layout.mode).toBe('fixed');
+    expect(layout.status).toBe('complete');
+    expect(layout.frameEmu).toBe(1_905_000);
+    expect(layout.rowHeightsEmu.reduce((sum, height) => sum + height, 0)).toBe(1_905_000);
+    const xml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(xml).toContain('cy="1905000"');
+    const rowHeights = [...xml.matchAll(/<a:tr h="(\d+)"/g)].map((match) => Number(match[1]));
+    expect(rowHeights.reduce((sum, height) => sum + height, 0)).toBe(1_905_000);
+
+    const status = await pptxAdapter.execute(
+      { version: '2.0', type: 'status', workspaceId: workspace },
+      {},
+    );
+    const rev2 = status.ok ? String((status.value as { revision: string }).revision) : revision;
+    const laid = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setTableLayout',
+        workspaceId: workspace,
+        transactionId: rev2,
+        target: 'slide:1/shape:Sized',
+        height: '200px',
+        redistribute: 'content',
+      },
+      {},
+    );
+    expect(laid.ok).toBe(true);
+    if (!laid.ok) return;
+    const again = (
+      laid.value as { layout: { status: string; frameEmu: number; rowHeightsEmu: number[] } }
+    ).layout;
+    expect(again.status).toBe('complete');
+    expect(again.frameEmu).toBe(1_905_000);
+    expect(again.rowHeightsEmu.reduce((sum, height) => sum + height, 0)).toBe(1_905_000);
   });
 
   it('duplicate batch reports changedParts covering presentation, notes, content types', async () => {

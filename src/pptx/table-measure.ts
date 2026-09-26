@@ -85,6 +85,69 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
   return { rowHeightsEmu, totalHeightEmu, colWidthEmu, cols };
 }
 
+export interface TableFrameLayout {
+  readonly mode: 'auto' | 'fixed';
+  readonly status: 'complete' | 'overflow';
+  readonly frameEmu: number;
+  readonly contentEmu: number;
+  readonly rowHeightsEmu: readonly number[];
+}
+
+/**
+ * Fit content row heights to a frame.
+ * Auto uses the measured height. Fixed mode spreads extra EMU across rows so
+ * the row-height sum equals the frame. A frame shorter than the content keeps
+ * content row heights and reports overflow.
+ */
+export function layoutTableFrame(input: {
+  contentRowHeightsEmu: readonly number[];
+  contentEmu: number;
+  frameEmu?: number;
+}): TableFrameLayout {
+  const rowHeightsEmu = input.contentRowHeightsEmu.map((height) => Math.round(height));
+  const contentEmu = Math.max(1, Math.round(input.contentEmu));
+  if (input.frameEmu === undefined) {
+    return {
+      mode: 'auto',
+      status: 'complete',
+      frameEmu: contentEmu,
+      contentEmu,
+      rowHeightsEmu,
+    };
+  }
+  const frameEmu = Math.max(1, Math.round(input.frameEmu));
+  if (frameEmu < contentEmu) {
+    return {
+      mode: 'fixed',
+      status: 'overflow',
+      frameEmu,
+      contentEmu,
+      rowHeightsEmu,
+    };
+  }
+  const count = rowHeightsEmu.length;
+  if (count > 0) {
+    const current = rowHeightsEmu.reduce((sum, height) => sum + height, 0);
+    const extra = frameEmu - current;
+    if (extra !== 0) {
+      const per = Math.floor(extra / count);
+      let assigned = 0;
+      for (let i = 0; i < count - 1; i += 1) {
+        rowHeightsEmu[i] = rowHeightsEmu[i]! + per;
+        assigned += per;
+      }
+      rowHeightsEmu[count - 1] = rowHeightsEmu[count - 1]! + (extra - assigned);
+    }
+  }
+  return {
+    mode: 'fixed',
+    status: 'complete',
+    frameEmu,
+    contentEmu,
+    rowHeightsEmu,
+  };
+}
+
 export const tableHeightMayClipDiagnostic = (input: {
   estimatedEmu: number;
   givenEmu: number;

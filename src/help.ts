@@ -792,6 +792,9 @@ ${WRITE_GLOBALS}`,
   <workspace>               Optional workspace path when not using --workspace
   <selector>                Selector string (default: *)
 
+Repeating the same workspace path is ignored. A second, different directory is
+CONFLICTING_WORKSPACE, not a selector. JSON data is { items, total, truncated }.
+
 Options:
   --limit <n>               Max results (default: 100)
   --workspace <path>        Workspace root

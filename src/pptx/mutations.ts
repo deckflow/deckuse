@@ -10,10 +10,11 @@ import {
 } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
-import { resolveTarget, resolveToRef, cNvPrIdOf, type ParsedTarget } from './addressing.js';
+import { resolveTarget, resolveToRef, type ParsedTarget } from './addressing.js';
+import { nodeFor, shapeByCNvPrId } from './node-for.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { assertWritable } from './edition.js';
-import { addElement, duplicateElement, normalizeTableRows, updateChart } from './elements.js';
+import { addElement, duplicateElement, resolveTableFrame, updateChart } from './elements.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
@@ -24,7 +25,7 @@ import { resolveLayoutRef } from './layout-ref.js';
 import { lengthContextFor } from './slide-size.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
 import { applyTableCellProperties, applyTableLayout, applyTableProperties } from './table.js';
-import { measureTableLayout, tableHeightMayClipDiagnostic } from './table-measure.js';
+import { tableHeightMayClipDiagnostic, type TableFrameLayout } from './table-measure.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import {
   REL,
@@ -34,7 +35,6 @@ import {
   cNvPr,
   descendants,
   first,
-  notesBodyShape,
   root,
   setNodeText,
   setNodeTextBlocks,
@@ -115,31 +115,7 @@ const normalizeTransformFields = (
   return out;
 };
 
-export const shapeByCNvPrId = (doc: Document, id: string): Element | undefined =>
-  descendants(doc).find(
-    (node) =>
-      node.localName != null &&
-      SHAPE_LOCAL_NAMES.has(node.localName) &&
-      attr(cNvPr(node), 'id') === id,
-  );
-export const nodeFor = (doc: Document, item: IndexedElement): Element | undefined => {
-  if (item.kind === 'notes') return notesBodyShape(doc) ?? undefined;
-  if (['slide', 'master', 'layout', 'theme'].includes(item.kind)) return root(doc);
-  if (item.kind === 'tableCell') {
-    const rawTableId = item.location?.['tableId'],
-      tableId = typeof rawTableId === 'string' ? rawTableId : '';
-    // elementId is `${slideId}:${ancestorPath}` — strip slide prefix, then take the leaf cNvPr id.
-    const afterSlide = tableId.includes(':') ? tableId.slice(tableId.indexOf(':') + 1) : tableId;
-    const tableTail = afterSlide.split('.').at(-1) ?? afterSlide;
-    if (!tableTail) return undefined;
-    const table = shapeByCNvPrId(doc, tableTail);
-    if (!table) return;
-    const row = descendants(table, 'tr')[Number(item.location?.['row'])];
-    return row ? descendants(row, 'tc')[Number(item.location?.['column'])] : undefined;
-  }
-  const id = cNvPrIdOf(item);
-  return id ? shapeByCNvPrId(doc, id) : undefined;
-};
+export { nodeFor, shapeByCNvPrId };
 
 const placeholderOf = (node: Element): { type: string; idx?: string } | undefined => {
   const ph = first(node, 'ph');
@@ -743,7 +719,16 @@ export async function mutate(
   command: AtomicCommand,
   archive: OpcArchive,
   index: IndexFile,
-): Promise<Result<MutationOutcome & { changedTargets?: string[]; changedParts?: string[] }>> {
+): Promise<
+  Result<
+    MutationOutcome & {
+      changedTargets?: string[];
+      changedParts?: string[];
+      layout?: TableFrameLayout;
+    }
+  >
+> {
+  let tableLayout: TableFrameLayout | undefined;
   if (command.type === 'replaceText') return applyReplaceText(command, archive, index);
 
   if (command.type === 'addSlide') {
@@ -838,26 +823,12 @@ export async function mutate(
     const created = await addElement(archive, slide.partUri, doc, parent, element);
     const diagnostics: Diagnostic[] = [];
     if (command.shapeType === 'table' && command.rows) {
-      const rows = normalizeTableRows(command.rows);
-      const cols = Math.max(1, ...rows.map((r) => r.length));
-      const widthEmu =
-        typeof geom['width'] === 'number'
-          ? geom['width']
-          : parseLength(String(geom['width'] ?? 914400 * cols), {
-              ...lengthContextFor(archive, 'x'),
-              axis: 'x',
-            });
-      const layout = measureTableLayout({ rows, widthEmu, fontPt: 11 });
-      if (
-        command.height !== undefined &&
-        command.height !== 'auto' &&
-        typeof geom['height'] === 'number' &&
-        geom['height'] < layout.totalHeightEmu
-      ) {
+      tableLayout = resolveTableFrame(element, archive);
+      if (tableLayout.status === 'overflow') {
         diagnostics.push(
           tableHeightMayClipDiagnostic({
-            estimatedEmu: layout.totalHeightEmu,
-            givenEmu: geom['height'],
+            estimatedEmu: tableLayout.contentEmu,
+            givenEmu: tableLayout.frameEmu,
             target: `slide:${command.slide}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
           }),
         );
@@ -909,6 +880,7 @@ export async function mutate(
         changedTargets: [`slide:${command.slide}/shape:${id}`],
         changedParts: [slide.partUri],
         diagnostics,
+        ...(tableLayout ? { layout: tableLayout } : {}),
       },
       diagnostics,
     );
@@ -1098,15 +1070,12 @@ export async function mutate(
       ...(command.redistribute !== undefined ? { redistribute: command.redistribute } : {}),
     });
     if (!laid.ok) return laid;
-    if (
-      laid.value.estimatedEmu !== undefined &&
-      typeof heightOpt === 'number' &&
-      heightOpt < laid.value.estimatedEmu
-    ) {
+    tableLayout = laid.value.layout;
+    if (laid.value.layout.status === 'overflow') {
       diagnostics.push(
         tableHeightMayClipDiagnostic({
-          estimatedEmu: laid.value.estimatedEmu,
-          givenEmu: heightOpt,
+          estimatedEmu: laid.value.layout.contentEmu,
+          givenEmu: laid.value.layout.frameEmu,
           target: command.target,
         }),
       );
@@ -1202,6 +1171,7 @@ export async function mutate(
       diagnostics,
       ...(target ? { changedTargets: [target] } : {}),
       changedParts,
+      ...(tableLayout ? { layout: tableLayout } : {}),
     },
     diagnostics,
   );

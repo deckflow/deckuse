@@ -407,6 +407,7 @@ describe('agent batch UX', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.diagnostics.some((d) => d.code === 'TABLE_HEIGHT_MAY_CLIP')).toBe(true);
+    expect((result.value as { layout?: { status?: string } }).layout?.status).toBe('overflow');
   });
 
   it('export repacks from source; fromPackage skips; packageStale flips', async () => {

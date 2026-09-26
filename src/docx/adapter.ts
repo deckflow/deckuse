@@ -359,12 +359,12 @@ export const docxAdapter: FormatAdapter = {
       }
 
       if (command.type === 'query') {
-        return ok(
-          index.elements
-            .filter((item) => matchesSelector(item, command.selector))
-            .slice(0, command.limit)
-            .map(summary),
-        );
+        const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+        return ok({
+          items: matched.slice(0, command.limit).map(summary),
+          total: matched.length,
+          truncated: matched.length > command.limit,
+        });
       }
 
       if (command.type === 'getText') {
