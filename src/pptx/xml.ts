@@ -129,8 +129,7 @@ export const setNodeText = (node: Node, text: string): void => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
       const paragraph = doc.createElementNS(NS.a, 'a:p');
-      const pPrSource =
-        pPrTemplates[i] ?? pPrTemplates[pPrTemplates.length - 1] ?? pPrTemplates[0];
+      const pPrSource = pPrTemplates[i] ?? pPrTemplates[pPrTemplates.length - 1] ?? pPrTemplates[0];
       if (pPrSource) paragraph.appendChild(pPrSource.cloneNode(true));
       const run = doc.createElementNS(NS.a, 'a:r');
       if (rPrTemplate) run.appendChild(rPrTemplate.cloneNode(true));
@@ -194,6 +193,7 @@ export interface TextRunStyle {
   readonly bold?: boolean;
   readonly italic?: boolean;
   readonly underline?: boolean;
+  readonly baseline?: 'super' | 'sub';
 }
 
 export interface TextBlockStyle {
@@ -206,6 +206,9 @@ export interface TextBlockStyle {
   readonly italic?: boolean;
   readonly underline?: boolean;
   readonly align?: string;
+  readonly lineSpacing?: number;
+  readonly spaceBefore?: number | string;
+  readonly spaceAfter?: number | string;
 }
 
 export const normalizeAlign = (align: string | undefined): string | undefined => {
@@ -231,6 +234,8 @@ const buildRunPr = (doc: Document, block: TextRunStyle): Element => {
   if (block.bold) rPr.setAttribute('b', '1');
   if (block.italic) rPr.setAttribute('i', '1');
   if (block.underline) rPr.setAttribute('u', 'sng');
+  if (block.baseline === 'super') rPr.setAttribute('baseline', '30000');
+  else if (block.baseline === 'sub') rPr.setAttribute('baseline', '-25000');
   if (block.fontFamily) {
     const latin = doc.createElementNS(NS.a, 'a:latin');
     latin.setAttribute('typeface', block.fontFamily);
@@ -249,6 +254,45 @@ const buildRunPr = (doc: Document, block: TextRunStyle): Element => {
     else rPr.appendChild(solid);
   }
   return rPr;
+};
+
+/** Parse spacing to hundredths of a point (OOXML spcPts). Bare number = pt. */
+export const spacingToSpcPts = (value: number | string): number => {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error('spacing must be a non-negative number (pt)');
+    return Math.round(value * 100);
+  }
+  const match = /^\s*(-?\d+(?:\.\d+)?)\s*(pt)?\s*$/i.exec(value.trim());
+  if (!match) throw new Error(`Invalid spacing: ${value}`);
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`Invalid spacing: ${value}`);
+  return Math.round(amount * 100);
+};
+
+const appendParagraphSpacing = (doc: Document, pPr: Element, block: TextBlockStyle): void => {
+  if (block.lineSpacing !== undefined) {
+    if (!(block.lineSpacing > 0)) throw new Error('lineSpacing must be a positive number');
+    const lnSpc = doc.createElementNS(NS.a, 'a:lnSpc');
+    const spcPct = doc.createElementNS(NS.a, 'a:spcPct');
+    spcPct.setAttribute('val', String(Math.round(block.lineSpacing * 100_000)));
+    lnSpc.appendChild(spcPct);
+    pPr.appendChild(lnSpc);
+  }
+  if (block.spaceBefore !== undefined) {
+    const spcBef = doc.createElementNS(NS.a, 'a:spcBef');
+    const spcPts = doc.createElementNS(NS.a, 'a:spcPts');
+    spcPts.setAttribute('val', String(spacingToSpcPts(block.spaceBefore)));
+    spcBef.appendChild(spcPts);
+    pPr.appendChild(spcBef);
+  }
+  if (block.spaceAfter !== undefined) {
+    const spcAft = doc.createElementNS(NS.a, 'a:spcAft');
+    const spcPts = doc.createElementNS(NS.a, 'a:spcPts');
+    spcPts.setAttribute('val', String(spacingToSpcPts(block.spaceAfter)));
+    spcAft.appendChild(spcPts);
+    pPr.appendChild(spcAft);
+  }
 };
 
 const appendRun = (doc: Document, paragraph: Element, style: TextRunStyle): void => {
@@ -280,6 +324,9 @@ export const normalizeTextBlocksNewlines = (
       ...(block.italic !== undefined ? { italic: block.italic } : {}),
       ...(block.underline !== undefined ? { underline: block.underline } : {}),
       ...(block.align !== undefined ? { align: block.align } : {}),
+      ...(block.lineSpacing !== undefined ? { lineSpacing: block.lineSpacing } : {}),
+      ...(block.spaceBefore !== undefined ? { spaceBefore: block.spaceBefore } : {}),
+      ...(block.spaceAfter !== undefined ? { spaceAfter: block.spaceAfter } : {}),
     };
     if (block.runs && block.runs.length > 0) {
       let currentRuns: TextRunStyle[] = [];
@@ -333,9 +380,15 @@ export const setNodeTextBlocks = (node: Node, blocks: readonly TextBlockStyle[])
   for (const block of normalized) {
     const paragraph = doc.createElementNS(NS.a, 'a:p');
     const align = normalizeAlign(block.align);
-    if (align) {
+    const needsPPr =
+      align !== undefined ||
+      block.lineSpacing !== undefined ||
+      block.spaceBefore !== undefined ||
+      block.spaceAfter !== undefined;
+    if (needsPPr) {
       const pPr = doc.createElementNS(NS.a, 'a:pPr');
-      pPr.setAttribute('algn', align);
+      if (align) pPr.setAttribute('algn', align);
+      appendParagraphSpacing(doc, pPr, block);
       paragraph.appendChild(pPr);
     }
     if (block.runs && block.runs.length > 0) {
@@ -389,10 +442,15 @@ export const normalizeTextAnchor = (value: string): string => {
   return normalized;
 };
 
-/** Set a:bodyPr vertical anchor and/or wrap. */
+/** Set a:bodyPr vertical anchor, wrap, insets, and/or autofit. */
 export const setBodyPrOptions = (
   shape: Element,
-  options: { anchor?: string; wrap?: string },
+  options: {
+    anchor?: string;
+    wrap?: string;
+    insets?: { left?: number; right?: number; top?: number; bottom?: number };
+    autofit?: 'none' | 'shrink' | 'resize';
+  },
 ): void => {
   const bodyPr = ensureBodyPr(shape);
   if (options.anchor !== undefined)
@@ -401,6 +459,32 @@ export const setBodyPrOptions = (
     if (options.wrap !== 'none' && options.wrap !== 'square')
       throw new Error('wrap must be "none" or "square"');
     bodyPr.setAttribute('wrap', options.wrap);
+  }
+  if (options.insets) {
+    if (options.insets.left !== undefined) bodyPr.setAttribute('lIns', String(options.insets.left));
+    if (options.insets.right !== undefined)
+      bodyPr.setAttribute('rIns', String(options.insets.right));
+    if (options.insets.top !== undefined) bodyPr.setAttribute('tIns', String(options.insets.top));
+    if (options.insets.bottom !== undefined)
+      bodyPr.setAttribute('bIns', String(options.insets.bottom));
+  }
+  if (options.autofit !== undefined) {
+    for (const child of [...children(bodyPr)])
+      if (
+        child.localName === 'noAutofit' ||
+        child.localName === 'normAutofit' ||
+        child.localName === 'spAutoFit'
+      )
+        bodyPr.removeChild(child);
+    const doc = bodyPr.ownerDocument;
+    if (!doc) throw new Error('Element has no document');
+    const tag =
+      options.autofit === 'none'
+        ? 'a:noAutofit'
+        : options.autofit === 'shrink'
+          ? 'a:normAutofit'
+          : 'a:spAutoFit';
+    bodyPr.appendChild(doc.createElementNS(NS.a, tag));
   }
 };
 export const cNvPr = (node: Element): Element | undefined => first(node, 'cNvPr');

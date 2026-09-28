@@ -14,7 +14,14 @@ import { resolveTarget, resolveToRef, type ParsedTarget } from './addressing.js'
 import { nodeFor, shapeByCNvPrId } from './node-for.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { assertWritable } from './edition.js';
-import { addElement, duplicateElement, resolveTableFrame, updateChart } from './elements.js';
+import {
+  addElement,
+  duplicateElement,
+  resolveColumnWidthsEmu,
+  resolveTableFrame,
+  updateChart,
+} from './elements.js';
+import { harveyBallPieAdj, isStShapeType } from './shape-presets.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
@@ -50,6 +57,7 @@ const mapTextRun = (run: {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  baseline?: 'super' | 'sub';
 }): TextRunStyle => {
   const styled: TextRunStyle = { text: run.text };
   if (run.fontSize !== undefined) (styled as { fontSize?: number }).fontSize = run.fontSize;
@@ -58,6 +66,8 @@ const mapTextRun = (run: {
   if (run.bold !== undefined) (styled as { bold?: boolean }).bold = run.bold;
   if (run.italic !== undefined) (styled as { italic?: boolean }).italic = run.italic;
   if (run.underline !== undefined) (styled as { underline?: boolean }).underline = run.underline;
+  if (run.baseline !== undefined)
+    (styled as { baseline?: 'super' | 'sub' }).baseline = run.baseline;
   return styled;
 };
 
@@ -83,6 +93,14 @@ const mapTextBlock = (block: Record<string, unknown>): TextBlockStyle => {
   if (typeof block['underline'] === 'boolean')
     (styled as { underline?: boolean }).underline = block['underline'];
   if (typeof block['align'] === 'string') (styled as { align?: string }).align = block['align'];
+  if (typeof block['lineSpacing'] === 'number')
+    (styled as { lineSpacing?: number }).lineSpacing = block['lineSpacing'];
+  if (block['spaceBefore'] !== undefined)
+    (styled as { spaceBefore?: number | string }).spaceBefore = block['spaceBefore'] as
+      number | string;
+  if (block['spaceAfter'] !== undefined)
+    (styled as { spaceAfter?: number | string }).spaceAfter = block['spaceAfter'] as
+      number | string;
   return styled;
 };
 
@@ -658,6 +676,53 @@ const shapeTypeToElement = (
         type: 'audio',
         ...(typeof fields['file'] === 'string' ? { path: fields['file'] } : {}),
       };
+    case 'preset': {
+      const preset = typeof fields['preset'] === 'string' ? fields['preset'] : '';
+      if (!isStShapeType(preset))
+        throw new Error(
+          `Invalid preset "${preset}"; must be an OOXML ST_ShapeType (e.g. pie, blockArc, leftBrace)`,
+        );
+      return {
+        ...base,
+        kind: 'shape',
+        type: 'shape',
+        preset,
+        txBox: false,
+        ...(typeof fields['adjust'] === 'object' && fields['adjust'] !== null
+          ? { adjust: fields['adjust'] }
+          : {}),
+      };
+    }
+    case 'harvey-ball': {
+      const hbValue = fields['value'];
+      if (hbValue !== 0 && hbValue !== 0.25 && hbValue !== 0.5 && hbValue !== 0.75 && hbValue !== 1)
+        throw new Error('harvey-ball requires value: 0 | 0.25 | 0.5 | 0.75 | 1');
+      if (hbValue === 0)
+        return {
+          ...base,
+          kind: 'shape',
+          type: 'shape',
+          preset: 'ellipse',
+          txBox: false,
+          fill: 'none',
+        };
+      if (hbValue === 1)
+        return {
+          ...base,
+          kind: 'shape',
+          type: 'shape',
+          preset: 'ellipse',
+          txBox: false,
+        };
+      return {
+        ...base,
+        kind: 'shape',
+        type: 'shape',
+        preset: 'pie',
+        txBox: false,
+        adjust: { adj: harveyBallPieAdj(hbValue) },
+      };
+    }
   }
 };
 
@@ -806,21 +871,47 @@ export async function mutate(
       ...(command.width !== undefined ? { width: command.width } : {}),
       ...(command.height !== undefined ? { height: command.height } : {}),
     });
-    const element = shapeTypeToElement(command.shapeType, {
-      ...(command.name !== undefined ? { name: command.name } : {}),
-      ...(role !== undefined ? { role } : {}),
-      ...geom,
-      ...(command.file !== undefined ? { file: command.file } : {}),
-      ...(command.blocks === undefined && command.text !== undefined ? { text: command.text } : {}),
-      ...(command.cornerRadius !== undefined ? { cornerRadius: command.cornerRadius } : {}),
-      ...(command.rows !== undefined ? { rows: command.rows } : {}),
-      ...(command.theme !== undefined ? { theme: command.theme } : {}),
-      ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
-      ...(command.chartType !== undefined ? { chartType: command.chartType } : {}),
-      ...(command.data !== undefined ? { data: command.data } : {}),
-      ...(command.showDataLabels !== undefined ? { showDataLabels: command.showDataLabels } : {}),
-    });
-    const created = await addElement(archive, slide.partUri, doc, parent, element);
+    let element: Record<string, unknown>;
+    try {
+      element = shapeTypeToElement(command.shapeType, {
+        ...(command.name !== undefined ? { name: command.name } : {}),
+        ...(role !== undefined ? { role } : {}),
+        ...geom,
+        ...(command.file !== undefined ? { file: command.file } : {}),
+        ...(command.blocks === undefined && command.text !== undefined
+          ? { text: command.text }
+          : {}),
+        ...(command.cornerRadius !== undefined ? { cornerRadius: command.cornerRadius } : {}),
+        ...(command.preset !== undefined ? { preset: command.preset } : {}),
+        ...(command.adjust !== undefined ? { adjust: command.adjust } : {}),
+        ...(command.value !== undefined ? { value: command.value } : {}),
+        ...(command.rows !== undefined ? { rows: command.rows } : {}),
+        ...(command.theme !== undefined ? { theme: command.theme } : {}),
+        ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
+        ...(command.columnWidths !== undefined ? { columnWidths: command.columnWidths } : {}),
+        ...(command.merges !== undefined ? { merges: command.merges } : {}),
+        ...(command.fontSize !== undefined ? { fontSize: command.fontSize } : {}),
+        ...(command.fontFamily !== undefined ? { fontFamily: command.fontFamily } : {}),
+        ...(command.chartType !== undefined ? { chartType: command.chartType } : {}),
+        ...(command.data !== undefined ? { data: command.data } : {}),
+        ...(command.showDataLabels !== undefined ? { showDataLabels: command.showDataLabels } : {}),
+        ...(command.legend !== undefined ? { legend: command.legend } : {}),
+        ...(command.valueAxis !== undefined ? { valueAxis: command.valueAxis } : {}),
+        ...(command.categoryAxis !== undefined ? { categoryAxis: command.categoryAxis } : {}),
+        ...(command.insets !== undefined ? { insets: command.insets } : {}),
+        ...(command.autofit !== undefined ? { autofit: command.autofit } : {}),
+        ...(command.anchor !== undefined ? { anchor: command.anchor } : {}),
+        ...(command.wrap !== undefined ? { wrap: command.wrap } : {}),
+      });
+    } catch (cause) {
+      return err('INVALID_COMMAND', cause instanceof Error ? cause.message : 'Failed to add shape');
+    }
+    let created: Element;
+    try {
+      created = await addElement(archive, slide.partUri, doc, parent, element);
+    } catch (cause) {
+      return err('INVALID_COMMAND', cause instanceof Error ? cause.message : 'Failed to add shape');
+    }
     const diagnostics: Diagnostic[] = [];
     if (command.shapeType === 'table' && command.rows) {
       tableLayout = resolveTableFrame(element, archive);
@@ -833,6 +924,19 @@ export async function mutate(
           }),
         );
       }
+      if (command.columnWidths) {
+        const cols = Math.max(1, ...command.rows.map((r) => r.length));
+        const width = typeof element['width'] === 'number' ? element['width'] : 914400 * cols;
+        const resolved = resolveColumnWidthsEmu(command.columnWidths, cols, width as number);
+        if (resolved.normalized) {
+          diagnostics.push({
+            severity: 'warning',
+            code: 'COLUMN_WIDTHS_NORMALIZED',
+            message:
+              'columnWidths sum did not match table width; widths were scaled proportionally',
+          });
+        }
+      }
     }
     if (command.chartType === 'combo') {
       diagnostics.push({
@@ -842,10 +946,12 @@ export async function mutate(
           'combo charts write into PPTX, but community deckuse render may show an Advanced Chart placeholder; prefer column/bar/line/pie for visual QA',
       });
     }
-    if (command.fill !== undefined || command.stroke !== undefined) {
+    const fill = command.fill ?? element['fill'];
+    const stroke = command.stroke;
+    if (fill !== undefined || stroke !== undefined) {
       const styleProps: Record<string, unknown> = {};
-      if (command.fill !== undefined) styleProps['fill'] = command.fill;
-      if (command.stroke !== undefined) styleProps['stroke'] = command.stroke;
+      if (fill !== undefined) styleProps['fill'] = fill;
+      if (stroke !== undefined) styleProps['stroke'] = stroke;
       const styled = applyShapeProperties(created, styleProps, {
         archive,
         partUri: slide.partUri,
@@ -853,12 +959,19 @@ export async function mutate(
       if (!styled.ok) return styled;
       diagnostics.push(...styled.diagnostics);
     }
-    if (command.anchor !== undefined || command.wrap !== undefined) {
+    if (
+      command.anchor !== undefined ||
+      command.wrap !== undefined ||
+      command.insets !== undefined ||
+      command.autofit !== undefined
+    ) {
       const body = applyShapeProperties(
         created,
         {
           ...(command.anchor !== undefined ? { anchor: command.anchor } : {}),
           ...(command.wrap !== undefined ? { wrap: command.wrap } : {}),
+          ...(command.insets !== undefined ? { insets: command.insets } : {}),
+          ...(command.autofit !== undefined ? { autofit: command.autofit } : {}),
         },
         { archive, partUri: slide.partUri },
       );
@@ -1117,6 +1230,7 @@ export async function mutate(
       if (!applied.ok) return applied;
       if (applied.value.applied.length === 0)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
+      diagnostics.push(...applied.value.diagnostics);
     } else {
       const applied = applyShapeProperties(node, properties, {
         archive,

@@ -11,7 +11,9 @@ import {
   normalizeAlign,
   setBodyPrOptions,
   setNodeText,
+  spacingToSpcPts,
 } from './xml.js';
+import { parseLength, type LengthInput } from '../core/index.js';
 
 const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
 const FONT_FAMILY_ALIASES = ['fontFamily', 'font', 'typeface'] as const;
@@ -38,6 +40,12 @@ const SHAPE_KEYS = new Set([
   'anchor',
   'valign',
   'cornerRadius',
+  'insets',
+  'autofit',
+  'lineSpacing',
+  'spaceBefore',
+  'spaceAfter',
+  'baseline',
   ...STROKE_ALIASES,
   ...FONT_FAMILY_ALIASES,
   ...FONT_SIZE_ALIASES,
@@ -50,6 +58,7 @@ const CHART_KEYS = new Set([
   'text',
   'textColor',
   'fontColor',
+  'fontSize',
   'gapWidth',
   'showMajorGridlines',
   'showDataLabels',
@@ -58,6 +67,9 @@ const CHART_KEYS = new Set([
   'fill',
   'background',
   'gridlineColor',
+  'legend',
+  'valueAxis',
+  'categoryAxis',
 ]);
 
 const EMU_PER_PT = 12700;
@@ -549,18 +561,115 @@ export function applyShapeProperties(
     }
 
     const anchorRaw = properties['anchor'] ?? properties['valign'];
-    if (anchorRaw !== undefined || properties['wrap'] !== undefined) {
+    if (
+      anchorRaw !== undefined ||
+      properties['wrap'] !== undefined ||
+      properties['insets'] !== undefined ||
+      properties['autofit'] !== undefined
+    ) {
       if (anchorRaw !== undefined && typeof anchorRaw !== 'string')
         throw new Error('anchor/valign must be a string');
       if (properties['wrap'] !== undefined && typeof properties['wrap'] !== 'string')
         throw new Error('wrap must be a string');
+      let insetsEmu: { left?: number; right?: number; top?: number; bottom?: number } | undefined;
+      if (properties['insets'] !== undefined) {
+        if (typeof properties['insets'] !== 'object' || properties['insets'] === null)
+          throw new Error('insets must be an object with left/right/top/bottom');
+        const raw = properties['insets'] as Record<string, unknown>;
+        insetsEmu = {};
+        for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+          if (raw[side] === undefined) continue;
+          if (typeof raw[side] !== 'number' && typeof raw[side] !== 'string')
+            throw new Error(`insets.${side} must be a length`);
+          insetsEmu[side] = parseLength(raw[side] as LengthInput, {
+            axis: side === 'left' || side === 'right' ? 'x' : 'y',
+          });
+        }
+      }
+      let autofit: 'none' | 'shrink' | 'resize' | undefined;
+      if (properties['autofit'] !== undefined) {
+        if (
+          properties['autofit'] !== 'none' &&
+          properties['autofit'] !== 'shrink' &&
+          properties['autofit'] !== 'resize'
+        )
+          throw new Error('autofit must be none, shrink, or resize');
+        autofit = properties['autofit'];
+      }
       setBodyPrOptions(node, {
         ...(typeof anchorRaw === 'string' ? { anchor: anchorRaw } : {}),
         ...(typeof properties['wrap'] === 'string' ? { wrap: properties['wrap'] } : {}),
+        ...(insetsEmu ? { insets: insetsEmu } : {}),
+        ...(autofit !== undefined ? { autofit } : {}),
       });
       if (typeof anchorRaw === 'string')
         applied.push(properties['anchor'] !== undefined ? 'anchor' : 'valign');
       if (typeof properties['wrap'] === 'string') applied.push('wrap');
+      if (insetsEmu) applied.push('insets');
+      if (autofit !== undefined) applied.push('autofit');
+    }
+
+    if ('lineSpacing' in properties || 'spaceBefore' in properties || 'spaceAfter' in properties) {
+      const paragraphs = paragraphNodes(node);
+      if (paragraphs.length === 0) throw new Error('Element has no paragraphs for spacing');
+      const doc = node.ownerDocument;
+      if (!doc) throw new Error('Element has no document');
+      for (const p of paragraphs) {
+        const pPr = ensurePPr(p);
+        if ('lineSpacing' in properties) {
+          const ls = properties['lineSpacing'];
+          if (typeof ls !== 'number' || !(ls > 0))
+            throw new Error('lineSpacing must be a positive number');
+          for (const child of [...children(pPr)])
+            if (child.localName === 'lnSpc') pPr.removeChild(child);
+          const lnSpc = doc.createElementNS(NS.a, 'a:lnSpc');
+          const spcPct = doc.createElementNS(NS.a, 'a:spcPct');
+          spcPct.setAttribute('val', String(Math.round(ls * 100_000)));
+          lnSpc.appendChild(spcPct);
+          pPr.appendChild(lnSpc);
+        }
+        if ('spaceBefore' in properties) {
+          for (const child of [...children(pPr)])
+            if (child.localName === 'spcBef') pPr.removeChild(child);
+          const spcBef = doc.createElementNS(NS.a, 'a:spcBef');
+          const spcPts = doc.createElementNS(NS.a, 'a:spcPts');
+          spcPts.setAttribute(
+            'val',
+            String(spacingToSpcPts(properties['spaceBefore'] as number | string)),
+          );
+          spcBef.appendChild(spcPts);
+          pPr.appendChild(spcBef);
+        }
+        if ('spaceAfter' in properties) {
+          for (const child of [...children(pPr)])
+            if (child.localName === 'spcAft') pPr.removeChild(child);
+          const spcAft = doc.createElementNS(NS.a, 'a:spcAft');
+          const spcPts = doc.createElementNS(NS.a, 'a:spcPts');
+          spcPts.setAttribute(
+            'val',
+            String(spacingToSpcPts(properties['spaceAfter'] as number | string)),
+          );
+          spcAft.appendChild(spcPts);
+          pPr.appendChild(spcAft);
+        }
+      }
+      if ('lineSpacing' in properties) applied.push('lineSpacing');
+      if ('spaceBefore' in properties) applied.push('spaceBefore');
+      if ('spaceAfter' in properties) applied.push('spaceAfter');
+    }
+
+    if ('baseline' in properties) {
+      const baseline = properties['baseline'];
+      if (baseline !== 'super' && baseline !== 'sub' && baseline !== null)
+        throw new Error('baseline must be "super", "sub", or null');
+      const rPrs = runPropertyTargets(node);
+      if (rPrs.length === 0) throw new Error('Element has no text runs for baseline');
+      for (const rPr of rPrs) {
+        if (baseline === 'super') rPr.setAttribute('baseline', '30000');
+        else if (baseline === 'sub') rPr.setAttribute('baseline', '-25000');
+        else rPr.removeAttribute('baseline');
+      }
+      applied.push('baseline');
     }
 
     if ('cornerRadius' in properties) {

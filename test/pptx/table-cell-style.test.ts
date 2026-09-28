@@ -326,3 +326,165 @@ describe('table cell style read/write', () => {
     ).toBe(true);
   });
 });
+
+describe('table height remeasure after cell style changes', () => {
+  const blankSlide = async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-table-h-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await writeArchive(source, (a) => {
+      minimalParts(
+        a,
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld></p:sld>`,
+      );
+    });
+    await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    return { workspace };
+  };
+
+  it('table(auto) + font.size:18 grows row height and frame', async () => {
+    const { workspace } = await blankSlide();
+    const added = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        slide: 1,
+        shapeType: 'table',
+        name: 'AutoTable',
+        width: '400px',
+        height: 'auto',
+        rows: [['Header'], ['Short']],
+      },
+      {},
+    );
+    expect(added.ok).toBe(true);
+    const before = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    const beforeH = Number(/<a:tr h="(\d+)"/.exec(before)?.[1] ?? 0);
+    const beforeCy = Number(/<a:ext cx="\d+" cy="(\d+)"/.exec(before)?.[1] ?? 0);
+
+    const styled = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:AutoTable/cell:0:0',
+        properties: { 'font.size': 18, 'font.weight': 'bold' },
+      },
+      {},
+    );
+    expect(styled.ok).toBe(true);
+    const after = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    const afterH = Number(/<a:tr h="(\d+)"/.exec(after)?.[1] ?? 0);
+    const afterCy = Number(/<a:ext cx="\d+" cy="(\d+)"/.exec(after)?.[1] ?? 0);
+    expect(afterH).toBeGreaterThanOrEqual(beforeH);
+    expect(afterCy).toBeGreaterThanOrEqual(beforeCy);
+  });
+
+  it('table(auto) + font.weight:bold triggers remeasure', async () => {
+    const { workspace } = await blankSlide();
+    await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        slide: 1,
+        shapeType: 'table',
+        name: 'BoldTable',
+        width: '500px',
+        height: 'auto',
+        rows: [
+          ['A. 高端出海（欧洲/中东）', '综合评价很长很长很长'],
+          ['B. 下沉', '现金牛'],
+        ],
+      },
+      {},
+    );
+    const styled = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:BoldTable/cell:0:0',
+        properties: { 'font.weight': 'bold' },
+      },
+      {},
+    );
+    expect(styled.ok).toBe(true);
+    const xml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    expect(xml).toContain('b="1"');
+    expect(xml).toMatch(/<a:tr h="\d+"/);
+  });
+
+  it('table(fixed height) + large font emits TABLE_HEIGHT_MAY_CLIP', async () => {
+    const { workspace } = await blankSlide();
+    await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        slide: 1,
+        shapeType: 'table',
+        name: 'FixedTable',
+        width: '200px',
+        height: '40px',
+        rows: [['Very long header text that will wrap when font is large'], ['Row two also long']],
+      },
+      {},
+    );
+    const styled = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:FixedTable/cell:0:0',
+        properties: { 'font.size': 28, 'font.weight': 'bold' },
+      },
+      {},
+    );
+    expect(styled.ok).toBe(true);
+    const diagnostics = styled.diagnostics ?? [];
+    expect(
+      diagnostics.some((d) => d.code === 'TABLE_HEIGHT_MAY_CLIP') ||
+        ((styled.value as { warnings?: string[] }).warnings ?? []).some((w) => w.includes('clip')),
+    ).toBe(true);
+  });
+
+  it('CJK text measurement does not under-estimate width', async () => {
+    const { workspace } = await blankSlide();
+    const result = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'addShape',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        slide: 1,
+        shapeType: 'table',
+        name: 'CjkTable',
+        width: '300px',
+        height: 'auto',
+        columnWidths: ['60%', '40%'],
+        rows: [
+          ['战略选项名称非常长需要换行', '综合评价'],
+          ['A. 高端出海（欧洲/中东）', '优先推进'],
+        ],
+      },
+      {},
+    );
+    expect(result.ok).toBe(true);
+    const xml = await readFile(join(workspace, 'source/ppt/slides/slide1.xml'), 'utf8');
+    const rowHs = [...xml.matchAll(/<a:tr h="(\d+)"/g)].map((m) => Number(m[1]));
+    // With CJK calibration, wrapped first column should need more than a single-line row.
+    expect(rowHs[0]!).toBeGreaterThan(200_000);
+    expect(xml).toContain('lang="zh-CN"');
+  });
+});

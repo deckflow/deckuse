@@ -77,9 +77,15 @@ export const textRunSchema = z
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
     underline: z.boolean().optional(),
+    /** Superscript / subscript (OOXML baseline ±30000/±25000). */
+    baseline: z.enum(['super', 'sub']).optional(),
   })
   .strict();
 export type TextRun = z.infer<typeof textRunSchema>;
+
+/** Paragraph spacing: bare number = pt, or unit string (`6pt`). */
+export const spacingValueSchema = z.union([z.number(), z.string().min(1)]);
+export type SpacingValue = z.infer<typeof spacingValueSchema>;
 
 export const textBlockSchema = z
   .object({
@@ -94,6 +100,12 @@ export const textBlockSchema = z
     italic: z.boolean().optional(),
     underline: z.boolean().optional(),
     align: z.enum(['l', 'ctr', 'r', 'just', 'left', 'center', 'right', 'justify']).optional(),
+    /** Line spacing multiplier (1 = single, 1.1 = 110%). */
+    lineSpacing: z.number().positive().optional(),
+    /** Space before paragraph (pt number or unit string). */
+    spaceBefore: spacingValueSchema.optional(),
+    /** Space after paragraph (pt number or unit string). */
+    spaceAfter: spacingValueSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -412,6 +424,14 @@ const setSlideLayoutCommandSchema = z
   })
   .strict();
 
+const chartAxisSchema = z
+  .object({
+    visible: z.boolean().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+  })
+  .strict();
+
 const chartDataSchema = z
   .object({
     title: z.string().optional(),
@@ -431,6 +451,22 @@ const chartDataSchema = z
           .strict(),
       )
       .min(1),
+  })
+  .strict();
+
+const tableMergeSchema = z
+  .object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+  })
+  .strict();
+
+const insetsSchema = z
+  .object({
+    left: lengthValueSchema.optional(),
+    right: lengthValueSchema.optional(),
+    top: lengthValueSchema.optional(),
+    bottom: lengthValueSchema.optional(),
   })
   .strict();
 
@@ -469,6 +505,10 @@ const addShapeCommandSchema = z
       'chart',
       'video',
       'audio',
+      /** Pass-through OOXML ST_ShapeType via `preset`. */
+      'preset',
+      /** Consulting Harvey ball: ellipse + pie; set `value` 0|0.25|0.5|0.75|1. */
+      'harvey-ball',
     ]),
     name: z.string().min(1).optional(),
     role: z.string().min(1).optional(),
@@ -478,6 +518,14 @@ const addShapeCommandSchema = z
     height: lengthValueSchema.optional(),
     /** Rounded-rect corner radius: 0–1 fraction of half the shorter side (OOXML adj). */
     cornerRadius: z.number().min(0).max(1).optional(),
+    /** OOXML ST_ShapeType when shapeType is `preset`. */
+    preset: z.string().min(1).optional(),
+    /** Preset geometry adjust guides (name → 0–1 fraction, written as OOXML val*50000 or raw). */
+    adjust: z.record(z.string(), z.number()).optional(),
+    /** Harvey-ball fill fraction. */
+    value: z
+      .union([z.literal(0), z.literal(0.25), z.literal(0.5), z.literal(0.75), z.literal(1)])
+      .optional(),
     file: z.string().min(1).optional(),
     text: z.string().optional(),
     /** Rich paragraphs; when set, preferred over `text`. */
@@ -486,6 +534,10 @@ const addShapeCommandSchema = z
     anchor: z.enum(['t', 'ctr', 'b', 'top', 'middle', 'bottom']).optional(),
     /** Text wrapping: square (default) or none. */
     wrap: z.enum(['square', 'none']).optional(),
+    /** Text body insets (lIns/rIns/tIns/bIns). */
+    insets: insetsSchema.optional(),
+    /** Text autofit: none | shrink | resize. */
+    autofit: z.enum(['none', 'shrink', 'resize']).optional(),
     fill: z
       .union([
         z.string().min(1),
@@ -517,9 +569,23 @@ const addShapeCommandSchema = z
     theme: z.enum(['minimal', 'zebra']).optional(),
     /** Column alignments by index: l|ctr|r (or left|center|right). */
     alignColumns: z.array(z.enum(['l', 'ctr', 'r', 'left', 'center', 'right'])).optional(),
+    /** Column widths: % of table, unit string, or EMU number. */
+    columnWidths: z.array(lengthValueSchema).optional(),
+    /** Cell merges as { from: "r:c", to: "r:c" }. */
+    merges: z.array(tableMergeSchema).optional(),
+    /** Table default font size (pt). */
+    fontSize: z.number().positive().optional(),
+    /** Table default font family. */
+    fontFamily: z.string().min(1).optional(),
     chartType: z.enum(['bar', 'column', 'line', 'pie', 'combo']).optional(),
     data: chartDataSchema.optional(),
     showDataLabels: z.boolean().optional(),
+    /** Chart legend: false hides; string sets position. */
+    legend: z.union([z.boolean(), z.enum(['b', 't', 'r', 'l'])]).optional(),
+    /** Value (Y) axis options. */
+    valueAxis: chartAxisSchema.optional(),
+    /** Category (X) axis options. */
+    categoryAxis: chartAxisSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -539,6 +605,20 @@ const addShapeCommandSchema = z
         message:
           '--type table requires --rows \'<json>\' (example: --rows \'[["A","B"],["1","2"]]\')',
         path: ['rows'],
+      });
+    }
+    if (value.shapeType === 'preset' && !value.preset) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'shapeType "preset" requires preset (OOXML ST_ShapeType, e.g. "pie")',
+        path: ['preset'],
+      });
+    }
+    if (value.shapeType === 'harvey-ball' && value.value === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'shapeType "harvey-ball" requires value: 0 | 0.25 | 0.5 | 0.75 | 1',
+        path: ['value'],
       });
     }
     if (value.shapeType === 'chart') {

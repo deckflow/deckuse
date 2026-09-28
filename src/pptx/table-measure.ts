@@ -18,12 +18,17 @@ export interface TableMeasureInput {
   readonly fontPt?: number;
   /** When true, row 0 uses bold glyph widths. */
   readonly headerBold?: boolean;
+  /** Per-column widths in EMU; defaults to equal split of widthEmu. */
+  readonly colWidthsEmu?: readonly number[];
+  /** Optional per-cell font overrides: [row][col] → { fontPt?, bold? }. */
+  readonly cellStyles?: readonly (readonly ({ fontPt?: number; bold?: boolean } | undefined)[])[];
 }
 
 export interface TableMeasureResult {
   readonly rowHeightsEmu: readonly number[];
   readonly totalHeightEmu: number;
   readonly colWidthEmu: number;
+  readonly colWidthsEmu: readonly number[];
   readonly cols: number;
 }
 
@@ -37,6 +42,10 @@ export const estimateTableRowHeightEmu = (fontPt = TABLE_DEFAULT_FONT_PT): numbe
 export const estimateTableHeightEmu = (rowCount: number, fontPt = TABLE_DEFAULT_FONT_PT): number =>
   Math.round(Math.max(1, rowCount) * estimateTableRowHeightEmu(fontPt) * TABLE_HEIGHT_SAFETY);
 
+/** CJK characters are typically wider than Latin in our heuristic; bump slightly. */
+const CJK_WIDTH_FACTOR = 1.05;
+const hasCjk = (text: string): boolean => /[\u3400-\u9FFF\uF900-\uFAFF]/.test(text);
+
 /**
  * Per-row height from content wrap heuristics (measureText + cell padding/borders).
  */
@@ -45,11 +54,15 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
   const rows = input.rows.length > 0 ? input.rows : [['']];
   const cols = Math.max(1, ...rows.map((r) => r.length));
   const widthEmu = Math.max(1, input.widthEmu);
-  const colWidthEmu = Math.floor(widthEmu / cols);
-  const contentWidthEmu = Math.max(
-    1,
-    colWidthEmu - TABLE_CELL_PAD_X_EMU * 2 - TABLE_CELL_BORDER_EMU * 2,
-  );
+  const equalCol = Math.floor(widthEmu / cols);
+  const colWidthsEmu =
+    input.colWidthsEmu && input.colWidthsEmu.length === cols
+      ? [...input.colWidthsEmu]
+      : Array.from({ length: cols }, () => equalCol);
+  if (colWidthsEmu.length > 0 && !input.colWidthsEmu) {
+    const sum = colWidthsEmu.reduce((a, b) => a + b, 0);
+    colWidthsEmu[colWidthsEmu.length - 1]! += widthEmu - sum;
+  }
   const headerBold = input.headerBold !== false;
   const minRow = estimateTableRowHeightEmu(fontPt);
 
@@ -58,11 +71,21 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
     for (let c = 0; c < cols; c++) {
       const raw = row[c];
       const text = typeof raw === 'string' ? raw : '';
+      const style = input.cellStyles?.[rowIndex]?.[c];
+      const cellFont = style?.fontPt ?? fontPt;
+      const cellBold = style?.bold ?? (headerBold && rowIndex === 0);
+      const colW = colWidthsEmu[c] ?? equalCol;
+      const contentWidthEmu = Math.max(
+        1,
+        colW - TABLE_CELL_PAD_X_EMU * 2 - TABLE_CELL_BORDER_EMU * 2,
+      );
       const measured = measureText({
         text: text.length > 0 ? text : ' ',
-        fontSize: fontPt,
-        bold: headerBold && rowIndex === 0,
-        maxWidthEmu: contentWidthEmu,
+        fontSize: cellFont,
+        bold: cellBold,
+        maxWidthEmu: hasCjk(text)
+          ? Math.max(1, Math.floor(contentWidthEmu / CJK_WIDTH_FACTOR))
+          : contentWidthEmu,
       });
       const cellH = measured.heightEmu + TABLE_CELL_PAD_Y_EMU * 2 + TABLE_CELL_BORDER_EMU * 2;
       maxCell = Math.max(maxCell, cellH);
@@ -82,7 +105,13 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
     }
   }
 
-  return { rowHeightsEmu, totalHeightEmu, colWidthEmu, cols };
+  return {
+    rowHeightsEmu,
+    totalHeightEmu,
+    colWidthEmu: colWidthsEmu[0] ?? equalCol,
+    colWidthsEmu,
+    cols,
+  };
 }
 
 export interface TableFrameLayout {

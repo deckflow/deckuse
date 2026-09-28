@@ -36,6 +36,12 @@ export interface ChartCreateInput {
   showDataLabels?: boolean;
   /** Number format code for value axis / numLit (e.g. `0%`, `#,##0`). */
   valueFormatCode?: string;
+  /** false hides legend; string sets position. Default: bottom for non-pie, none for pie. */
+  legend?: boolean | 'b' | 't' | 'r' | 'l';
+  valueAxis?: { visible?: boolean; min?: number; max?: number };
+  categoryAxis?: { visible?: boolean };
+  /** Chart-wide default font size in pt (chartSpace txPr). */
+  fontSize?: number;
 }
 
 const esc = (value: string) =>
@@ -158,21 +164,35 @@ const plotXml = (
   return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${ser}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
 };
 
-const axesXml = (chartType: ChartType, series: ChartSeriesInput[], formatCode?: string) => {
+const axesXml = (
+  chartType: ChartType,
+  series: ChartSeriesInput[],
+  formatCode?: string,
+  valueAxis?: { visible?: boolean; min?: number; max?: number },
+  categoryAxis?: { visible?: boolean },
+) => {
   if (chartType === 'pie') return '';
   const numFmt =
     formatCode && formatCode !== 'General'
       ? `<c:numFmt formatCode="${esc(formatCode)}" sourceLinked="0"/>`
       : '';
+  const catDelete = categoryAxis?.visible === false ? '1' : '0';
+  const valDelete = valueAxis?.visible === false ? '1' : '0';
+  const scalingInner = (axis?: { min?: number; max?: number }) => {
+    const parts = ['<c:orientation val="minMax"/>'];
+    if (typeof axis?.min === 'number') parts.push(`<c:min val="${String(axis.min)}"/>`);
+    if (typeof axis?.max === 'number') parts.push(`<c:max val="${String(axis.max)}"/>`);
+    return parts.join('');
+  };
   if (chartType === 'combo') {
     const needsSecondary =
       series.some((s) => s.axis === 'secondary') ||
       series.some((s) => (s.chart ?? 'column') === 'line');
-    const primary = `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
+    const primary = `<c:catAx><c:axId val="1"/><c:scaling>${scalingInner()}</c:scaling><c:delete val="${catDelete}"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling>${scalingInner(valueAxis)}</c:scaling><c:delete val="${valDelete}"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
     if (!needsSecondary) return primary;
-    return `${primary}<c:valAx><c:axId val="3"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="r"/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/><c:crosses val="max"/></c:valAx>`;
+    return `${primary}<c:valAx><c:axId val="3"/><c:scaling>${scalingInner(valueAxis)}</c:scaling><c:delete val="${valDelete}"/><c:axPos val="r"/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/><c:crosses val="max"/></c:valAx>`;
   }
-  return `<c:catAx><c:axId val="1"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
+  return `<c:catAx><c:axId val="1"/><c:scaling>${scalingInner()}</c:scaling><c:delete val="${catDelete}"/><c:axPos val="b"/><c:tickLblPos val="nextTo"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling>${scalingInner(valueAxis)}</c:scaling><c:delete val="${valDelete}"/><c:axPos val="l"/><c:majorGridlines/><c:tickLblPos val="nextTo"/>${numFmt}<c:crossAx val="1"/></c:valAx>`;
 };
 
 const titleXml = (title?: string) => {
@@ -180,16 +200,30 @@ const titleXml = (title?: string) => {
   return `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr><a:r><a:rPr lang="en-US"/><a:t>${esc(title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>`;
 };
 
+const legendXml = (chartType: ChartType, legend?: boolean | 'b' | 't' | 'r' | 'l'): string => {
+  if (legend === false) return '';
+  if (legend === true || legend === undefined) {
+    // Default: pie has no legend; others bottom.
+    if (chartType === 'pie') return '';
+    return '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>';
+  }
+  return `<c:legend><c:legendPos val="${legend}"/><c:overlay val="0"/></c:legend>`;
+};
+
+const chartSpaceTxPrXml = (fontSizePt?: number): string => {
+  if (fontSizePt === undefined) return '';
+  const sz = String(Math.round(fontSizePt * 100));
+  return `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}"/></a:pPr><a:endParaRPr sz="${sz}"/></a:p></c:txPr>`;
+};
+
 export function buildChartXml(input: ChartCreateInput): string {
   const categories = input.categories;
   const series = input.series;
   const showDataLabels = input.showDataLabels === true;
   const formatCode = input.valueFormatCode;
-  const legend =
-    input.chartType === 'pie'
-      ? ''
-      : '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>';
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories, showDataLabels, formatCode)}${axesXml(input.chartType, series, formatCode)}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart></c:chartSpace>`;
+  const legend = legendXml(input.chartType, input.legend);
+  const txPr = chartSpaceTxPrXml(input.fontSize);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="${NS.c}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><c:chart>${titleXml(input.title)}<c:plotArea><c:layout/>${plotXml(input.chartType, series, categories, showDataLabels, formatCode)}${axesXml(input.chartType, series, formatCode, input.valueAxis, input.categoryAxis)}</c:plotArea>${legend}<c:plotVisOnly val="1"/></c:chart>${txPr}</c:chartSpace>`;
 }
 
 export function createChartPart(
@@ -601,6 +635,131 @@ export function applyChartProperties(
         ? properties['axisFormatCode']
         : undefined;
   if (typeof formatCode === 'string') applyChartValueFormat(chartDoc, formatCode);
+
+  if ('legend' in properties) applyChartLegend(chartDoc, properties['legend']);
+  if ('valueAxis' in properties && typeof properties['valueAxis'] === 'object')
+    applyChartValueAxis(chartDoc, properties['valueAxis'] as Record<string, unknown>);
+  if ('categoryAxis' in properties && typeof properties['categoryAxis'] === 'object')
+    applyChartCategoryAxis(chartDoc, properties['categoryAxis'] as Record<string, unknown>);
+  if (typeof properties['fontSize'] === 'number')
+    applyChartFontSize(chartDoc, properties['fontSize']);
+}
+
+export function applyChartLegend(chartDoc: Document, legend: unknown): void {
+  const chart = first(chartDoc, 'chart');
+  if (!chart) throw new Error('Chart XML has no c:chart');
+  const existing = directChild(chart, 'legend') ?? first(chart, 'legend');
+  if (legend === false) {
+    if (existing) existing.parentNode?.removeChild(existing);
+    return;
+  }
+  const pos =
+    legend === true || legend === undefined
+      ? 'b'
+      : legend === 'b' || legend === 't' || legend === 'r' || legend === 'l'
+        ? legend
+        : undefined;
+  if (pos === undefined) throw new Error('legend must be false, true, or b|t|r|l');
+  if (existing) {
+    let legendPos = directChild(existing, 'legendPos');
+    if (!legendPos) {
+      legendPos = chartDoc.createElementNS(NS.c, 'c:legendPos');
+      if (existing.firstChild) existing.insertBefore(legendPos, existing.firstChild);
+      else existing.appendChild(legendPos);
+    }
+    legendPos.setAttribute('val', pos);
+    return;
+  }
+  const created = chartDoc.createElementNS(NS.c, 'c:legend');
+  const legendPos = chartDoc.createElementNS(NS.c, 'c:legendPos');
+  legendPos.setAttribute('val', pos);
+  created.appendChild(legendPos);
+  const overlay = chartDoc.createElementNS(NS.c, 'c:overlay');
+  overlay.setAttribute('val', '0');
+  created.appendChild(overlay);
+  // CT_Chart: legend after plotArea, before plotVisOnly.
+  const plotVisOnly = directChild(chart, 'plotVisOnly');
+  if (plotVisOnly) chart.insertBefore(created, plotVisOnly);
+  else chart.appendChild(created);
+}
+
+const setAxisDelete = (ax: Element, visible: boolean): void => {
+  let del = directChild(ax, 'delete');
+  if (!del) {
+    del = ax.ownerDocument!.createElementNS(NS.c, 'c:delete');
+    const after = directChild(ax, 'scaling') ?? directChild(ax, 'axId');
+    if (after?.nextSibling) ax.insertBefore(del, after.nextSibling);
+    else if (after) ax.appendChild(del);
+    else ax.appendChild(del);
+  }
+  del.setAttribute('val', visible ? '0' : '1');
+};
+
+const setAxisScaling = (ax: Element, min?: number, max?: number): void => {
+  let scaling = directChild(ax, 'scaling');
+  if (!scaling) {
+    scaling = ax.ownerDocument!.createElementNS(NS.c, 'c:scaling');
+    const after = directChild(ax, 'axId');
+    if (after?.nextSibling) ax.insertBefore(scaling, after.nextSibling);
+    else if (after) ax.appendChild(scaling);
+    else ax.appendChild(scaling);
+  }
+  const doc = ax.ownerDocument!;
+  if (typeof min === 'number') {
+    let node = directChild(scaling, 'min');
+    if (!node) {
+      node = doc.createElementNS(NS.c, 'c:min');
+      scaling.appendChild(node);
+    }
+    node.setAttribute('val', String(min));
+  }
+  if (typeof max === 'number') {
+    let node = directChild(scaling, 'max');
+    if (!node) {
+      node = doc.createElementNS(NS.c, 'c:max');
+      scaling.appendChild(node);
+    }
+    node.setAttribute('val', String(max));
+  }
+};
+
+export function applyChartValueAxis(chartDoc: Document, axis: Record<string, unknown>): void {
+  for (const ax of descendants(chartDoc, 'valAx')) {
+    if (typeof axis['visible'] === 'boolean') setAxisDelete(ax, axis['visible']);
+    if (typeof axis['min'] === 'number' || typeof axis['max'] === 'number')
+      setAxisScaling(
+        ax,
+        typeof axis['min'] === 'number' ? axis['min'] : undefined,
+        typeof axis['max'] === 'number' ? axis['max'] : undefined,
+      );
+  }
+}
+
+export function applyChartCategoryAxis(chartDoc: Document, axis: Record<string, unknown>): void {
+  for (const ax of descendants(chartDoc, 'catAx')) {
+    if (typeof axis['visible'] === 'boolean') setAxisDelete(ax, axis['visible']);
+  }
+}
+
+export function applyChartFontSize(chartDoc: Document, fontSizePt: number): void {
+  if (!(fontSizePt > 0)) throw new Error('fontSize must be a positive number (pt)');
+  const sz = String(Math.round(fontSizePt * 100));
+  const root = chartDoc.documentElement;
+  if (!root) throw new Error('Chart XML has no root');
+  let txPr = directChild(root, 'txPr');
+  if (!txPr) {
+    txPr = buildTxPr(chartDoc, '000000');
+    // chartSpace: txPr after spPr / chart
+    const spPr = directChild(root, 'spPr');
+    const chart = directChild(root, 'chart');
+    const after = spPr ?? chart;
+    if (after?.nextSibling) root.insertBefore(txPr, after.nextSibling);
+    else if (after) root.appendChild(txPr);
+    else root.appendChild(txPr);
+  }
+  for (const defRPr of descendants(txPr, 'defRPr')) defRPr.setAttribute('sz', sz);
+  for (const end of descendants(txPr, 'endParaRPr')) end.setAttribute('sz', sz);
+  for (const rPr of descendants(txPr, 'rPr')) rPr.setAttribute('sz', sz);
 }
 
 export function applyChartDataLabels(chartDoc: Document, show: boolean): void {

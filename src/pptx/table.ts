@@ -1,4 +1,11 @@
-import { err, ok, type Diagnostic, type Result } from '../core/index.js';
+import {
+  err,
+  ok,
+  parseLength,
+  type Diagnostic,
+  type LengthInput,
+  type Result,
+} from '../core/index.js';
 import type { Element } from '@xmldom/xmldom';
 import {
   applyShapeProperties,
@@ -11,6 +18,7 @@ import {
   estimateTableRowHeightEmu,
   layoutTableFrame,
   measureTableLayout,
+  tableHeightMayClipDiagnostic,
   type TableFrameLayout,
 } from './table-measure.js';
 import { NS, attr, children, descendants, first, setNodeText } from './xml.js';
@@ -450,6 +458,7 @@ const TABLE_STRUCTURAL_KEYS = new Set([
   'deleteColumn',
   'text',
   'name',
+  'columnWidths',
 ]);
 
 const TABLE_CELL_STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
@@ -480,6 +489,7 @@ const TABLE_CELL_KEYS = new Set([
   'text',
   'fill',
   'paragraph.align',
+  'merge',
   ...TABLE_CELL_STROKE_ALIASES,
   ...TABLE_CELL_PADDING_KEYS,
   ...TABLE_CELL_FONT_KEYS,
@@ -499,6 +509,162 @@ const setTableCellPadding = (cell: Element, properties: Record<string, unknown>)
   }
   return applied;
 };
+
+const applyTableColumnWidths = (graphicFrame: Element, raw: unknown): void => {
+  const tbl = tblOf(graphicFrame);
+  const doc = graphicFrame.ownerDocument;
+  if (!doc) throw new Error('Element has no document');
+  let grid = first(tbl, 'tblGrid');
+  if (!grid) {
+    grid = doc.createElementNS(NS.a, 'a:tblGrid');
+    const firstRow = directChildren(tbl, 'tr')[0];
+    if (firstRow) tbl.insertBefore(grid, firstRow);
+    else tbl.appendChild(grid);
+  }
+  const existing = directChildren(grid, 'gridCol');
+  const cols =
+    existing.length ||
+    Math.max(1, ...directChildren(tbl, 'tr').map((r) => directChildren(r, 'tc').length));
+  const widthEmu = tableWidthEmu(graphicFrame);
+  if (!Array.isArray(raw)) throw new Error('columnWidths must be an array');
+  const widths: number[] = [];
+  for (let i = 0; i < cols; i++) {
+    const entry = raw[i];
+    if (entry === undefined) {
+      widths.push(Math.floor(widthEmu / cols));
+      continue;
+    }
+    if (typeof entry === 'string' && entry.trim().endsWith('%')) {
+      const pct = Number(entry.trim().replace(/%$/, ''));
+      if (!Number.isFinite(pct)) throw new Error(`Invalid columnWidths[%]: ${entry}`);
+      widths.push(Math.round((pct / 100) * widthEmu));
+    } else if (typeof entry === 'number' || typeof entry === 'string') {
+      widths.push(parseLength(entry as LengthInput, { axis: 'x' }));
+    } else throw new Error('columnWidths entries must be lengths or percentages');
+  }
+  const sum = widths.reduce((a, b) => a + b, 0);
+  if (sum <= 0) throw new Error('columnWidths sum must be positive');
+  const scaled =
+    sum === widthEmu ? widths : widths.map((w) => Math.max(1, Math.round((w / sum) * widthEmu)));
+  if (sum !== widthEmu) {
+    const scaledSum = scaled.reduce((a, b) => a + b, 0);
+    scaled[scaled.length - 1]! += widthEmu - scaledSum;
+  }
+  for (let i = 0; i < cols; i++) {
+    let col = existing[i];
+    if (!col) {
+      col = doc.createElementNS(NS.a, 'a:gridCol');
+      grid.appendChild(col);
+    }
+    col.setAttribute('w', String(scaled[i]));
+  }
+  // Drop extra columns if widths array shrank (rare).
+  for (const extra of existing.slice(cols)) grid.removeChild(extra);
+};
+
+const applyCellMerge = (cell: Element, merge: unknown): void => {
+  if (typeof merge !== 'object' || merge === null) throw new Error('merge must be an object');
+  const rec = merge as Record<string, unknown>;
+  if (
+    typeof rec['gridSpan'] === 'number' &&
+    Number.isInteger(rec['gridSpan']) &&
+    rec['gridSpan'] > 1
+  )
+    cell.setAttribute('gridSpan', String(rec['gridSpan']));
+  else if (rec['gridSpan'] === null || rec['gridSpan'] === 1) cell.removeAttribute('gridSpan');
+  if (typeof rec['rowSpan'] === 'number' && Number.isInteger(rec['rowSpan']) && rec['rowSpan'] > 1)
+    cell.setAttribute('rowSpan', String(rec['rowSpan']));
+  else if (rec['rowSpan'] === null || rec['rowSpan'] === 1) cell.removeAttribute('rowSpan');
+  if (rec['hMerge'] === true) cell.setAttribute('hMerge', '1');
+  else if (rec['hMerge'] === false || rec['hMerge'] === null) cell.removeAttribute('hMerge');
+  if (rec['vMerge'] === true) cell.setAttribute('vMerge', '1');
+  else if (rec['vMerge'] === false || rec['vMerge'] === null) cell.removeAttribute('vMerge');
+};
+
+const findGraphicFrame = (node: Element): Element | undefined => {
+  let current: Element | null = node;
+  while (current) {
+    if (current.localName === 'graphicFrame') return current;
+    current = current.parentNode as Element | null;
+  }
+  return undefined;
+};
+
+const readCellFontPt = (tc: Element): number | undefined => {
+  const rPr = first(tc, 'rPr');
+  const sz = attr(rPr, 'sz');
+  if (sz === undefined) return undefined;
+  const n = Number(sz) / 100;
+  return Number.isFinite(n) ? n : undefined;
+};
+
+const readCellBold = (tc: Element): boolean => {
+  const rPr = first(tc, 'rPr');
+  const b = attr(rPr, 'b');
+  return b === '1' || b === 'true';
+};
+
+/** Remeasure table row heights after cell content/style changes. */
+export function remeasureTableAfterCellChange(graphicFrame: Element): {
+  diagnostics: Diagnostic[];
+  grew: boolean;
+} {
+  const tbl = first(graphicFrame, 'tbl');
+  if (!tbl) return { diagnostics: [], grew: false };
+  const rows = directChildren(tbl, 'tr');
+  if (rows.length === 0) return { diagnostics: [], grew: false };
+  const widthEmu = tableWidthEmu(graphicFrame);
+  const gridCols = descendants(graphicFrame, 'gridCol');
+  const colWidthsEmu =
+    gridCols.length > 0
+      ? gridCols.map((col) => Number(attr(col, 'w') ?? Math.floor(widthEmu / gridCols.length)))
+      : undefined;
+  const textRows = rows.map((tr) => directChildren(tr, 'tc').map((tc) => cellPlainText(tc)));
+  const cellStyles = rows.map((tr) =>
+    directChildren(tr, 'tc').map((tc) => {
+      const fontPt = readCellFontPt(tc);
+      const bold = readCellBold(tc);
+      return {
+        ...(fontPt !== undefined ? { fontPt } : {}),
+        ...(bold ? { bold: true } : {}),
+      };
+    }),
+  );
+  const measured = measureTableLayout({
+    rows: textRows,
+    widthEmu,
+    fontPt: 11,
+    ...(colWidthsEmu ? { colWidthsEmu } : {}),
+    cellStyles,
+  });
+  const xfrm = first(graphicFrame, 'xfrm');
+  const ext = xfrm ? first(xfrm, 'ext') : undefined;
+  const currentCy = Number(attr(ext, 'cy') ?? 0);
+  // Auto-like: frame was previously sized to content (±20% of measured).
+  // A much shorter fixed frame must NOT be grown — emit TABLE_HEIGHT_MAY_CLIP instead.
+  const ratio = currentCy / Math.max(measured.totalHeightEmu, 1);
+  const wasContentSized = currentCy > 0 && ratio >= 0.8 && ratio <= 1.25;
+  const diagnostics: Diagnostic[] = [];
+  let grew = false;
+  if (wasContentSized || currentCy <= 0) {
+    for (let i = 0; i < rows.length; i++) {
+      const h = measured.rowHeightsEmu[i] ?? estimateTableRowHeightEmu(11);
+      rows[i]!.setAttribute('h', String(h));
+    }
+    if (ext) {
+      if (measured.totalHeightEmu > currentCy) grew = true;
+      ext.setAttribute('cy', String(measured.totalHeightEmu));
+    }
+  } else if (measured.totalHeightEmu > currentCy * 1.1) {
+    diagnostics.push(
+      tableHeightMayClipDiagnostic({
+        estimatedEmu: measured.totalHeightEmu,
+        givenEmu: currentCy,
+      }),
+    );
+  }
+  return { diagnostics, grew };
+}
 
 export function applyTableProperties(
   node: Element,
@@ -549,6 +715,11 @@ export function applyTableProperties(
       applied.push('name');
     } else if (structural['name'] !== undefined) throw new Error('name must be a string');
 
+    if ('columnWidths' in structural) {
+      applyTableColumnWidths(node, structural['columnWidths']);
+      applied.push('columnWidths');
+    }
+
     // Table fill/line map onto cells — graphicFrame has no spPr.
     if ('fill' in visual) {
       const cells = tableCells(node);
@@ -588,7 +759,7 @@ export function applyTableProperties(
 export function applyTableCellProperties(
   node: Element,
   properties: Record<string, unknown>,
-): Result<{ applied: string[] }> {
+): Result<{ applied: string[]; diagnostics: Diagnostic[] }> {
   const unexpected = Object.keys(properties).filter((k) => !TABLE_CELL_KEYS.has(k));
   if (unexpected.length)
     return err(
@@ -596,6 +767,7 @@ export function applyTableCellProperties(
       `Unsupported tableCell setProperties keys: ${unexpected.join(', ')}`,
     );
   const applied: string[] = [];
+  const diagnostics: Diagnostic[] = [];
   try {
     if (typeof properties['text'] === 'string') {
       setNodeText(node, properties['text']);
@@ -616,6 +788,11 @@ export function applyTableCellProperties(
 
     applied.push(...setTableCellPadding(node, properties));
 
+    if ('merge' in properties) {
+      applyCellMerge(node, properties['merge']);
+      applied.push('merge');
+    }
+
     const styleProps: Record<string, unknown> = {};
     if ('paragraph.align' in properties)
       styleProps['paragraph.align'] = properties['paragraph.align'];
@@ -627,13 +804,23 @@ export function applyTableCellProperties(
       if (!styled.ok) return styled;
       applied.push(...styled.value.applied);
     }
+
+    const fontChanged =
+      [...TABLE_CELL_FONT_KEYS].some((k) => k in properties) || 'text' in properties;
+    if (fontChanged) {
+      const frame = findGraphicFrame(node);
+      if (frame) {
+        const result = remeasureTableAfterCellChange(frame);
+        diagnostics.push(...result.diagnostics);
+      }
+    }
   } catch (cause) {
     return err(
       'INVALID_COMMAND',
       cause instanceof Error ? cause.message : 'Invalid tableCell properties',
     );
   }
-  return ok({ applied });
+  return ok({ applied, diagnostics });
 }
 
 const cellPlainText = (tc: Element): string =>
