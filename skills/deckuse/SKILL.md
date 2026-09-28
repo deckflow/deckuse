@@ -287,7 +287,7 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
 ]
 ```
 
-`deckuse render --page` does not paginate DOCX. `@deckflow/office2html` converts PPTX only. Export and open the file in Word for layout checks.
+`deckuse render --page` does not paginate DOCX. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
 
 Schema: `deckuse schema --type addParagraph --json`.
 
@@ -344,6 +344,6 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
 ]
 ```
 
-`deckuse render --page` does not paginate DOCX. `@deckflow/office2html` converts PPTX only. Export and open the file in Word for layout checks.
+`deckuse render --page` does not paginate DOCX. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
 
 Schema: `deckuse schema --type addParagraph --json`.

@@ -726,7 +726,7 @@ Examples:
   render: {
     usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
     summary:
-      'Convert one slide to HTML (office2html), screenshot it with Playwright, then delete the HTML staging output.',
+      'Convert one slide to HTML (deck2html), screenshot it with Playwright, then delete the HTML staging output.',
     example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',
     details: `Required:
   --page <n>                One-based slide index (exactly one page per call)
@@ -740,9 +740,9 @@ Options:
 Notes:
   Intended for AI agents to visually review whether an edit looks correct.
   Community render may not show custom chart series colors faithfully — check ppt/charts/*.xml or PowerPoint.
-  DOCX workspaces cannot be paginated: office2html converts PPTX only. Export and open the .docx in Word.
+  DOCX workspaces cannot be paginated: deck2html converts PPTX only. Export and open the .docx in Word.
   Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
-  Temporary office2html output is always removed after the screenshot.`,
+  Temporary deck2html output is always removed after the screenshot.`,
   },
 
   'add paragraph': {

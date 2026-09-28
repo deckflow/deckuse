@@ -3,7 +3,7 @@ import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/
 import { watch } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path';
-import office2html from '@deckflow/office2html';
+import deck2html from '@deckflow/deck2html';
 import {
   ensureGitignore,
   indexPath,
@@ -12,7 +12,7 @@ import {
   operationsPath,
   previewDir,
 } from './workspace/index.js';
-import { ensureOffice2HtmlExecutable } from './office2html-exec.js';
+import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
 const KEEPALIVE_MS = 15_000;
 const DEBOUNCE_MS = 80;
@@ -67,7 +67,7 @@ export interface MonitorWatcher {
 }
 
 export interface MonitorDependencies {
-  readonly convert?: typeof office2html.convert;
+  readonly convert?: typeof deck2html.convert;
   readonly watch?: (
     path: string,
     listener: (event?: string, filename?: string | Buffer | null) => void,
@@ -476,11 +476,11 @@ export const startMonitor = async (
   const fullPreviewRoot = previewDir(absoluteWorkspace);
   await mkdir(fullPreviewRoot, { recursive: true });
   let realFullPreviewRoot = await realpath(fullPreviewRoot);
-  const converter = options.dependencies?.convert ?? office2html.convert;
+  const converter = options.dependencies?.convert ?? deck2html.convert;
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
-  if (!options.dependencies?.convert) await ensureOffice2HtmlExecutable();
+  if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const operationsWatchPath = dirname(operationsPath(absoluteWorkspace));
   const clients = new Set<ServerResponse>();
@@ -552,7 +552,7 @@ export const startMonitor = async (
         output,
         pages: String(state.page),
       });
-      if (result.exitCode !== 0) throw new Error(result.stderr || 'office2html conversion failed');
+      if (result.exitCode !== 0) throw new Error(result.stderr || 'deck2html conversion failed');
       const entry = resolve(result.indexHtmlPath);
       const entryRelative = relative(output, entry);
       if (
@@ -560,7 +560,7 @@ export const startMonitor = async (
         entryRelative === '..' ||
         resolve(output, entryRelative) !== entry
       )
-        throw new Error('office2html returned an output outside its version directory');
+        throw new Error('deck2html returned an output outside its version directory');
       if (!queued && mainActive && generation === runGeneration) {
         const meta = await publishMeta(state);
         latestRenderUrl = `/render/${encodeURIComponent(versionName)}${entryRelative ? `/${entryRelative.split(sep).map(encodeURIComponent).join('/')}` : ''}`;
@@ -707,7 +707,7 @@ export const startMonitor = async (
           output: staging,
         });
         if (result.exitCode !== 0)
-          throw new Error(result.stderr || 'office2html conversion failed');
+          throw new Error(result.stderr || 'deck2html conversion failed');
         const entry = resolve(result.indexHtmlPath);
         const entryRelative = relative(staging, entry);
         if (
@@ -715,7 +715,7 @@ export const startMonitor = async (
           entryRelative === '..' ||
           resolve(staging, entryRelative) !== entry
         )
-          throw new Error('office2html returned an output outside the preview directory');
+          throw new Error('deck2html returned an output outside the preview directory');
         const meta: PreviewMeta = {
           revision: identity.revision,
           fingerprint: identity.fingerprint,

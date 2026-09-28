@@ -189,7 +189,7 @@ describe('deckuse CLI', () => {
     expect(renderHelp).toMatchObject({ code: 0, stderr: '' });
     expect(renderHelp.stdout).toContain('usage: deckuse render --page <n>');
     expect(renderHelp.stdout).toContain('--page <n>');
-    expect(renderHelp.stdout).toContain('office2html');
+    expect(renderHelp.stdout).toContain('deck2html');
 
     const monitorHelp = await run(['monitor', '--help']);
     expect(monitorHelp).toMatchObject({ code: 0, stderr: '' });

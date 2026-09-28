@@ -19,7 +19,7 @@ describe('renderPage', () => {
     await expect(renderPage(workspace, { page: 1.5 })).rejects.toThrow(/positive integer/);
   });
 
-  it('converts one page, screenshots, and deletes office2html staging', async () => {
+  it('converts one page, screenshots, and deletes deck2html staging', async () => {
     const workspace = await workspaceFixture();
     const screenshots: Array<{ indexHtmlPath: string; outputPath: string }> = [];
     let stagingDuringConvert: string | undefined;

@@ -343,7 +343,7 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing). Tables support `height: "auto"`, themes `minimal`/`zebra`, and `alignColumns`.
 - Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, series colors, and value format codes. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, ChartEx) are preserve-only in the community edition. Community `render` may not show custom series colors faithfully — verify chart XML or PowerPoint.
 - List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
-- `monitor` for live HTML preview (`monitor start|status|stop`; use `--port 0` for an ephemeral port) and `render` for single-slide PNG screenshots (`--scale` supported; office2html + Playwright). `deckuse schema` prints command JSON Schema; `deckuse measure` estimates text box size heuristically.
+- `monitor` for live HTML preview (`monitor start|status|stop`; use `--port 0` for an ephemeral port) and `render` for single-slide PNG screenshots (`--scale` supported; deck2html + Playwright). `deckuse schema` prints command JSON Schema; `deckuse measure` estimates text box size heuristically.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
 Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
@@ -358,7 +358,7 @@ Word uses the same workspace loop as PPTX (`new` / `init`, `list`, `apply`, `val
 - Slide commands (`addShape`, `xfrmSet`, `alignElements`, …) return `UNSUPPORTED_CAPABILITY`.
 - Tracked changes, fields, comments, content controls, and equations are preserved. A command that would have to rewrite them fails instead of stripping them.
 - Community edition does not write style definitions, numbering definitions, theme, or settings parts.
-- `render --page` is PPTX-only. `@deckflow/office2html` does not paginate Word; export and open the `.docx` to check layout.
+- `render --page` is PPTX-only. `@deckflow/deck2html` does not paginate Word; export and open the `.docx` to check layout.
 
 ## PPTX `setProperties` example
 

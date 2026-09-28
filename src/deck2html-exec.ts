@@ -1,9 +1,9 @@
 import { access, chmod, constants } from 'node:fs/promises';
-import office2html from '@deckflow/office2html';
+import deck2html from '@deckflow/deck2html';
 
 /** npm may install platform binaries without +x; restore before convert. */
-export const ensureOffice2HtmlExecutable = async (): Promise<void> => {
-  const mod = office2html as { getBinaryPath?: () => string };
+export const ensureDeck2HtmlExecutable = async (): Promise<void> => {
+  const mod = deck2html as { getBinaryPath?: () => string };
   if (typeof mod.getBinaryPath !== 'function') return;
   const binary = mod.getBinaryPath();
   try {
@@ -14,7 +14,7 @@ export const ensureOffice2HtmlExecutable = async (): Promise<void> => {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `office2html binary is not executable (${binary}). Tried chmod +x and failed: ${detail}`,
+        `deck2html binary is not executable (${binary}). Tried chmod +x and failed: ${detail}`,
       );
     }
   }

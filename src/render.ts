@@ -2,16 +2,16 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import office2html from '@deckflow/office2html';
+import deck2html from '@deckflow/deck2html';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { ensureGitignore, renderDir } from './workspace/index.js';
-import { ensureOffice2HtmlExecutable } from './office2html-exec.js';
+import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
 const AUTOFIT_SETTLE_MS = 400;
 
-export type ConvertFn = typeof office2html.convert;
+export type ConvertFn = typeof deck2html.convert;
 
 export type ScreenshotFn = (options: {
   readonly indexHtmlPath: string;
@@ -117,7 +117,7 @@ const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath, scal
   }
 };
 
-/** Convert one workspace slide to PNG via office2html + playwright-core. */
+/** Convert one workspace slide to PNG via deck2html + playwright-core. */
 export const renderPage = async (
   workspace: string,
   options: RenderOptions,
@@ -141,19 +141,19 @@ export const renderPage = async (
   }
   if (snapshot === 'package.docx') {
     throw new Error(
-      'DOCX page render is not available. @deckflow/office2html converts PPTX only and does not paginate Word documents. Export the .docx and open it in Word to check layout.',
+      'DOCX page render is not available. @deckflow/deck2html converts PPTX only and does not paginate Word documents. Export the .docx and open it in Word to check layout.',
     );
   }
 
   const output = resolve(options.output ?? joinRenderDefault(absoluteWorkspace, page));
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
-  const converter = options.dependencies?.convert ?? office2html.convert;
+  const converter = options.dependencies?.convert ?? deck2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
   const warnings = [
-    'RENDER_FIDELITY: community render uses office2html; chart series custom colors and some advanced charts may not match PowerPoint. Verify chart XML or open in PowerPoint when color accuracy matters.',
+    'RENDER_FIDELITY: community render uses deck2html; chart series custom colors and some advanced charts may not match PowerPoint. Verify chart XML or open in PowerPoint when color accuracy matters.',
   ];
 
-  if (!options.dependencies?.convert) await ensureOffice2HtmlExecutable();
+  if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
 
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-'));
   try {
@@ -162,7 +162,7 @@ export const renderPage = async (
       pages: String(page),
     });
     if (result.exitCode !== 0) {
-      throw new Error(result.stderr || 'office2html conversion failed');
+      throw new Error(result.stderr || 'deck2html conversion failed');
     }
 
     const indexHtmlPath = resolve(result.indexHtmlPath);
@@ -172,7 +172,7 @@ export const renderPage = async (
       entryRelative === '..' ||
       resolve(staging, entryRelative) !== indexHtmlPath
     ) {
-      throw new Error('office2html returned an output outside the staging directory');
+      throw new Error('deck2html returned an output outside the staging directory');
     }
 
     await mkdir(dirname(output), { recursive: true });
