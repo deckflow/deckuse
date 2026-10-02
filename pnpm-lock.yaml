@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@deckflow/deck2html':
-        specifier: ^0.3.7
-        version: 0.3.7
+        specifier: ^0.3.8
+        version: 0.3.8
       '@xmldom/xmldom':
         specifier: ^0.9.10
         version: 0.9.12
@@ -240,28 +240,28 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
-  '@deckflow/deck2html-darwin-arm64@0.3.7':
-    resolution: {integrity: sha512-T3u89xY/kBdYjJ0A1jtd5ITweE1lTcXbK0hennJzbFAduT5iA77bM1jBJF6YAKS15hw8VpoaQMTk6QeXHXiU3A==}
+  '@deckflow/deck2html-darwin-arm64@0.3.8':
+    resolution: {integrity: sha512-3TfUUwREVB1fj73qxWCQBMHZvI7Yf0Jz4BG7DuuMYWGlhwsVnIn0vlNzncGQHF32kWJOtyfd0/j+kqRyP0Kq/g==}
     cpu: [arm64]
     os: [darwin]
 
-  '@deckflow/deck2html-darwin-x64@0.3.7':
-    resolution: {integrity: sha512-UzA/RenO7f5foo/J262Mkdha4VhX1cnEPyVUShhxCDdbBfnuvJQknlGddh8+sBwMRrsMnX2KHY4PQKpVcnXyPw==}
+  '@deckflow/deck2html-darwin-x64@0.3.8':
+    resolution: {integrity: sha512-0AwIcWViOflYVLS029M74fDv9Jlffw4UCqgFidiJJwqKf43QqSHDX0FgcV5BgywNpiGCdirTUqYUXsegDrQddw==}
     cpu: [x64]
     os: [darwin]
 
-  '@deckflow/deck2html-linux-x64@0.3.7':
-    resolution: {integrity: sha512-jGZqGmjW3QggDq0ZMtzmuvI+oZrEPbCBCt+l+KyKO8tkZOKGBFkXN88fQdJuiFOTxywCWj+Bs277EQL5r790Ow==}
+  '@deckflow/deck2html-linux-x64@0.3.8':
+    resolution: {integrity: sha512-kL7Kby/6fdp3QDevEIp8y6TrBqIEk/UhG/39aKBquxyrw9dRjcKePKYdBl5lc3pPrMSpScK066yGACgeq2WnFQ==}
     cpu: [x64]
     os: [linux]
 
-  '@deckflow/deck2html-win32-x64@0.3.7':
-    resolution: {integrity: sha512-2hAxJY+hoWWN5Yb2DmX7XeLGPJ0SWh16WfvE87AKGjsuzhXhYunhDlavjqG5XpLQrll6HVnpeLVs8ftKXARp7A==}
+  '@deckflow/deck2html-win32-x64@0.3.8':
+    resolution: {integrity: sha512-96vwJDc+mph9mOzJoMgwjXnCZiJEqh0YvosofLH4S9sE5YlHvbbDkKdmYM/oL6js9jUUGcyyal4EjrnEaD8Mew==}
     cpu: [x64]
     os: [win32]
 
-  '@deckflow/deck2html@0.3.7':
-    resolution: {integrity: sha512-kOAO7TnEkNSG2Fq5Q95qxctwv8VylI5jobYWC44qvaCA2FiQOiBRDCOhOsI3NUVNQF+I1YnwaR5UsV+yA8F3ig==}
+  '@deckflow/deck2html@0.3.8':
+    resolution: {integrity: sha512-9dVpsgB6RCl3sdTvlCDvlvrLbwIrPupXd41KkEjox5veRKwjpatKUM65SOrcPgHdTZcYC2jI9AOeZAqGo/SeKA==}
     hasBin: true
 
   '@deckflow/decktools-sdk@1.0.0':
@@ -1569,27 +1569,27 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@deckflow/deck2html-darwin-arm64@0.3.7':
+  '@deckflow/deck2html-darwin-arm64@0.3.8':
     optional: true
 
-  '@deckflow/deck2html-darwin-x64@0.3.7':
+  '@deckflow/deck2html-darwin-x64@0.3.8':
     optional: true
 
-  '@deckflow/deck2html-linux-x64@0.3.7':
+  '@deckflow/deck2html-linux-x64@0.3.8':
     optional: true
 
-  '@deckflow/deck2html-win32-x64@0.3.7':
+  '@deckflow/deck2html-win32-x64@0.3.8':
     optional: true
 
-  '@deckflow/deck2html@0.3.7':
+  '@deckflow/deck2html@0.3.8':
     dependencies:
       '@deckflow/decktools-sdk': 1.0.0
       jszip: 3.10.2
     optionalDependencies:
-      '@deckflow/deck2html-darwin-arm64': 0.3.7
-      '@deckflow/deck2html-darwin-x64': 0.3.7
-      '@deckflow/deck2html-linux-x64': 0.3.7
-      '@deckflow/deck2html-win32-x64': 0.3.7
+      '@deckflow/deck2html-darwin-arm64': 0.3.8
+      '@deckflow/deck2html-darwin-x64': 0.3.8
+      '@deckflow/deck2html-linux-x64': 0.3.8
+      '@deckflow/deck2html-win32-x64': 0.3.8
     transitivePeerDependencies:
       - debug
       - supports-color
