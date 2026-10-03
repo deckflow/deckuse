@@ -1,5 +1,11 @@
 # @deckflow/deckuse
 
+## 1.4.3
+
+### Patch Changes
+
+- c445714: Add `deckuse repair` for unambiguous notesSlide back-pointers, surface `valid` on status/export, and emit per-page chart render plus table overlap candidates for agents.
+
 ## 1.4.0
 
 ### Minor Changes
