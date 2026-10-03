@@ -55,6 +55,8 @@ describe('renderPage', () => {
     );
     expect(result.page).toBe(2);
     expect(result.output).toBe(join(workspace, '.deckuse', 'render', 'page-2.png'));
+    expect(result.warnings).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
     await expect(readFile(result.output, 'utf8')).resolves.toBe('png');
     expect(screenshots).toHaveLength(1);
     expect(stagingDuringConvert).toBeDefined();

@@ -756,6 +756,14 @@ const undoCommandSchema = z
   })
   .strict();
 
+const repairCommandSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('repair'),
+  })
+  .strict();
+
 const historyCommandSchema = z
   .object({
     ...commandBase,
@@ -846,6 +854,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   batchCommandSchema,
   exportCommandSchema,
   undoCommandSchema,
+  repairCommandSchema,
   historyCommandSchema,
   validateCommandSchema,
 ]);

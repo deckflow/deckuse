@@ -38,6 +38,7 @@ Commands:
   validate      Validate package / relationships
   history       Show write history
   undo          Undo recent write revisions
+  repair        Fix unambiguous notesSlide back-pointers in a PPTX workspace
   export        Pack source/ to .pptx (default; --from-package copies snapshot)
   monitor       Live HTML preview server (foreground or start/status/stop)
   render        Screenshot one slide to PNG (for visual review)
@@ -642,7 +643,11 @@ Options:
   --slide <n>               Limit to one slide when supported
   --workspace <path>        Workspace root
   --revision <rev>          Validate a historical revision
-  --json                    Machine-readable envelope`,
+  --json                    Machine-readable envelope
+
+Notes:
+  NOTES_SLIDE_MISMATCH on PPTX (legacy duplicate-slide back-pointers) is fixed with
+  deckuse repair --workspace <path> --json. Writes never auto-migrate.`,
   },
 
   history: {
@@ -672,6 +677,23 @@ Options:
   ${WRITE_GLOBALS}`,
   },
 
+  repair: {
+    usage: 'deckuse repair [<workspace>]',
+    summary:
+      'Rewrite notesSlide→slide back-pointers when exactly one slide owns the notes part (legacy 1.2.1 duplicate damage).',
+    example: 'deckuse repair --workspace ./workspace --json',
+    details: `Arguments:
+  <workspace>               Optional workspace path (or use --workspace)
+
+Options:
+  ${WRITE_GLOBALS}
+
+Notes:
+  Does not rewrite notes body text. Shared or unowned notes parts return AMBIGUOUS_REFERENCE.
+  Successful repairs are one undoable revision. Validate still fails until repair succeeds.
+  Word workspaces return UNSUPPORTED_CAPABILITY.`,
+  },
+
   export: {
     usage: 'deckuse export <output.pptx> [options]',
     summary: 'Pack workspace source/ to .pptx (default) or copy package.pptx.',
@@ -686,7 +708,9 @@ Options:
   --json                    Machine-readable envelope
 
 Notes:
-  Default export rebuilds package.pptx from source/ so hand-edits are included.`,
+  Default export rebuilds package.pptx from source/ so hand-edits are included.
+  Success (ok: true) does not mean the package validated. Read data.valid and
+  data.diagnostics. NOTES_SLIDE_MISMATCH is repaired with deckuse repair.`,
   },
 
   monitor: {
@@ -739,7 +763,9 @@ Options:
 
 Notes:
   Intended for AI agents to visually review whether an edit looks correct.
-  Community render may not show custom chart series colors faithfully — check ppt/charts/*.xml or PowerPoint.
+  Combo/advanced charts emit COMBO_CHART_RENDER_LIMITED; explicit series colors emit
+  CHART_SERIES_COLOR_UNVERIFIED. Pages without those charts omit the generic warning.
+  Verify ppt/charts/*.xml or PowerPoint when color accuracy matters.
   DOCX workspaces cannot be paginated: deck2html converts PPTX only. Export and open the .docx in Word.
   Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
   Temporary deck2html output is always removed after the screenshot.`,

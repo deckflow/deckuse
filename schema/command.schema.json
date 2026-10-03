@@ -563,6 +563,43 @@
         "requestId": {
           "$ref": "#/$defs/__schema1"
         },
+        "workspaceId": {
+          "$ref": "#/$defs/__schema9"
+        },
+        "transactionId": {
+          "$ref": "#/$defs/__schema10"
+        },
+        "dryRun": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "expectRevision": {
+          "$ref": "#/$defs/__schema12"
+        },
+        "reason": {
+          "$ref": "#/$defs/__schema13"
+        },
+        "type": {
+          "type": "string",
+          "const": "repair"
+        }
+      },
+      "required": [
+        "version",
+        "workspaceId",
+        "transactionId",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "requestId": {
+          "$ref": "#/$defs/__schema1"
+        },
         "type": {
           "type": "string",
           "const": "history"

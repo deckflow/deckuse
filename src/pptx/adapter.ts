@@ -23,7 +23,12 @@ import {
 } from './layout-ref.js';
 import { mutate } from './mutations.js';
 import { resolveProperties } from './resolve-properties.js';
-import { syncAppSlideCounts } from './slides.js';
+import {
+  applyNotesSlideRepairs,
+  planNotesSlideRepairs,
+  repairNotesHint,
+  syncAppSlideCounts,
+} from './slides.js';
 import {
   initializeWorkspace,
   isPackageStale,
@@ -213,7 +218,7 @@ export const pptxCapabilities = {
 const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>
   OpcArchive.openDirectory(sourceDir(workspace));
 
-const validateArchive = (archive: OpcArchive): Diagnostic[] => {
+const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
   const diagnostics: Diagnostic[] = [];
   for (const [source, rels] of archive.relationships)
     for (const rel of rels)
@@ -280,7 +285,11 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
           severity: 'error',
           code: 'NOTES_SLIDE_MISMATCH',
           message: `Notes part ${rel.resolvedTarget} has no slide relationship back to ${source}`,
-          details: { slide: source, notes: rel.resolvedTarget },
+          details: {
+            slide: source,
+            notes: rel.resolvedTarget,
+            hint: repairNotesHint(workspace ?? '.'),
+          },
         });
       } else if (back.resolvedTarget !== source) {
         diagnostics.push({
@@ -291,6 +300,7 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
             slide: source,
             notes: rel.resolvedTarget,
             notesPointsTo: back.resolvedTarget,
+            hint: repairNotesHint(workspace ?? '.'),
           },
         });
       }
@@ -299,6 +309,14 @@ const validateArchive = (archive: OpcArchive): Diagnostic[] => {
 
   return diagnostics;
 };
+
+const notesRepairHintExtra = (
+  workspace: string,
+  diagnostics: readonly Diagnostic[],
+): { hint: string } | Record<string, never> =>
+  diagnostics.some((item) => item.code === 'NOTES_SLIDE_MISMATCH')
+    ? { hint: repairNotesHint(workspace) }
+    : {};
 
 const slidesFromOutcome = (outcome: { slides?: number[] } | undefined): number[] =>
   outcome?.slides ?? [];
@@ -657,6 +675,7 @@ export const pptxAdapter: FormatAdapter = {
       const index = await loadIndex(workspace, archive, manifest, { persist: true });
 
       if (command.type === 'status') {
+        const diagnostics = validateArchive(archive, workspace);
         return ok({
           workspaceId: workspace,
           format: manifest.format,
@@ -671,6 +690,8 @@ export const pptxAdapter: FormatAdapter = {
           capabilities: pptxCapabilities,
           ...editionMetadata,
           branch: 'main',
+          valid: diagnostics.length === 0,
+          diagnostics,
         });
       }
 
@@ -798,9 +819,14 @@ export const pptxAdapter: FormatAdapter = {
       }
 
       if (command.type === 'validate') {
-        const diagnostics = validateArchive(archive);
+        const diagnostics = validateArchive(archive, workspace);
         return diagnostics.length
-          ? err('VALIDATION_FAILED', 'PPTX validation failed', diagnostics)
+          ? err(
+              'VALIDATION_FAILED',
+              'PPTX validation failed',
+              diagnostics,
+              notesRepairHintExtra(workspace, diagnostics),
+            )
           : ok({
               valid: true,
               revision: index.revision,
@@ -826,11 +852,87 @@ export const pptxAdapter: FormatAdapter = {
           repacked = true;
         }
         await copyFile(packagePath(workspace), output);
+        const exported = await openWorkspaceArchive(workspace);
+        const diagnostics = validateArchive(exported, workspace);
         return ok({
           output,
           revision: exportRevision,
           repacked,
           fromPackage,
+          valid: diagnostics.length === 0,
+          diagnostics,
+        });
+      }
+
+      if (command.type === 'repair') {
+        const conflict = assertExpectRevision(command, manifest.revision);
+        if (conflict) return conflict;
+        return await withWriteLock(workspace, async () => {
+          const currentManifest = await readManifest(workspace);
+          const locked = assertExpectRevision(command, currentManifest.revision);
+          if (locked) return locked;
+          const working = await openWorkspaceArchive(workspace);
+          working.markClean();
+          const planned = planNotesSlideRepairs(working);
+          if (planned.ambiguous.length > 0) {
+            return err(
+              'AMBIGUOUS_REFERENCE',
+              'Notes slide relationships cannot be repaired without ambiguity',
+              planned.ambiguous,
+              { hint: repairNotesHint(workspace) },
+            );
+          }
+          if (planned.fixes.length === 0) {
+            const validation = validateArchive(working, workspace);
+            if (validation.length)
+              return err(
+                'VALIDATION_FAILED',
+                'PPTX validation failed',
+                validation,
+                notesRepairHintExtra(workspace, validation),
+              );
+            return ok({
+              repaired: [],
+              valid: true,
+              dryRun: command.dryRun === true,
+              revision: currentManifest.revision,
+            });
+          }
+          applyNotesSlideRepairs(working, planned.fixes);
+          const validation = validateArchive(working, workspace);
+          if (validation.length)
+            return err(
+              'VALIDATION_FAILED',
+              'PPTX validation failed after notes repair',
+              validation,
+              notesRepairHintExtra(workspace, validation),
+            );
+          const changedParts = working.getDirtyParts();
+          if (command.dryRun)
+            return ok({
+              repaired: planned.fixes,
+              valid: true,
+              dryRun: true,
+              revision: currentManifest.revision,
+              changedParts,
+            });
+          const rev = nextRevision(currentManifest.revision);
+          const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+          const saved = await persistWrite(
+            workspace,
+            working,
+            currentManifest,
+            nextIndex,
+            command,
+            [],
+          );
+          return ok({
+            repaired: planned.fixes,
+            valid: true,
+            dryRun: false,
+            revision: saved.revision,
+            changedParts,
+          });
         });
       }
 
@@ -885,9 +987,14 @@ export const pptxAdapter: FormatAdapter = {
           // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
           syncAppSlideCounts(working);
           const changedParts = working.getDirtyParts();
-          const validation = validateArchive(working);
+          const validation = validateArchive(working, workspace);
           if (validation.length)
-            return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
+            return err(
+              'VALIDATION_FAILED',
+              'PPTX validation failed',
+              validation,
+              notesRepairHintExtra(workspace, validation),
+            );
           if (dryRun)
             return ok(
               {

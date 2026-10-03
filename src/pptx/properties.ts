@@ -419,6 +419,7 @@ const unknownKeys = (properties: Record<string, unknown>, allowed: Set<string>):
 export type ShapePropertyContext = {
   archive: OpcArchive;
   partUri: string;
+  target?: string;
 };
 
 export function applyShapeProperties(

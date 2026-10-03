@@ -272,6 +272,7 @@ export const docxAdapter: FormatAdapter = {
       const index = await loadIndex(workspace, archive, manifest, { persist: true });
 
       if (command.type === 'status') {
+        const diagnostics = validateArchive(archive);
         return ok({
           workspaceId: workspace,
           format: manifest.format,
@@ -285,6 +286,8 @@ export const docxAdapter: FormatAdapter = {
           elementCount: index.elements.length,
           capabilities: docxCapabilities,
           branch: 'main',
+          valid: diagnostics.length === 0,
+          diagnostics,
         });
       }
 
@@ -406,7 +409,25 @@ export const docxAdapter: FormatAdapter = {
           repacked = true;
         }
         await copyFile(packagePath(workspace), output);
-        return ok({ output, revision: exportRevision, repacked, fromPackage });
+        const exported = await openWorkspaceArchive(workspace);
+        const diagnostics = validateArchive(exported);
+        return ok({
+          output,
+          revision: exportRevision,
+          repacked,
+          fromPackage,
+          valid: diagnostics.length === 0,
+          diagnostics,
+        });
+      }
+
+      if (command.type === 'repair') {
+        return err(
+          'UNSUPPORTED_CAPABILITY',
+          'repair is only available for PPTX notes relationships',
+          [],
+          { hint: 'Word workspaces do not use notesSlide back-pointers.' },
+        );
       }
 
       if (SLIDE_COMMANDS.has(command.type)) {

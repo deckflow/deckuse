@@ -137,9 +137,14 @@ const toEnvelope = (
       ? { changedParts: value['changedParts'] as string[] }
       : {}),
     warnings: [
-      ...result.diagnostics.filter((d) => d.severity === 'warning').map((d) => d.message),
+      ...result.diagnostics.map((d) => d.message),
       ...(Array.isArray(value['warnings']) ? (value['warnings'] as string[]) : []),
-    ],
+      ...(Array.isArray(value['diagnostics'])
+        ? (value['diagnostics'] as { message?: unknown }[])
+            .map((item) => (item && typeof item.message === 'string' ? item.message : ''))
+            .filter(Boolean)
+        : []),
+    ].filter((message, index, all) => all.indexOf(message) === index),
     data: value,
     ...extras,
   };
@@ -1017,6 +1022,13 @@ const main = async (): Promise<void> => {
           workspaceId: workspace,
           steps: Number(optionFrom(clean, '--steps') ?? 1),
         });
+      } else if (action === 'repair') {
+        const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+        ok = await execute('deckuse repair', {
+          ...(await mutationExtras(workspace)),
+          type: 'repair',
+          workspaceId: workspace,
+        });
       } else if (action === 'export') {
         const output = clean[1];
         if (!output) throw new Error('Usage: deckuse export <output.pptx>');
@@ -1176,7 +1188,12 @@ const main = async (): Promise<void> => {
             ok: true,
             command: 'deckuse render',
             warnings: [...rendered.warnings],
-            data: { page: rendered.page, output: rendered.output, warnings: rendered.warnings },
+            data: {
+              page: rendered.page,
+              output: rendered.output,
+              warnings: rendered.warnings,
+              diagnostics: rendered.diagnostics,
+            },
           });
         } catch (error) {
           outputEnvelope({

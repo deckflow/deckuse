@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import type { Diagnostic } from '../core/index.js';
 import { OpcArchive, type OpcRelationship } from '../opc/index.js';
 import { cleanupUnreferencedPart } from './picture.js';
 import { NS, REL, attr, descendants } from './xml.js';
@@ -279,4 +280,119 @@ export function removeSlide(archive: OpcArchive, part: string): void {
 }
 export function slideElementPart(refPart: string): string {
   return refPart.split('#')[0] ?? refPart;
+}
+
+export const repairNotesHint = (workspace: string): string =>
+  `deckuse repair --workspace ${workspace} --json`;
+
+const isSlidePart = (source: string): boolean =>
+  source.startsWith('/ppt/slides/slide') && !source.includes('/_rels/');
+
+export interface NotesRepairFix {
+  notes: string;
+  ownerSlide: string;
+  previousTarget?: string;
+}
+
+/** 1-based page → slide part URI from `p:sldIdLst` order. */
+export function slidePartAtPage(archive: OpcArchive, page: number): string | undefined {
+  if (!Number.isInteger(page) || page < 1) return undefined;
+  if (!archive.getPart('/ppt/presentation.xml')) return undefined;
+  const ids = presentationSlideIds(archive.readXml('/ppt/presentation.xml'));
+  const sld = ids[page - 1];
+  if (!sld) return undefined;
+  const rid = sld.getAttributeNS(NS.r, 'id') ?? attr(sld, 'r:id');
+  if (!rid) return undefined;
+  return archive.getRelationships('/ppt/presentation.xml').find((rel) => rel.id === rid)
+    ?.resolvedTarget;
+}
+
+const ownersByNotesPart = (archive: OpcArchive): Map<string, string[]> => {
+  const owners = new Map<string, string[]>();
+  for (const [source, rels] of archive.relationships) {
+    if (!isSlidePart(source)) continue;
+    for (const rel of rels) {
+      if (rel.type !== REL.notes || !rel.resolvedTarget) continue;
+      const list = owners.get(rel.resolvedTarget) ?? [];
+      list.push(source);
+      owners.set(rel.resolvedTarget, list);
+    }
+  }
+  return owners;
+};
+
+/**
+ * Plan retargeting of notes→slide back-pointers when exactly one slide owns the notes part.
+ * Shared or unowned notes parts are reported as ambiguous and must not be rewritten.
+ */
+export function planNotesSlideRepairs(archive: OpcArchive): {
+  fixes: NotesRepairFix[];
+  ambiguous: Diagnostic[];
+} {
+  const owners = ownersByNotesPart(archive);
+  const fixes: NotesRepairFix[] = [];
+  const ambiguous: Diagnostic[] = [];
+  const seenNotes = new Set<string>();
+
+  for (const [source, rels] of archive.relationships) {
+    if (!isSlidePart(source)) continue;
+    for (const rel of rels) {
+      if (rel.type !== REL.notes || !rel.resolvedTarget) continue;
+      const notes = rel.resolvedTarget;
+      if (seenNotes.has(notes)) continue;
+      seenNotes.add(notes);
+      const claimants = owners.get(notes) ?? [];
+      const notesRels = archive.getRelationships(notes);
+      const back = notesRels.find((item) => item.type === REL.slide);
+      const mismatch = !back?.resolvedTarget || back.resolvedTarget !== source;
+      if (claimants.length === 1 && claimants[0] === source) {
+        if (!mismatch) continue;
+        fixes.push({
+          notes,
+          ownerSlide: source,
+          ...(back?.resolvedTarget ? { previousTarget: back.resolvedTarget } : {}),
+        });
+        continue;
+      }
+      if (!mismatch && claimants.length === 1) continue;
+      ambiguous.push({
+        severity: 'error',
+        code: 'NOTES_SLIDE_MISMATCH',
+        message:
+          claimants.length === 0
+            ? `Notes part ${notes} is not referenced by any slide`
+            : claimants.length > 1
+              ? `Notes part ${notes} is referenced by ${String(claimants.length)} slides`
+              : `Notes part ${notes} points at ${back?.resolvedTarget ?? '(none)'} instead of owning slide ${source}`,
+        details: {
+          slide: source,
+          notes,
+          ...(back?.resolvedTarget ? { notesPointsTo: back.resolvedTarget } : {}),
+          owners: claimants,
+        },
+      });
+    }
+  }
+  return { fixes, ambiguous };
+}
+
+export function applyNotesSlideRepairs(
+  archive: OpcArchive,
+  fixes: readonly NotesRepairFix[],
+): void {
+  for (const fix of fixes) {
+    const rels = [...archive.getRelationships(fix.notes)];
+    const existingIdx = rels.findIndex((rel) => rel.type === REL.slide);
+    const existing = existingIdx >= 0 ? rels[existingIdx] : undefined;
+    const nextRel: OpcRelationship = {
+      id: existing?.id ?? nextRelId(rels),
+      type: REL.slide,
+      target: relativeTarget(fix.notes, fix.ownerSlide),
+      external: false,
+      resolvedTarget: fix.ownerSlide,
+    };
+    if (existingIdx >= 0) rels[existingIdx] = nextRel;
+    else rels.push(nextRel);
+    archive.setRelationships(fix.notes, rels);
+  }
 }

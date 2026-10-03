@@ -39,6 +39,28 @@ describe('command schema', () => {
       }).type,
     ).toBe('setTableLayout');
   });
+  it('parses repair at the top-level commandSchema', () => {
+    expect(
+      commandSchema.parse({
+        version: '2.0',
+        type: 'repair',
+        workspaceId: 'w',
+        transactionId: 'latest',
+        dryRun: true,
+      }).type,
+    ).toBe('repair');
+  });
+  it('rejects unknown fields on repair', () => {
+    expect(() =>
+      commandSchema.parse({
+        version: '2.0',
+        type: 'repair',
+        workspaceId: 'w',
+        transactionId: 'latest',
+        extra: true,
+      }),
+    ).toThrow();
+  });
   it('parses replaceText, undo, and history', () => {
     expect(
       commandSchema.parse({

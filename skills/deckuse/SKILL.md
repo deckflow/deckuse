@@ -32,7 +32,7 @@ Prefer **`deckuse schema --type addShape --json`** (or full `deckuse schema --js
 4. **Intuitive Unit System**:
    `px` (96 DPI), `pt`, `cm`, `mm`, `in`, `%` (of slide). Bare numbers = EMU. Example: `"x": "5%"`, `"y": "120px"`.
 5. **Structural Engine, Not Visual Brain**:
-   Use `deckuse render --page N` for visual QA. Community render may **not** show custom chart series colors; confirm via `ppt/charts/chart*.xml` or PowerPoint. Response includes `RENDER_FIDELITY` warnings.
+   Use `deckuse render --page N` for visual QA. Combo/advanced charts emit `COMBO_CHART_RENDER_LIMITED`; explicit series colors emit `CHART_SERIES_COLOR_UNVERIFIED`. Confirm via `ppt/charts/chart*.xml` or PowerPoint. Pages without those charts omit a generic fidelity warning.
 6. **Community Edition Boundaries**:
    Writing `master:*` / `layout:*` / `theme` **part contents** → `UNSUPPORTED_CAPABILITY`.
    Rebinding a slide's layout (`setSlideLayout`) is allowed — it only changes the relationship.
@@ -201,7 +201,7 @@ Shape vocabulary: `line`/`connector`; `elbow` / `curved-connector`; `arrow` / `l
 
 ### E. Charts / Align / replaceText
 
-Prefer `column|bar|line|pie` for render. Series `color` is written into chart XML. **Community `render` may still show theme defaults** — verify XML or PowerPoint.
+Prefer `column|bar|line|pie` for render. Series `color` is written into chart XML. Community `render` may emit `CHART_SERIES_COLOR_UNVERIFIED` — verify XML or PowerPoint.
 
 ### F. Capability fallback (last resort)
 
@@ -218,7 +218,8 @@ deckuse undo --workspace ./workspace --steps 1 --json
 - Always use `--json` for agents. On `INVALID_COMMAND`, read **`error.message`** (includes first field path) and **`error.diagnostics[]`** (`path` + `message`).
 - `TARGET_NOT_FOUND`: list shapes; for dry-run, ensure the name was added in the **same** apply batch.
 - `UNSUPPORTED_CAPABILITY`: community master/layout/theme gate.
-- `COMBO_CHART_RENDER_LIMITED` / `RENDER_FIDELITY` / `TABLE_HEIGHT_MAY_CLIP`: warnings, not write failures.
+- `COMBO_CHART_RENDER_LIMITED` / `CHART_SERIES_COLOR_UNVERIFIED` / `TABLE_HEIGHT_MAY_CLIP` / `TABLE_OVERLAPS_SHAPE`: warnings, not write failures.
+- `NOTES_SLIDE_MISMATCH`: workspace cannot be written until `deckuse repair --workspace ./ws --json` (unambiguous notes back-pointers only).
 - Schema discovery: `deckuse schema --type addShape --json`.
 
 ---
@@ -232,68 +233,30 @@ deckuse undo --workspace ./workspace --steps 1 --json
 - [ ] Checked `error.diagnostics` on failure (not only top-level message)?
 - [ ] Validated + rendered key slides; chart colors verified in XML if needed?
 - [ ] Table auto-height rendered; used `setTableLayout` after frame-only resize if needed?
-- [ ] Exported final PPTX (default rebuilds from `source/`)?
+- [ ] `status.data.valid` / `export.data.valid` true before delivery (`ok: true` on export is not validation)?
 
 ---
 
-## 6. Word (DOCX)
+## 6. Recipe: safe iteration on an existing deck
 
-Same workspace loop as PPTX. Do **not** send slide geometry (`addShape`, `xfrmSet`, `alignElements`, `zMove`); those return `UNSUPPORTED_CAPABILITY`.
-
-```bash
-deckuse new ./workspace --format docx --json
-# or: deckuse init report.docx ./workspace --json
-deckuse list paragraphs --workspace ./workspace --json
-deckuse apply --workspace ./workspace --input ops.json --json
-deckuse validate --workspace ./workspace --json
-deckuse export ./output.docx --workspace ./workspace --json
-```
-
-`new` without `--format` stays PPTX.
-
-### Addresses
-
-- `body/p:3` — 1-based body paragraph (tables are not paragraphs)
-- `body/p:3/run:0` — 0-based run
-- `para:1A2B3C4D` — `w14:paraId`
-- `bookmark:Intro` — bookmark. `addParagraph.name` creates one for same-batch forward refs
-- `body/table:1/row:2/cell:1/p:1`
-- `style:Heading1` — read only. Apply it with `paragraph.style`; do not write `styles.xml`
-
-### `replaceText`
-
-Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatting). `replaceText` concatenates visible `w:t` text **inside one paragraph**, then splices only the matched span and keeps neighboring `rPr`. It fails instead of rewriting tracked changes, fields, comments, content controls, or equations.
-
-### Create
-
-```json
-[
-  {
-    "type": "addParagraph",
-    "after": "body/p:1",
-    "style": "Heading1",
-    "name": "Intro",
-    "blocks": [{ "text": "总营收", "fontSize": 16, "bold": true }]
-  },
-  { "type": "setText", "target": "bookmark:Intro", "value": "Updated" },
-  {
-    "type": "addTable",
-    "name": "FinTable",
-    "rows": [
-      ["指标", "Q3"],
-      ["营收", "120"]
-    ]
-  }
-]
-```
-
-`deckuse render --page` does not paginate DOCX. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
-
-Schema: `deckuse schema --type addParagraph --json`.
+1. Keep the original PPTX. Record its SHA-256 (or copy) before `init`.
+2. `deckuse init input.pptx ./ws --json` then `deckuse status --workspace ./ws --json`. Read `data.valid` and `data.diagnostics`.
+3. If `NOTES_SLIDE_MISMATCH` appears and diagnostics show a single owning slide, run `deckuse repair --workspace ./ws --json`. Shared or unowned notes parts return `AMBIGUOUS_REFERENCE` — do not guess.
+4. Batch edits with `apply`. Prefer `duplicate` + local text over rewriting untouched slides.
+5. `deckuse validate --workspace ./ws --json` after writes. `export` still writes the file when invalid: treat `data.valid` as the gate, not envelope `ok`.
+6. Byte changes in unused parts after `init → export` (pretty-printed XML, `[Content_Types].xml`) are normalization, not content edits. Compare slide XML you intended to change; confirm in PowerPoint.
 
 ---
 
-## 6. Word (DOCX)
+## 7. Recipe: visual QA
+
+1. After table `insertRow` / `insertColumn`, read `TABLE_OVERLAPS_SHAPE.details.candidates` and run one `setTableLayout` from that list in the same or next `apply`. Check whether the overlap warning remains after layout.
+2. `deckuse render --page N --json`. `COMBO_CHART_RENDER_LIMITED` means the PNG may be a placeholder; `CHART_SERIES_COLOR_UNVERIFIED` means legend/series fills may not match PowerPoint. Confirm `ppt/charts/*.xml` or open the exported PPTX.
+3. Do not treat community `render` / `monitor` as the final visual sign-off.
+
+---
+
+## 8. Word (DOCX)
 
 Same workspace loop as PPTX. Do **not** send slide geometry (`addShape`, `xfrmSet`, `alignElements`, `zMove`); those return `UNSUPPORTED_CAPABILITY`.
 

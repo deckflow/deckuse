@@ -164,6 +164,30 @@ const frameBoxOf = (node: Element): FrameBox | undefined => {
 const boxesIntersect = (a: FrameBox, b: FrameBox): boolean =>
   a.x < b.x + b.cx && a.x + a.cx > b.x && a.y < b.y + b.cy && a.y + a.cy > b.y;
 
+const verticalOverlapEmu = (a: FrameBox, b: FrameBox): number =>
+  Math.max(0, Math.min(a.y + a.cy, b.y + b.cy) - Math.max(a.y, b.y));
+
+const FOOTER_GAP_EMU = 20 * EMU_PER_PT;
+
+const tableLayoutCandidates = (box: FrameBox, peer: FrameBox): Record<string, unknown>[] => {
+  const candidates: Record<string, unknown>[] = [
+    { type: 'setTableLayout', redistribute: 'content' },
+    { type: 'setTableLayout', redistribute: 'equal' },
+  ];
+  const footerLike = peer.y > box.y && peer.y < box.y + box.cy;
+  if (footerLike) {
+    const heightEmu = peer.y - box.y - FOOTER_GAP_EMU;
+    if (heightEmu > 0) {
+      candidates.push({
+        type: 'setTableLayout',
+        height: `${String(Math.round(heightEmu / EMU_PER_PT))}pt`,
+        redistribute: 'equal',
+      });
+    }
+  }
+  return candidates;
+};
+
 const SHAPE_FRAME_LOCAL = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
 
 /** Warn when a grown table overlaps peers or extends past the slide bottom. */
@@ -198,7 +222,12 @@ export const tableLayoutWarnings = (
         severity: 'warning',
         code: 'TABLE_OVERLAPS_SHAPE',
         message: `Table frame overlaps shape "${name}" after structural edit; consider setTableLayout to reflow`,
-        details: { peer: name },
+        details: {
+          peer: name,
+          overlapEmu: verticalOverlapEmu(box, other),
+          ...(context?.target ? { target: context.target } : {}),
+          candidates: tableLayoutCandidates(box, other),
+        },
       });
       break;
     }

@@ -31,7 +31,12 @@ import { addSlide, duplicateSlide, ensureNotes, removeSlide, setSlideLayout } fr
 import { resolveLayoutRef } from './layout-ref.js';
 import { lengthContextFor } from './slide-size.js';
 import { normalizePlaceholderRole } from './placeholder-role.js';
-import { applyTableCellProperties, applyTableLayout, applyTableProperties } from './table.js';
+import {
+  applyTableCellProperties,
+  applyTableLayout,
+  applyTableProperties,
+  tableLayoutWarnings,
+} from './table.js';
 import { tableHeightMayClipDiagnostic, type TableFrameLayout } from './table-measure.js';
 import type { IndexFile, IndexedElement, MutationOutcome } from './types.js';
 import {
@@ -1193,6 +1198,13 @@ export async function mutate(
         }),
       );
     }
+    diagnostics.push(
+      ...tableLayoutWarnings(shapeNode, {
+        archive,
+        partUri: liveItem.partUri,
+        target: command.target,
+      }),
+    );
   } else if (command.type === 'set' || command.type === 'setProperties') {
     if (command.type === 'set' && command.scope && command.scope !== 'local')
       return err(
@@ -1220,6 +1232,7 @@ export async function mutate(
       const applied = applyTableProperties(shapeNode, properties, {
         archive,
         partUri: liveItem.partUri,
+        ...(target !== undefined ? { target } : {}),
       });
       if (!applied.ok) return applied;
       if (applied.value.applied.length === 0)

@@ -4,7 +4,10 @@ import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import deck2html from '@deckflow/deck2html';
 import { chromium, type Browser, type Page } from 'playwright-core';
-import { ensureGitignore, renderDir } from './workspace/index.js';
+import type { Diagnostic } from './core/index.js';
+import { OpcArchive } from './opc/index.js';
+import { chartRenderDiagnostics } from './pptx/render-fidelity.js';
+import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
 import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
@@ -38,6 +41,7 @@ export interface RenderResult {
   readonly page: number;
   readonly output: string;
   readonly warnings: readonly string[];
+  readonly diagnostics: readonly Diagnostic[];
 }
 
 const sleep = (milliseconds: number): Promise<void> =>
@@ -149,9 +153,8 @@ export const renderPage = async (
   const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
   const converter = options.dependencies?.convert ?? deck2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
-  const warnings = [
-    'RENDER_FIDELITY: community render uses deck2html; chart series custom colors and some advanced charts may not match PowerPoint. Verify chart XML or open in PowerPoint when color accuracy matters.',
-  ];
+  const diagnostics = await inspectChartRenderFidelity(absoluteWorkspace, page);
+  const warnings = diagnostics.map((item) => `${item.code}: ${item.message}`);
 
   if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
 
@@ -181,9 +184,27 @@ export const renderPage = async (
       outputPath: output,
       ...(options.scale !== undefined ? { scale: options.scale } : {}),
     });
-    return { page, output, warnings };
+    return { page, output, warnings, diagnostics };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+const inspectChartRenderFidelity = async (
+  workspace: string,
+  page: number,
+): Promise<Diagnostic[]> => {
+  try {
+    const packed = resolve(workspace, PACKAGE_PPTX);
+    try {
+      const archive = await OpcArchive.openFile(packed);
+      return chartRenderDiagnostics(archive, page);
+    } catch {
+      const archive = await OpcArchive.openDirectory(sourceDir(workspace));
+      return chartRenderDiagnostics(archive, page);
+    }
+  } catch {
+    return [];
   }
 };
 

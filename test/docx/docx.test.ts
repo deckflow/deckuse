@@ -371,9 +371,9 @@ describe('docx adapter', () => {
     });
     expect(paragraphs.ok).toBe(true);
     if (!paragraphs.ok) return;
-    const previews = (
-      paragraphs.value as { items: Array<{ textPreview?: string }> }
-    ).items.map((item) => item.textPreview ?? '');
+    const previews = (paragraphs.value as { items: Array<{ textPreview?: string }> }).items.map(
+      (item) => item.textPreview ?? '',
+    );
     expect(previews.some((text) => text.includes(marker))).toBe(true);
 
     const bookmarks = await docxAdapter.execute({
@@ -396,5 +396,45 @@ describe('docx adapter', () => {
     expect(docXml).toContain(`${marker} heading`);
     expect(docXml).toContain(`${marker} body updated`);
     expect(docXml).toContain(`${marker}-A`);
+  });
+
+  it('rejects repair and still reports valid on status/export', async () => {
+    const { workspace, source } = await fixture();
+    const created = await docxAdapter.init({
+      version: '2.0',
+      type: 'init',
+      workspaceId: workspace,
+      format: 'docx',
+      source,
+    });
+    expect(created.ok).toBe(true);
+    const repaired = await docxAdapter.execute({
+      version: '2.0',
+      type: 'repair',
+      workspaceId: workspace,
+      transactionId: 'latest',
+    });
+    expect(repaired.ok).toBe(false);
+    if (!repaired.ok) expect(repaired.error.code).toBe('UNSUPPORTED_CAPABILITY');
+
+    const status = await docxAdapter.execute({
+      version: '2.0',
+      type: 'status',
+      workspaceId: workspace,
+    });
+    expect(status.ok).toBe(true);
+    if (status.ok) {
+      expect((status.value as { valid: boolean }).valid).toBe(true);
+      expect((status.value as { diagnostics: unknown[] }).diagnostics).toEqual([]);
+    }
+
+    const exported = await docxAdapter.execute({
+      version: '2.0',
+      type: 'export',
+      workspaceId: workspace,
+      output: join(workspace, 'checked.docx'),
+    });
+    expect(exported.ok).toBe(true);
+    if (exported.ok) expect((exported.value as { valid: boolean }).valid).toBe(true);
   });
 });

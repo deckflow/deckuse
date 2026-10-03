@@ -306,7 +306,173 @@ describe('agent regression: notes / undo / setText / table / changedParts', () =
     expect(validated.ok).toBe(false);
     if (!validated.ok) {
       expect(validated.diagnostics.some((d) => d.code === 'NOTES_SLIDE_MISMATCH')).toBe(true);
+      expect(validated.error.hint).toMatch(/deckuse repair/);
     }
+
+    const status = await pptxAdapter.execute(
+      { version: '2.0', type: 'status', workspaceId: workspace },
+      {},
+    );
+    expect(status.ok).toBe(true);
+    if (status.ok) {
+      expect((status.value as { valid: boolean }).valid).toBe(false);
+      expect(
+        (status.value as { diagnostics: { code: string }[] }).diagnostics.some(
+          (d) => d.code === 'NOTES_SLIDE_MISMATCH',
+        ),
+      ).toBe(true);
+    }
+
+    const exported = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'export',
+        workspaceId: workspace,
+        output: join(root, 'broken.pptx'),
+      },
+      {},
+    );
+    expect(exported.ok).toBe(true);
+    if (exported.ok) {
+      expect((exported.value as { valid: boolean }).valid).toBe(false);
+      expect(
+        (exported.value as { diagnostics: { code: string }[] }).diagnostics.some(
+          (d) => d.code === 'NOTES_SLIDE_MISMATCH',
+        ),
+      ).toBe(true);
+    }
+
+    const dry = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'repair',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        dryRun: true,
+      },
+      {},
+    );
+    expect(dry.ok).toBe(true);
+    if (dry.ok) {
+      expect((dry.value as { dryRun: boolean }).dryRun).toBe(true);
+      expect((dry.value as { repaired: unknown[] }).repaired.length).toBe(1);
+    }
+    const stillBroken = await pptxAdapter.execute(
+      { version: '2.0', type: 'validate', workspaceId: workspace },
+      {},
+    );
+    expect(stillBroken.ok).toBe(false);
+
+    const repaired = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'repair',
+        workspaceId: workspace,
+        transactionId: 'latest',
+      },
+      {},
+    );
+    expect(repaired.ok).toBe(true);
+    if (!repaired.ok) return;
+    const rev = String((repaired.value as { revision: string }).revision);
+
+    const setNote = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setText',
+        workspaceId: workspace,
+        transactionId: rev,
+        target: 'slide:2/notes',
+        text: 'Fixed notes',
+      },
+      {},
+    );
+    expect(setNote.ok).toBe(true);
+  });
+
+  it('repair refuses shared notes parts without writing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-repair-ambiguous-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await writeArchive(source, (a) => {
+      baseParts(a);
+      a.setPart(
+        '/ppt/slides/slide1.xml',
+        e.encode(
+          `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>One</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+        ),
+        SLIDE_CT,
+      );
+      a.setRelationships('/ppt/slides/slide1.xml', [
+        {
+          id: 'rId1',
+          type: REL.notes,
+          target: '../notesSlides/notesSlide1.xml',
+          external: false,
+        },
+      ]);
+      a.setPart(
+        '/ppt/notesSlides/notesSlide1.xml',
+        e.encode(
+          `<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes"/><p:cNvSpPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Note</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>`,
+        ),
+        NOTES_CT,
+      );
+      a.setRelationships('/ppt/notesSlides/notesSlide1.xml', [
+        {
+          id: 'rId1',
+          type: REL.slide,
+          target: '../slides/slide1.xml',
+          external: false,
+        },
+      ]);
+    });
+    await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    const dup = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'duplicate',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1',
+      },
+      {},
+    );
+    expect(dup.ok).toBe(true);
+    const pack = await OpcArchive.openDirectory(join(workspace, 'source'));
+    pack.setRelationships('/ppt/slides/slide2.xml', [
+      {
+        id: 'rId1',
+        type: REL.notes,
+        target: '../notesSlides/notesSlide1.xml',
+        external: false,
+        resolvedTarget: '/ppt/notesSlides/notesSlide1.xml',
+      },
+    ]);
+    await pack.writeDirectory(join(workspace, 'source'), true);
+    const before = await readFile(
+      join(workspace, 'source/ppt/notesSlides/_rels/notesSlide1.xml.rels'),
+      'utf8',
+    );
+    const repaired = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'repair',
+        workspaceId: workspace,
+        transactionId: 'latest',
+      },
+      {},
+    );
+    expect(repaired.ok).toBe(false);
+    if (!repaired.ok) expect(repaired.error.code).toBe('AMBIGUOUS_REFERENCE');
+    const after = await readFile(
+      join(workspace, 'source/ppt/notesSlides/_rels/notesSlide1.xml.rels'),
+      'utf8',
+    );
+    expect(after).toBe(before);
   });
 
   it('undo after duplicate removes orphan slide/notes parts from source and package', async () => {

@@ -146,6 +146,7 @@ describe('deckuse CLI', () => {
       'new           Create a workspace from the bundled blank template',
     );
     expect(help.stdout).toContain('render        Screenshot one slide to PNG');
+    expect(help.stdout).toContain('repair        Fix unambiguous notesSlide back-pointers');
   });
 
   it('provides progressive command and subcommand help', async () => {
@@ -196,6 +197,12 @@ describe('deckuse CLI', () => {
     expect(monitorHelp.stdout).toContain('usage: deckuse monitor');
     expect(monitorHelp.stdout).toContain('list all running daemons');
     expect(monitorHelp.stdout).toContain('--all');
+
+    const repairHelp = await run(['repair', '--help']);
+    expect(repairHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(repairHelp.stdout).toContain('usage: deckuse repair');
+    expect(repairHelp.stdout).toContain('notesSlide');
+    expect(repairHelp.stdout).toContain('AMBIGUOUS_REFERENCE');
   });
 
   it('monitor status without workspace lists daemons instead of requiring a workspace', async () => {

@@ -316,14 +316,87 @@ describe('table cell style read/write', () => {
     );
     expect(inserted.ok).toBe(true);
     if (!inserted.ok) return;
-    const warnings = (inserted.value as { warnings?: string[] }).warnings ?? [];
     const diagnostics = inserted.diagnostics ?? [];
-    const messages = [...warnings, ...diagnostics.map((d) => d.message)];
-    expect(messages.some((m) => m.includes('setTableLayout'))).toBe(true);
-    expect(
-      diagnostics.some((d) => d.code === 'TABLE_OVERLAPS_SHAPE') ||
-        messages.some((m) => m.includes('overlaps')),
-    ).toBe(true);
+    const overlap = diagnostics.find((d) => d.code === 'TABLE_OVERLAPS_SHAPE');
+    expect(overlap).toBeTruthy();
+    const details = overlap?.details as {
+      peer?: string;
+      overlapEmu?: number;
+      target?: string;
+      candidates?: { type: string; redistribute?: string; height?: string }[];
+    };
+    expect(details.peer).toBe('AutoShape 6');
+    expect(details.target).toBe('slide:1/shape:3');
+    expect(details.overlapEmu).toBeGreaterThan(0);
+    expect(details.candidates?.some((c) => c.redistribute === 'content')).toBe(true);
+    expect(details.candidates?.some((c) => c.redistribute === 'equal' && c.height)).toBe(true);
+
+    const stillOverlap = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setTableLayout',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:3',
+        height: 2_000_000,
+        redistribute: 'equal',
+      },
+      {},
+    );
+    expect(stillOverlap.ok).toBe(true);
+    if (!stillOverlap.ok) return;
+    expect(stillOverlap.diagnostics.some((d) => d.code === 'TABLE_OVERLAPS_SHAPE')).toBe(true);
+
+    const laid = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setTableLayout',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:3',
+        height: 400000,
+        redistribute: 'equal',
+      },
+      {},
+    );
+    expect(laid.ok).toBe(true);
+    if (!laid.ok) return;
+    expect(laid.diagnostics.some((d) => d.code === 'TABLE_OVERLAPS_SHAPE')).toBe(false);
+  });
+
+  it('does not suggest shrinking when a peer covers the table from above', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-cell-overlay-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await writeArchive(source, (a) => {
+      minimalParts(
+        a,
+        `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name="Root"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="3" name="Table"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="1000000" y="1000000"/><a:ext cx="4000000" cy="1000000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl><a:tblGrid><a:gridCol w="4000000"/></a:tblGrid><a:tr h="914400"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>A</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame><p:sp><p:nvSpPr><p:cNvPr id="9" name="Badge"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="1000000" y="500000"/><a:ext cx="4000000" cy="2000000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Overlay</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`,
+      );
+    });
+    await pptxAdapter.init(
+      { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+      {},
+    );
+    const inserted = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'setProperties',
+        workspaceId: workspace,
+        transactionId: 'latest',
+        target: 'slide:1/shape:3',
+        properties: { insertRow: { index: 1, cells: ['B'] } },
+      },
+      {},
+    );
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    const overlap = inserted.diagnostics.find((d) => d.code === 'TABLE_OVERLAPS_SHAPE');
+    expect(overlap).toBeTruthy();
+    const candidates =
+      (overlap?.details as { candidates?: { height?: string }[] }).candidates ?? [];
+    expect(candidates.some((c) => c.height)).toBe(false);
+    expect(candidates.some((c) => !('height' in c))).toBe(true);
   });
 });
 
