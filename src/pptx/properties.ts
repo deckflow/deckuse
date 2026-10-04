@@ -5,6 +5,7 @@ import { setColor } from './elements.js';
 import { setHyperlink } from './hyperlink.js';
 import {
   NS,
+  attr,
   children,
   descendants,
   first,
@@ -188,6 +189,23 @@ const setFill = (spPr: Element, value: unknown): void => {
     } else throw new Error('Unsupported fill value');
   } else throw new Error('Unsupported fill value');
   insertAfter(spPr, solidFillXml(doc, color, transparency), ['xfrm', 'prstGeom', 'custGeom']);
+};
+
+export const readBackgroundFill = (
+  rootEl: Element,
+): { kind: string; color: string | null } | undefined => {
+  const cSld = directChild(rootEl, 'cSld') ?? first(rootEl, 'cSld');
+  if (!cSld) return undefined;
+  const bg = directChild(cSld, 'bg');
+  if (!bg) return undefined;
+  const bgPr = directChild(bg, 'bgPr');
+  if (!bgPr) return undefined;
+  if (directChild(bgPr, 'noFill')) return { kind: 'none', color: null };
+  const solid = directChild(bgPr, 'solidFill');
+  if (!solid) return undefined;
+  const srgb = first(solid, 'srgbClr');
+  const val = attr(srgb, 'val');
+  return { kind: 'solid', color: val ? `#${val.toUpperCase()}` : null };
 };
 
 const setStroke = (spPr: Element, value: unknown): void => {

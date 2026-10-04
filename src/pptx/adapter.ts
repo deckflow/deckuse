@@ -104,6 +104,8 @@ export const pptxCapabilities = {
     comboDualAxis: true,
     fill: true,
     embeddedWorkbook: false,
+    createFamilies: ['bar', 'column', 'line', 'pie', 'combo'],
+    editExistingAdvanced: !editionCapabilities.chartBasicOnly,
   },
   table: {
     insertRow: true,
@@ -339,6 +341,35 @@ const assertExpectRevision = (
   return undefined;
 };
 
+const listShapeItems = (index: ReturnType<typeof buildIndex>, partUri: string) =>
+  index.elements
+    .filter(
+      (item) =>
+        item.partUri === partUri &&
+        !['slide', 'notes', 'master', 'layout', 'theme', 'tableCell'].includes(item.kind),
+    )
+    .map((item, z) => ({
+      target: targetPathForItem(index, item),
+      uid: uidForItem(item),
+      id: cNvPrIdOf(item),
+      name: item.name,
+      kind: item.kind,
+      role: item.payload?.['placeholder'] ?? item.payload?.['role'],
+      bbox: item.transform,
+      zOrder: z,
+      textPreview: item.text?.slice(0, 80),
+      parentId: item.parentId,
+      ...(item.kind === 'chart'
+        ? {
+            chartVariant:
+              item.payload?.['chartVariant'] === 'basic' ||
+              item.payload?.['chartVariant'] === 'advanced'
+                ? item.payload['chartVariant']
+                : 'advanced',
+          }
+        : {}),
+    }));
+
 const listResource = (
   archive: OpcArchive,
   index: ReturnType<typeof buildIndex>,
@@ -353,7 +384,7 @@ const listResource = (
     | 'sections'
     | 'styles'
     | 'bookmarks',
-  slide?: number,
+  options: { slide?: number; master?: string; layout?: string } = {},
 ) => {
   if (
     resource === 'paragraphs' ||
@@ -404,43 +435,36 @@ const listResource = (
       });
   }
   if (resource === 'shapes') {
-    if (slide === undefined)
-      return err('INVALID_COMMAND', 'list shapes requires --slide', [], {
-        hint: 'deckuse list shapes --slide <n> --json',
-      });
-    const slides = index.elements.filter((item) => item.kind === 'slide');
-    const slideItem = slides[slide - 1];
-    if (!slideItem)
-      return err('TARGET_NOT_FOUND', `slide:${slide} does not exist`, [], {
-        target: `slide:${slide}`,
-      });
-    return index.elements
-      .filter(
-        (item) =>
-          item.partUri === slideItem.partUri &&
-          !['slide', 'notes', 'master', 'layout', 'theme', 'tableCell'].includes(item.kind),
-      )
-      .map((item, z) => ({
-        target: targetPathForItem(index, item),
-        uid: uidForItem(item),
-        id: cNvPrIdOf(item),
-        name: item.name,
-        kind: item.kind,
-        role: item.payload?.['placeholder'] ?? item.payload?.['role'],
-        bbox: item.transform,
-        zOrder: z,
-        textPreview: item.text?.slice(0, 80),
-        parentId: item.parentId,
-        ...(item.kind === 'chart'
-          ? {
-              chartVariant:
-                item.payload?.['chartVariant'] === 'basic' ||
-                item.payload?.['chartVariant'] === 'advanced'
-                  ? item.payload['chartVariant']
-                  : 'advanced',
-            }
-          : {}),
-      }));
+    const slide = options.slide;
+    const master = options.master;
+    const layout = options.layout;
+    const specified = [slide !== undefined, Boolean(master), Boolean(layout)].filter(
+      Boolean,
+    ).length;
+    if (specified !== 1)
+      return err(
+        'INVALID_COMMAND',
+        'list shapes requires exactly one of --slide, --master, or --layout',
+        [],
+        { hint: 'deckuse list shapes --slide <n> | --master <name> | --layout <name> --json' },
+      );
+    if (slide !== undefined) {
+      const slides = index.elements.filter((item) => item.kind === 'slide');
+      const slideItem = slides[slide - 1];
+      if (!slideItem)
+        return err('TARGET_NOT_FOUND', `slide:${slide} does not exist`, [], {
+          target: `slide:${slide}`,
+        });
+      return listShapeItems(index, slideItem.partUri);
+    }
+    if (master) {
+      const resolved = resolveTarget(index, `master:${master}`);
+      if (!resolved.ok) return resolved;
+      return listShapeItems(index, resolved.value.item.partUri);
+    }
+    const resolved = resolveTarget(index, `layout:${layout!}`);
+    if (!resolved.ok) return resolved;
+    return listShapeItems(index, resolved.value.item.partUri);
   }
   if (resource === 'layouts' || resource === 'masters') {
     if (resource === 'layouts') {
@@ -696,7 +720,11 @@ export const pptxAdapter: FormatAdapter = {
       }
 
       if (command.type === 'list') {
-        const listed = listResource(archive, index, command.resource, command.slide);
+        const listed = listResource(archive, index, command.resource, {
+          ...(command.slide !== undefined ? { slide: command.slide } : {}),
+          ...(command.master !== undefined ? { master: command.master } : {}),
+          ...(command.layout !== undefined ? { layout: command.layout } : {}),
+        });
         if (listed && typeof listed === 'object' && 'ok' in listed && listed.ok === false)
           return listed;
         return ok({ resource: command.resource, items: listed });

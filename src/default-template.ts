@@ -17,7 +17,7 @@ export const assertDefaultDocxExists = async (): Promise<string> => {
     await access(path);
   } catch {
     throw new Error(
-      `Bundled default template missing: ${path}. Reinstall @deckflow/deckuse or restore assets/default.docx.`,
+      `Bundled default template missing: ${path}. Reinstall this deckuse package or restore assets/default.docx.`,
     );
   }
   return path;
@@ -28,7 +28,7 @@ export const assertDefaultPptxExists = async (): Promise<string> => {
     await access(path);
   } catch {
     throw new Error(
-      `Bundled default template missing: ${path}. Reinstall @deckflow/deckuse or restore assets/default.pptx.`,
+      `Bundled default template missing: ${path}. Reinstall this deckuse package or restore assets/default.pptx.`,
     );
   }
   return path;

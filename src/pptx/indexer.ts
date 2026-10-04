@@ -93,139 +93,158 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
       name: `Slide ${slideId}`,
       location: { slideId, partUri },
     });
-    const doc = archive.readXml(partUri);
-    const walk = (node: Element, ancestors: string[], parentId: string): void => {
-      for (const child of children(node)) {
-        const kind = classify(child);
-        if (!kind) {
-          walk(child, ancestors, parentId);
-          continue;
-        }
-        const own = attr(cNvPr(child), 'id') ?? child.nodeName,
-          id = `${slideId}:${[...ancestors, own].join('.')}`,
-          transform = transformOf(child),
-          name = attr(cNvPr(child), 'name'),
-          text = textOf(child);
-        const ph = readPlaceholder(child);
-        const placeholderType = ph?.type;
-        const placeholderIdx = ph?.idx;
-        const pr = cNvPr(child);
-        const hlink = pr ? children(pr).find((c) => c.localName === 'hlinkClick') : undefined;
-        const hlinkRid =
-          hlink?.getAttributeNS(NS.r, 'id') ?? (hlink ? attr(hlink, 'r:id') : undefined);
-        const hlinkRel = hlinkRid
-          ? archive.getRelationships(partUri).find((r) => r.id === hlinkRid)
-          : undefined;
-        const indexed: IndexedElement = {
-          ref: { documentId, elementId: id, path: `${partUri}#${id}`, revision: rev },
-          kind,
-          partUri,
-          slideId,
-          parentId,
-          location: { slideId, partUri, ancestorIds: ancestors, cNvPrId: own },
-          ...(name ? { name } : {}),
-          ...(text ? { text } : {}),
-          ...(transform ? { transform } : {}),
-        };
-        if (placeholderType || hlinkRel) {
-          indexed.payload = {
-            ...(placeholderType ? { placeholder: placeholderType } : {}),
-            ...(placeholderIdx !== undefined ? { placeholderIdx } : {}),
-            ...(hlinkRel ? { hyperlink: hlinkRel.target } : {}),
+    const walkSpTree = (
+      treePartUri: string,
+      ownerId: string,
+      treeSlideId: string | undefined,
+      parentRoot: string,
+    ): void => {
+      const treeDoc = archive.readXml(treePartUri);
+      const walk = (node: Element, ancestors: string[], parentId: string): void => {
+        for (const child of children(node)) {
+          const kind = classify(child);
+          if (!kind) {
+            walk(child, ancestors, parentId);
+            continue;
+          }
+          const own = attr(cNvPr(child), 'id') ?? child.nodeName,
+            id = `${ownerId}:${[...ancestors, own].join('.')}`,
+            transform = transformOf(child),
+            name = attr(cNvPr(child), 'name'),
+            text = textOf(child);
+          const ph = readPlaceholder(child);
+          const placeholderType = ph?.type;
+          const placeholderIdx = ph?.idx;
+          const pr = cNvPr(child);
+          const hlink = pr ? children(pr).find((c) => c.localName === 'hlinkClick') : undefined;
+          const hlinkRid =
+            hlink?.getAttributeNS(NS.r, 'id') ?? (hlink ? attr(hlink, 'r:id') : undefined);
+          const hlinkRel = hlinkRid
+            ? archive.getRelationships(treePartUri).find((r) => r.id === hlinkRid)
+            : undefined;
+          const indexed: IndexedElement = {
+            ref: { documentId, elementId: id, path: `${treePartUri}#${id}`, revision: rev },
+            kind,
+            partUri: treePartUri,
+            parentId,
+            location: {
+              ...(treeSlideId ? { slideId: treeSlideId } : {}),
+              partUri: treePartUri,
+              ancestorIds: ancestors,
+              cNvPrId: own,
+            },
+            ...(treeSlideId ? { slideId: treeSlideId } : {}),
+            ...(name ? { name } : {}),
+            ...(text ? { text } : {}),
+            ...(transform ? { transform } : {}),
           };
-        }
-        elements.push(indexed);
-        if (kind === 'table') {
-          const rows = descendants(child, 'tr');
-          rows.forEach((row, rowIndex) => {
-            children(row)
-              .filter((n) => n.localName === 'tc')
-              .forEach((cell, columnIndex) =>
-                elements.push({
-                  ref: {
-                    documentId,
-                    elementId: `${id}:cell:${String(rowIndex)}:${String(columnIndex)}`,
-                    path: `${partUri}#${id}:cell:${String(rowIndex)}:${String(columnIndex)}`,
-                    revision: rev,
-                  },
-                  kind: 'tableCell',
-                  partUri,
-                  slideId,
-                  parentId: id,
-                  text: textOf(cell),
-                  location: { slideId, partUri, tableId: id, row: rowIndex, column: columnIndex },
+          if (placeholderType || hlinkRel) {
+            indexed.payload = {
+              ...(placeholderType ? { placeholder: placeholderType } : {}),
+              ...(placeholderIdx !== undefined ? { placeholderIdx } : {}),
+              ...(hlinkRel ? { hyperlink: hlinkRel.target } : {}),
+            };
+          }
+          elements.push(indexed);
+          if (kind === 'table') {
+            const rows = descendants(child, 'tr');
+            rows.forEach((row, rowIndex) => {
+              children(row)
+                .filter((n) => n.localName === 'tc')
+                .forEach((cell, columnIndex) =>
+                  elements.push({
+                    ref: {
+                      documentId,
+                      elementId: `${id}:cell:${String(rowIndex)}:${String(columnIndex)}`,
+                      path: `${treePartUri}#${id}:cell:${String(rowIndex)}:${String(columnIndex)}`,
+                      revision: rev,
+                    },
+                    kind: 'tableCell',
+                    partUri: treePartUri,
+                    parentId: id,
+                    text: textOf(cell),
+                    location: {
+                      ...(treeSlideId ? { slideId: treeSlideId } : {}),
+                      partUri: treePartUri,
+                      tableId: id,
+                      row: rowIndex,
+                      column: columnIndex,
+                    },
+                    ...(treeSlideId ? { slideId: treeSlideId } : {}),
+                  }),
+                );
+            });
+          }
+          if (kind === 'picture' || kind === 'video' || kind === 'audio') {
+            const blip = first(child, 'blip');
+            const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
+            const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
+            const video = first(child, 'videoFile');
+            const audio = first(child, 'audioFile');
+            const mediaLink =
+              (video ?? audio)?.getAttributeNS(NS.r, 'link') ??
+              attr(video ?? audio, 'r:link') ??
+              undefined;
+            const rid = mediaLink ?? embed ?? link;
+            const rel = rid
+              ? archive.getRelationships(treePartUri).find((r) => r.id === rid)
+              : undefined;
+            if (rel) {
+              const mediaPart = rel.resolvedTarget ?? rel.target;
+              const external = Boolean(rel.external || (!embed && link && !mediaLink));
+              indexed.payload = {
+                ...(indexed.payload ?? {}),
+                mediaPart,
+                href: external ? rel.target : mediaHref(documentId, mediaPart),
+                ...(kind !== 'picture' ? { mediaKind: kind } : {}),
+                ...(external ? { external: true } : {}),
+                ...(!external && rel.resolvedTarget
+                  ? {
+                      mediaType: archive.getPart(rel.resolvedTarget)?.mediaType,
+                      fileName: basename(rel.resolvedTarget),
+                    }
+                  : {}),
+              };
+            }
+          }
+          if (kind === 'chart') {
+            const crid =
+                first(child, 'chart')?.getAttributeNS(NS.r, 'id') ??
+                attr(first(child, 'chart'), 'r:id'),
+              cr = archive.getRelationships(treePartUri).find((r) => r.id === crid);
+            if (cr?.resolvedTarget) {
+              const chart = archive.readXml(cr.resolvedTarget);
+              indexed.payload = {
+                ...(indexed.payload ?? {}),
+                chartPart: cr.resolvedTarget,
+                chartVariant: classifyChartPart(archive, cr.resolvedTarget),
+                title: textOf(first(chart, 'title') ?? chart),
+                series: descendants(chart, 'ser').map((ser) => {
+                  const color = readSeriesColor(ser);
+                  return {
+                    name:
+                      first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
+                      textOf(first(ser, 'tx') ?? ser),
+                    values: descendants(first(ser, 'val') ?? ser, 'v').map(
+                      (v) => v.textContent ?? '',
+                    ),
+                    ...(color ? { color } : {}),
+                  };
                 }),
-              );
-          });
-        }
-        if (kind === 'picture' || kind === 'video' || kind === 'audio') {
-          const blip = first(child, 'blip');
-          const embed = blip?.getAttributeNS(NS.r, 'embed') ?? attr(blip, 'r:embed');
-          const link = blip?.getAttributeNS(NS.r, 'link') ?? attr(blip, 'r:link');
-          const video = first(child, 'videoFile');
-          const audio = first(child, 'audioFile');
-          const mediaLink =
-            (video ?? audio)?.getAttributeNS(NS.r, 'link') ??
-            attr(video ?? audio, 'r:link') ??
-            undefined;
-          const rid = mediaLink ?? embed ?? link;
-          const rel = rid ? archive.getRelationships(partUri).find((r) => r.id === rid) : undefined;
-          if (rel) {
-            const mediaPart = rel.resolvedTarget ?? rel.target;
-            const external = Boolean(rel.external || (!embed && link && !mediaLink));
-            indexed.payload = {
-              ...(indexed.payload ?? {}),
-              mediaPart,
-              href: external ? rel.target : mediaHref(documentId, mediaPart),
-              ...(kind !== 'picture' ? { mediaKind: kind } : {}),
-              ...(external ? { external: true } : {}),
-              ...(!external && rel.resolvedTarget
-                ? {
-                    mediaType: archive.getPart(rel.resolvedTarget)?.mediaType,
-                    fileName: basename(rel.resolvedTarget),
-                  }
-                : {}),
-            };
+                embeddedWorkbook: archive
+                  .getRelationships(cr.resolvedTarget)
+                  .some((r) => r.type === REL.package),
+              };
+            } else {
+              indexed.payload = { ...(indexed.payload ?? {}), chartVariant: 'advanced' };
+            }
           }
+          if (kind === 'group') walk(child, [...ancestors, own], id);
         }
-        if (kind === 'chart') {
-          const crid =
-              first(child, 'chart')?.getAttributeNS(NS.r, 'id') ??
-              attr(first(child, 'chart'), 'r:id'),
-            cr = archive.getRelationships(partUri).find((r) => r.id === crid);
-          if (cr?.resolvedTarget) {
-            const chart = archive.readXml(cr.resolvedTarget);
-            indexed.payload = {
-              ...(indexed.payload ?? {}),
-              chartPart: cr.resolvedTarget,
-              chartVariant: classifyChartPart(archive, cr.resolvedTarget),
-              title: textOf(first(chart, 'title') ?? chart),
-              series: descendants(chart, 'ser').map((ser) => {
-                const color = readSeriesColor(ser);
-                return {
-                  name:
-                    first(first(ser, 'tx') ?? ser, 'v')?.textContent ??
-                    textOf(first(ser, 'tx') ?? ser),
-                  values: descendants(first(ser, 'val') ?? ser, 'v').map(
-                    (v) => v.textContent ?? '',
-                  ),
-                  ...(color ? { color } : {}),
-                };
-              }),
-              embeddedWorkbook: archive
-                .getRelationships(cr.resolvedTarget)
-                .some((r) => r.type === REL.package),
-            };
-          } else {
-            // Fail closed: unresolvable chart parts are advanced (commercial-only edits).
-            indexed.payload = { ...(indexed.payload ?? {}), chartVariant: 'advanced' };
-          }
-        }
-        // Only groups nest addressable descendants; table cells are indexed above.
-        if (kind === 'group') walk(child, [...ancestors, own], id);
-      }
+      };
+      walk(root(treeDoc), [], parentRoot);
     };
-    walk(root(doc), [], `slide:${slideId}`);
+    walkSpTree(partUri, slideId, slideId, `slide:${slideId}`);
     const notes = archive.getRelationships(partUri).find((r) => r.type === REL.notes);
     if (notes?.resolvedTarget) {
       const nd = archive.readXml(notes.resolvedTarget);
@@ -264,6 +283,37 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
               .filter((v): v is string => v !== undefined),
           },
         });
+        if (kind === 'master' || kind === 'layout') {
+          const ownerId = `${kind}:${basename(part.name).replace(/\.xml$/i, '')}`;
+          for (const child of descendants(doc)) {
+            const shapeKind = classify(child);
+            if (!shapeKind) continue;
+            const own = attr(cNvPr(child), 'id');
+            if (!own) continue;
+            const id = `${ownerId}:${own}`;
+            const name = attr(cNvPr(child), 'name');
+            const text = textOf(child);
+            const transform = transformOf(child);
+            const ph = readPlaceholder(child);
+            const indexed: IndexedElement = {
+              ref: { documentId, elementId: id, path: `${part.name}#${id}`, revision: rev },
+              kind: shapeKind,
+              partUri: part.name,
+              parentId: ownerId,
+              location: { partUri: part.name, cNvPrId: own },
+              ...(name ? { name } : {}),
+              ...(text ? { text } : {}),
+              ...(transform ? { transform } : {}),
+            };
+            if (ph?.type) {
+              indexed.payload = {
+                placeholder: ph.type,
+                ...(ph.idx !== undefined ? { placeholderIdx: ph.idx } : {}),
+              };
+            }
+            elements.push(indexed);
+          }
+        }
       }
   return { revision: rev, elements };
 }

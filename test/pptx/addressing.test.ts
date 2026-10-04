@@ -69,6 +69,17 @@ const sampleIndex = (): IndexFile => ({
     {
       ref: {
         documentId: '/ws',
+        elementId: 'master:slideMaster1:2',
+        path: '/ppt/slideMasters/slideMaster1.xml#master:slideMaster1:2',
+      },
+      kind: 'textbox',
+      partUri: '/ppt/slideMasters/slideMaster1.xml',
+      name: 'MasterTitle',
+      location: { partUri: '/ppt/slideMasters/slideMaster1.xml', cNvPrId: '2' },
+    },
+    {
+      ref: {
+        documentId: '/ws',
         elementId: 'master:/ppt/slideMasters/slideMaster10.xml',
         path: '/ppt/slideMasters/slideMaster10.xml',
       },
@@ -149,5 +160,26 @@ describe('addressing', () => {
     if (!resolved.ok) return;
     expect(resolved.value.target).toBe('master:slideMaster1');
     expect(resolved.value.item.partUri).toBe('/ppt/slideMasters/slideMaster1.xml');
+  });
+
+  it('rejects unknown master/layout suffixes instead of dropping them', () => {
+    const parsed = parseTargetPath('master:slideMaster1/widget:2');
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error.code).toBe('INVALID_COMMAND');
+  });
+
+  it('resolves master shapes and fails for missing ids', () => {
+    const index = sampleIndex();
+    const resolved = resolveTarget(index, 'master:slideMaster1/shape:2');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.target).toBe('master:slideMaster1/shape:2');
+    expect(resolved.value.item.name).toBe('MasterTitle');
+
+    const missing = resolveTarget(index, 'master:slideMaster1/shape:999');
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.error.code).toBe('TARGET_NOT_FOUND');
   });
 });

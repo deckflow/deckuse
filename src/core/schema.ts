@@ -187,8 +187,26 @@ const listCommandSchema = z
       'bookmarks',
     ]),
     slide: z.number().int().positive().optional(),
+    master: z.string().min(1).optional(),
+    layout: z.string().min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.resource !== 'shapes') return;
+    const specified = [
+      value.slide !== undefined,
+      value.master !== undefined,
+      value.layout !== undefined,
+    ].filter(Boolean).length;
+    if (specified !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'list shapes requires exactly one of slide, master, or layout (example: deckuse list shapes --slide 1 --json)',
+        path: ['slide'],
+      });
+    }
+  });
 
 const getCommandSchema = z
   .object({

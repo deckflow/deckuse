@@ -524,12 +524,16 @@ const main = async (): Promise<void> => {
           );
         const workspace = await findWorkspace(workspaceOpt);
         const slide = optionFrom(clean, '--slide');
+        const master = optionFrom(clean, '--master');
+        const layout = optionFrom(clean, '--layout');
         ok = await execute(`deckuse list ${resource}`, {
           version: PROTOCOL_VERSION,
           type: 'list',
           workspaceId: workspace,
           resource: resource as (typeof resources)[number],
           ...(slide ? { slide: Number(slide) } : {}),
+          ...(master ? { master } : {}),
+          ...(layout ? { layout } : {}),
         });
       } else if (action === 'get') {
         const target = clean[1];

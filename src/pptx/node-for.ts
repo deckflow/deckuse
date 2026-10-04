@@ -1,5 +1,6 @@
 import type { Document, Element } from '@xmldom/xmldom';
-import { cNvPrIdOf } from './addressing.js';
+import { err, ok, type Result } from '../core/index.js';
+import { cNvPrIdOf, type ParsedTarget } from './addressing.js';
 import type { IndexedElement } from './types.js';
 import { attr, children, cNvPr, descendants, first, notesBodyShape, root } from './xml.js';
 
@@ -39,4 +40,34 @@ export const nodeFor = (doc: Document, item: IndexedElement): Element | undefine
   }
   const id = cNvPrIdOf(item);
   return id ? shapeByCNvPrId(doc, id) : undefined;
+};
+
+/** Narrow a shape node to paragraph or run when the target path includes those segments. */
+export const focusMutationNode = (
+  shape: Element,
+  parsed: ParsedTarget | undefined,
+): Result<Element> => {
+  if (!parsed?.focus) return ok(shape);
+  if (parsed.focus === 'paragraph' && parsed.paragraph !== undefined) {
+    const paragraphs = descendants(shape, 'p');
+    const p = paragraphs[parsed.paragraph];
+    if (!p)
+      return err(
+        'TARGET_NOT_FOUND',
+        `paragraph:${parsed.paragraph} not found on ${parsed.raw}`,
+        [],
+        { target: parsed.raw },
+      );
+    return ok(p);
+  }
+  if (parsed.focus === 'run' && parsed.run !== undefined) {
+    const runs = descendants(shape, 'r');
+    const run = runs[parsed.run];
+    if (!run)
+      return err('TARGET_NOT_FOUND', `run:${parsed.run} not found on ${parsed.raw}`, [], {
+        target: parsed.raw,
+      });
+    return ok(run);
+  }
+  return ok(shape);
 };

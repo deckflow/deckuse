@@ -110,7 +110,9 @@ Notes:
   DOCX: paragraphs | tables | sections | styles | bookmarks
 
 Options:
-  --slide <n>               Required for shapes; one-based slide index
+  --slide <n>               Required for slide shapes; one-based slide index
+  --master <name>           List shapes on a slide master (e.g. slideMaster1)
+  --layout <name|index>     List shapes on a slide layout
   --workspace <path>        Workspace root
   --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope
@@ -118,6 +120,7 @@ Options:
 Examples:
   deckuse list slides --json
   deckuse list shapes --slide 12 --json
+  deckuse list shapes --master slideMaster1 --json
   deckuse list paragraphs --json`,
   },
 
@@ -132,11 +135,14 @@ Examples:
   },
 
   'list shapes': {
-    usage: 'deckuse list shapes --slide <n> [options]',
-    summary: 'List shapes on a slide (id, name, role, type, bbox, text preview).',
+    usage: 'deckuse list shapes --slide <n> | --master <name> | --layout <name> [options]',
+    summary:
+      'List shapes on a slide, master, or layout (id, name, role, type, bbox, text preview).',
     example: 'deckuse list shapes --slide 1 --workspace ./workspace --json',
-    details: `Required:
+    details: `Required (exactly one):
   --slide <n>               One-based slide index
+  --master <name>           Slide master basename (e.g. slideMaster1)
+  --layout <name|index>     Layout basename, display name, or 1-based index
 
 Options:
   --workspace <path>        Workspace root

@@ -11,9 +11,10 @@ import {
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import { resolveTarget, resolveToRef, type ParsedTarget } from './addressing.js';
-import { nodeFor, shapeByCNvPrId } from './node-for.js';
+import { nodeFor, shapeByCNvPrId, focusMutationNode } from './node-for.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
-import { assertWritable } from './edition.js';
+import { editionGatedWriteKind, gatedWriteHardDeny } from './edition.js';
+import { getPptxEditionExtension } from './edition-extension.js';
 import {
   addElement,
   duplicateElement,
@@ -378,15 +379,24 @@ const writeText = (
   text: string,
   diagnostics: Diagnostic[],
 ): Result<void> => {
-  const gated = assertWritable(item, archive);
-  if (!gated.ok) return gated;
+  const gatedKind = editionGatedWriteKind(item, archive);
+  if (gatedKind) {
+    const ext = getPptxEditionExtension();
+    if (ext?.assertWritable) {
+      const verdict = ext.assertWritable(item, archive);
+      if (verdict !== undefined && !verdict.ok) return verdict;
+    }
+    if (ext?.writeGatedText) return ext.writeGatedText(archive, item, text, diagnostics);
+    return gatedWriteHardDeny(item, archive);
+  }
   if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
     const result = updateChart(archive, item.payload['chartPart'], { title: text });
     if (result.workbook)
       diagnostics.push({
         severity: 'warning',
         code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
-        message: 'Chart cache changed; embedded workbook was not modified',
+        message:
+          'Chart cache changed; embedded workbook was not modified. PowerPoint Edit Data or a data refresh may restore previous values — review before delivery.',
       });
     return ok(undefined, diagnostics);
   }
@@ -553,33 +563,6 @@ const resolveCommandRef = (
     },
     diagnostics: [],
   };
-};
-
-/** Narrow a shape node to paragraph or run when the target path includes those segments. */
-const focusMutationNode = (shape: Element, parsed: ParsedTarget | undefined): Result<Element> => {
-  if (!parsed?.focus) return ok(shape);
-  if (parsed.focus === 'paragraph' && parsed.paragraph !== undefined) {
-    const paragraphs = descendants(shape, 'p');
-    const p = paragraphs[parsed.paragraph];
-    if (!p)
-      return err(
-        'TARGET_NOT_FOUND',
-        `paragraph:${parsed.paragraph} not found on ${parsed.raw}`,
-        [],
-        { target: parsed.raw },
-      );
-    return ok(p);
-  }
-  if (parsed.focus === 'run' && parsed.run !== undefined) {
-    const runs = descendants(shape, 'r');
-    const run = runs[parsed.run];
-    if (!run)
-      return err('TARGET_NOT_FOUND', `run:${parsed.run} not found on ${parsed.raw}`, [], {
-        target: parsed.raw,
-      });
-    return ok(run);
-  }
-  return ok(shape);
 };
 
 const shapeTypeToElement = (
@@ -856,6 +839,19 @@ export async function mutate(
   }
 
   if (command.type === 'addShape') {
+    const CREATE_CHART_TYPES = ['bar', 'column', 'line', 'pie', 'combo'] as const;
+    if (command.shapeType === 'chart') {
+      const chartType = command.chartType;
+      if (
+        typeof chartType !== 'string' ||
+        !(CREATE_CHART_TYPES as readonly string[]).includes(chartType)
+      ) {
+        return err(
+          'INVALID_COMMAND',
+          'chartType must be bar, column, line, pie, or combo. Creating radar/area/scatter and other advanced families is not available; edit an existing advanced chart instead.',
+        );
+      }
+    }
     const slides = index.elements.filter((item) => item.kind === 'slide');
     const slide = slides[command.slide - 1];
     if (!slide)
@@ -1051,13 +1047,24 @@ export async function mutate(
       `Expected revision ${item.ref.revision}, current ${index.revision}`,
     );
 
-  // Edition gate (master/layout/theme/advanced chart): hard-deny unless
-  // a registered PptxEditionExtension allows the target.
-  // Slide add/remove/duplicate, addSlide layout binding, and setSlideLayout
-  // rebind are not gated here.
-  if (item.kind !== 'slide') {
-    const gated = assertWritable(item, archive);
-    if (!gated.ok) return gated;
+  const gatedKind = editionGatedWriteKind(item, archive);
+  if (gatedKind) {
+    const ext = getPptxEditionExtension();
+    if (ext?.assertWritable) {
+      const verdict = ext.assertWritable(item, archive);
+      if (verdict !== undefined && !verdict.ok) return verdict;
+    }
+    if (ext?.applyGatedMutation) {
+      return ext.applyGatedMutation({
+        command,
+        archive,
+        index,
+        item,
+        ...(target !== undefined ? { target } : {}),
+        ...(parsed !== undefined ? { parsed } : {}),
+      });
+    }
+    return gatedWriteHardDeny(item, archive);
   }
 
   const diagnostics: Diagnostic[] = [];
@@ -1142,7 +1149,8 @@ export async function mutate(
           diagnostics.push({
             severity: 'warning',
             code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
-            message: 'Chart cache changed; embedded workbook was not modified',
+            message:
+              'Chart cache changed; embedded workbook was not modified. PowerPoint Edit Data or a data refresh may restore previous values — review before delivery.',
           });
       } else setNodeText(node, text);
     }
@@ -1226,7 +1234,8 @@ export async function mutate(
         diagnostics.push({
           severity: 'warning',
           code: 'EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED',
-          message: 'Chart cache changed; embedded workbook was not modified',
+          message:
+            'Chart cache changed; embedded workbook was not modified. PowerPoint Edit Data or a data refresh may restore previous values — review before delivery.',
         });
     } else if (liveItem.kind === 'table') {
       const applied = applyTableProperties(shapeNode, properties, {

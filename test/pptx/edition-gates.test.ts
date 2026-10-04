@@ -13,6 +13,7 @@ import {
   editionMetadata,
   pptxAdapter,
   registerPptxEditionExtension,
+  writeDenialReason,
 } from '../../src/pptx/index.js';
 
 const e = new TextEncoder();
@@ -171,7 +172,13 @@ describe('community edition write gates', () => {
     );
     expect(masters.ok).toBe(true);
 
-    for (const target of ['master:slideMaster1', 'layout:slideLayout1', 'theme']) {
+    for (const target of [
+      'master:slideMaster1',
+      'layout:slideLayout1',
+      'theme',
+      'master:slideMaster1/shape:2',
+      'layout:slideLayout1/shape:2',
+    ]) {
       const denied = await pptxAdapter.execute(
         {
           version: '2.0',
@@ -186,6 +193,24 @@ describe('community edition write gates', () => {
       expect(denied.ok, target).toBe(false);
       if (!denied.ok) expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
     }
+
+    const bgDenied = await pptxAdapter.execute(
+      {
+        version: '2.0',
+        type: 'set',
+        workspaceId: workspace,
+        transactionId: rev,
+        target: 'master:slideMaster1',
+        properties: { 'fill.color': '#FDE68A' },
+        scope: 'local',
+      },
+      {},
+    );
+    expect(bgDenied.ok).toBe(false);
+    if (!bgDenied.ok) expect(bgDenied.error.code).toBe('UNSUPPORTED_CAPABILITY');
+    expect(
+      await readFile(join(workspace, 'source/ppt/slideMasters/slideMaster1.xml'), 'utf8'),
+    ).not.toContain('FDE68A');
 
     const rebindOk = await pptxAdapter.execute(
       {
@@ -368,7 +393,141 @@ describe('community edition write gates', () => {
     }
   });
 
-  it('allows gated writes only while a permissive extension is registered', async () => {
+  it('writeDenialReason stays denied until apply/write hooks exist', async () => {
+    const archive = new OpcArchive();
+    const master = {
+      ref: { documentId: 'd', elementId: 'master:slideMaster1', path: '/ppt/slideMasters/slideMaster1.xml' },
+      kind: 'master' as const,
+      partUri: '/ppt/slideMasters/slideMaster1.xml',
+    };
+    expect(writeDenialReason(master, archive)).toMatch(/commercial edition/);
+
+    registerPptxEditionExtension({
+      assertWritable: () => ok(undefined),
+    });
+    try {
+      expect(writeDenialReason(master, archive)).toMatch(/commercial edition/);
+    } finally {
+      clearPptxEditionExtension();
+    }
+
+    registerPptxEditionExtension({
+      assertWritable: () => ok(undefined),
+      applyGatedMutation: () => ok({ changed: false, slides: [] }),
+    });
+    try {
+      expect(writeDenialReason(master, archive)).toBeUndefined();
+    } finally {
+      clearPptxEditionExtension();
+    }
+
+    registerPptxEditionExtension({
+      assertWritable: () => err('UNSUPPORTED_CAPABILITY', 'theme preserve-only'),
+      applyGatedMutation: () => ok({ changed: false, slides: [] }),
+    });
+    try {
+      expect(writeDenialReason(master, archive)).toBe('theme preserve-only');
+    } finally {
+      clearPptxEditionExtension();
+    }
+  });
+
+  it('routes gated writes through applyGatedMutation when provided', async () => {
+    const calls: string[] = [];
+    registerPptxEditionExtension({
+      assertWritable(item, archive) {
+        const kind = editionGatedWriteKind(item, archive);
+        if (kind === 'theme')
+          return err('UNSUPPORTED_CAPABILITY', 'theme preserve-only (test extension)');
+        if (kind === 'master' || kind === 'layout' || kind === 'advanced-chart')
+          return ok(undefined);
+        return undefined;
+      },
+      applyGatedMutation(ctx) {
+        calls.push(`mutate:${ctx.target ?? ctx.item.kind}`);
+        return ok({
+          changed: true,
+          slides: [],
+          changedTargets: ctx.target ? [ctx.target] : [],
+          changedParts: [ctx.item.partUri],
+        });
+      },
+      writeGatedText(_archive, item, text) {
+        calls.push(`text:${item.kind}:${text}`);
+        return ok(undefined);
+      },
+    });
+    try {
+      const root = await mkdtemp(join(tmpdir(), 'deckuse-edition-apply-hook-'));
+      const source = join(root, 'source.pptx'),
+        workspace = join(root, 'workspace');
+      await packageWithMasters(source, 'radarChart');
+      const init = await pptxAdapter.init(
+        { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+        {},
+      );
+      expect(init.ok).toBe(true);
+      if (!init.ok) return;
+      let rev = (init.value as { revision: string }).revision;
+
+      const masterWrite = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target: 'master:slideMaster1',
+          text: 'HookMaster',
+        },
+        {},
+      );
+      expect(masterWrite.ok).toBe(true);
+      if (masterWrite.ok) rev = (masterWrite.value as { revision: string }).revision;
+
+      const chartWrite = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'setText',
+          workspaceId: workspace,
+          transactionId: rev,
+          target: 'slide:1/shape:4',
+          text: 'HookRadar',
+        },
+        {},
+      );
+      expect(chartWrite.ok).toBe(true);
+      if (chartWrite.ok) rev = (chartWrite.value as { revision: string }).revision;
+
+      const replaced = await pptxAdapter.execute(
+        {
+          version: '2.0',
+          type: 'replaceText',
+          workspaceId: workspace,
+          transactionId: rev,
+          find: 'MasterText',
+          replace: 'ViaWriteHook',
+        },
+        {},
+      );
+      expect(replaced.ok).toBe(true);
+
+      expect(calls.some((c) => c.startsWith('mutate:master:'))).toBe(true);
+      expect(calls.some((c) => c.includes('shape:4') || c.includes('chart'))).toBe(true);
+      expect(calls.some((c) => c.startsWith('text:'))).toBe(true);
+
+      // Hook returns ok without writing — shared mutators must not have run.
+      expect(
+        await readFile(join(workspace, 'source/ppt/slideMasters/slideMaster1.xml'), 'utf8'),
+      ).toContain('MasterText');
+      expect(await readFile(join(workspace, 'source/ppt/charts/chart1.xml'), 'utf8')).toContain(
+        'Sales',
+      );
+    } finally {
+      clearPptxEditionExtension();
+    }
+  });
+
+  it('does not unlock gated writes with assertWritable alone', async () => {
     registerPptxEditionExtension({
       assertWritable(item, archive) {
         const kind = editionGatedWriteKind(item, archive);
@@ -390,49 +549,23 @@ describe('community edition write gates', () => {
       );
       expect(init.ok).toBe(true);
       if (!init.ok) return;
-      let rev = (init.value as { revision: string }).revision;
+      const rev = (init.value as { revision: string }).revision;
 
-      const masterWrite = await pptxAdapter.execute(
-        {
-          version: '2.0',
-          type: 'setText',
-          workspaceId: workspace,
-          transactionId: rev,
-          target: 'master:slideMaster1',
-          text: 'ExtMaster',
-        },
-        {},
-      );
-      expect(masterWrite.ok).toBe(true);
-      if (masterWrite.ok) rev = (masterWrite.value as { revision: string }).revision;
-
-      const chartWrite = await pptxAdapter.execute(
-        {
-          version: '2.0',
-          type: 'setText',
-          workspaceId: workspace,
-          transactionId: rev,
-          target: 'slide:1/shape:4',
-          text: 'ExtRadar',
-        },
-        {},
-      );
-      expect(chartWrite.ok).toBe(true);
-      if (chartWrite.ok) rev = (chartWrite.value as { revision: string }).revision;
-
-      const themeDenied = await pptxAdapter.execute(
-        {
-          version: '2.0',
-          type: 'setText',
-          workspaceId: workspace,
-          transactionId: rev,
-          target: 'theme',
-          text: 'Nope',
-        },
-        {},
-      );
-      expect(themeDenied.ok).toBe(false);
-      if (!themeDenied.ok) expect(themeDenied.error.code).toBe('UNSUPPORTED_CAPABILITY');
+      for (const target of ['master:slideMaster1', 'slide:1/shape:4', 'theme']) {
+        const denied = await pptxAdapter.execute(
+          {
+            version: '2.0',
+            type: 'setText',
+            workspaceId: workspace,
+            transactionId: rev,
+            target,
+            text: 'Nope',
+          },
+          {},
+        );
+        expect(denied.ok, target).toBe(false);
+        if (!denied.ok) expect(denied.error.code).toBe('UNSUPPORTED_CAPABILITY');
+      }
     } finally {
       clearPptxEditionExtension();
     }

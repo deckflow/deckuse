@@ -47,19 +47,26 @@ export interface RenderResult {
 const sleep = (milliseconds: number): Promise<void> =>
   new Promise((done) => setTimeout(done, milliseconds));
 
+/** String scripts so commercial obfuscation cannot leak `_0x…` into Playwright. */
+const PARSE_DECK_SIZE_SCRIPT = `(() => {
+  const deck = document.getElementById('deck');
+  if (!deck) return undefined;
+  const style = getComputedStyle(deck);
+  const width = Number.parseFloat(style.width);
+  const height = Number.parseFloat(style.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1)
+    return undefined;
+  return { width: Math.round(width), height: Math.round(height) };
+})()`;
+
+const WAIT_FONTS_SCRIPT = `(async () => {
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+})()`;
+
 const parseDeckSize = async (
   page: Page,
 ): Promise<{ width: number; height: number } | undefined> => {
-  return page.evaluate(() => {
-    const deck = document.getElementById('deck');
-    if (!deck) return undefined;
-    const style = getComputedStyle(deck);
-    const width = Number.parseFloat(style.width);
-    const height = Number.parseFloat(style.height);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1)
-      return undefined;
-    return { width: Math.round(width), height: Math.round(height) };
-  });
+  return page.evaluate(PARSE_DECK_SIZE_SCRIPT);
 };
 
 const launchChromium = async (): Promise<Browser> => {
@@ -102,9 +109,7 @@ const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath, scal
     await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
     await page.waitForSelector('#deck', { timeout: 30_000 });
 
-    await page.evaluate(async () => {
-      if (document.fonts?.ready) await document.fonts.ready;
-    });
+    await page.evaluate(WAIT_FONTS_SCRIPT);
     await sleep(AUTOFIT_SETTLE_MS);
 
     const size = await parseDeckSize(page);

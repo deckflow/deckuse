@@ -9,10 +9,10 @@ The commercial product lives in the private `deckuse-commercial` repository as a
 | Class                    | Meaning                                                                                                                | Where code lives                                                                        |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | **Shared primitives**    | OOXML helpers used by community slide / basic-chart edits (`setNodeText`, `applyChartProperties`, …)                   | Public `src/pptx` in `@deckflow/deckuse`                                                |
-| **Edition-gated writes** | Master / Layout / Theme / Advanced Chart writes are **hard-denied** in shared code regardless of `editionCapabilities` | Allowed only via a registered `PptxEditionExtension` from private commercial packages   |
-| **B — proprietary**      | Editors that must not appear in this public tree (SmartArt, office2html plus, …)                                       | Only `deckuse-commercial` private packages, injected through the same extension / hooks |
+| **Edition-gated writes** | Master / Layout / Theme / Advanced Chart writes are **hard-denied** in shared mutation code. `assertWritable` cannot unlock them. | Commercial overlay must implement `applyGatedMutation` / `writeGatedText` in a private package |
+| **B — proprietary**      | Editors and mappings that must not appear in this public tree (master/layout apply path, `p:cSld/p:bg` writer, office2html plus, …) | Only `deckuse-commercial` private packages, injected through the same extension hooks |
 
-Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism for shared primitives. Anything committed here is visible under AGPL. Commercial overlays own _authorization and product write paths_ for gated targets; they must not rely on flipping `editionCapabilities` in `src/edition-config`.
+Runtime edition gates (`UNSUPPORTED_CAPABILITY`) are **not** a secrecy mechanism for shared primitives. Anything committed here is visible under AGPL. Commercial overlays own the *product write implementations* for gated targets (`applyGatedMutation` / `writeGatedText`); they must not rely on flipping `editionCapabilities` or on `assertWritable` alone.
 
 ## Boundaries (community)
 

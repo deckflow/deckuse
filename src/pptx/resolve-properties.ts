@@ -3,6 +3,7 @@ import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import type { ResolvedTarget } from './addressing.js';
 import { nodeFor } from './node-for.js';
+import { readBackgroundFill } from './properties.js';
 import {
   NS,
   REL,
@@ -599,6 +600,21 @@ export function resolveProperties(
     const properties: Record<string, PropertyValue> = {
       name: prop(item.name ?? null, item.name ?? null, { scope: 'local', target: resolved.target }),
     };
+    if (item.kind === 'master' || item.kind === 'layout') {
+      const bg = readBackgroundFill(node);
+      properties['fill.kind'] = prop(
+        bg?.kind ?? null,
+        bg?.kind ?? null,
+        bg ? { scope: 'local', target: resolved.target, path: 'fill.kind' } : { scope: 'default' },
+      );
+      properties['fill.color'] = prop(
+        bg?.color ?? null,
+        bg?.color ?? null,
+        bg?.color
+          ? { scope: 'local', target: resolved.target, path: 'fill.color' }
+          : { scope: 'default' },
+      );
+    }
     return ok({
       target: resolved.target,
       uid: resolved.uid,

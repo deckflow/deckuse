@@ -79,78 +79,12 @@ export const stableUid = (parts: {
   return `du:${prefix}:${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
 };
 
-export function parseTargetPath(raw: string): Result<ParsedTarget> {
-  const trimmed = raw.trim();
-  if (!trimmed) return err('INVALID_COMMAND', 'Target path is empty');
-  if (trimmed === 'presentation')
-    return { ok: true, value: { raw: trimmed, kind: 'presentation' }, diagnostics: [] };
-  if (trimmed === 'theme')
-    return { ok: true, value: { raw: trimmed, kind: 'theme' }, diagnostics: [] };
-
-  const segments = trimmed.split('/');
-  const head = segments[0] ?? '';
-  if (head.startsWith('layout:')) {
-    return {
-      ok: true,
-      value: { raw: trimmed, kind: 'layout', layout: head.slice('layout:'.length) },
-      diagnostics: [],
-    };
-  }
-  if (head.startsWith('master:')) {
-    return {
-      ok: true,
-      value: { raw: trimmed, kind: 'master', master: head.slice('master:'.length) },
-      diagnostics: [],
-    };
-  }
-  if (!head.startsWith('slide:'))
-    return err('INVALID_COMMAND', `Unrecognized target path: ${trimmed}`, [], {
-      target: trimmed,
-      hint: 'Use slide:<n>/shape:<id-or-name>, layout:<name>, master:<name>, or theme.',
-    });
-
-  const slide = Number(head.slice('slide:'.length));
-  if (!Number.isInteger(slide) || slide < 1)
-    return err('INVALID_COMMAND', `Invalid slide index in target: ${trimmed}`, [], {
-      target: trimmed,
-    });
-
-  if (segments.length === 1)
-    return { ok: true, value: { raw: trimmed, kind: 'slide', slide }, diagnostics: [] };
-
-  const second = segments[1] ?? '';
-  let parsed: ParsedTarget = { raw: trimmed, kind: 'slide', slide };
-
-  if (second.startsWith('shape:')) {
-    const token = second.slice('shape:'.length);
-    if (!token)
-      return err('INVALID_COMMAND', `Missing shape id in target: ${trimmed}`, [], {
-        target: trimmed,
-      });
-    const asNum = Number(token);
-    parsed = {
-      ...parsed,
-      kind: 'shape',
-      ...(Number.isInteger(asNum) && String(asNum) === token
-        ? { shapeId: token }
-        : { shapeName: token }),
-    };
-  } else if (second.startsWith('placeholder:')) {
-    parsed = {
-      ...parsed,
-      kind: 'placeholder',
-      placeholder: second.slice('placeholder:'.length),
-    };
-  } else if (second === 'notes') {
-    parsed = { ...parsed, kind: 'notes' };
-  } else {
-    return err('INVALID_COMMAND', `Unrecognized target segment: ${second}`, [], {
-      target: trimmed,
-    });
-  }
-
+const parseShapeFocus = (
+  trimmed: string,
+  segments: string[],
+  parsed: ParsedTarget,
+): Result<ParsedTarget> => {
   if (segments.length === 2) return { ok: true, value: parsed, diagnostics: [] };
-
   const third = segments[2] ?? '';
   if (third === 'text') {
     return {
@@ -201,6 +135,91 @@ export function parseTargetPath(raw: string): Result<ParsedTarget> {
     };
   }
   return err('INVALID_COMMAND', `Unrecognized target path: ${trimmed}`, [], { target: trimmed });
+};
+
+const parseChildSegments = (
+  trimmed: string,
+  segments: string[],
+  base: ParsedTarget,
+): Result<ParsedTarget> => {
+  if (segments.length === 1) return { ok: true, value: base, diagnostics: [] };
+  const second = segments[1] ?? '';
+  let parsed: ParsedTarget = { ...base };
+
+  if (second.startsWith('shape:')) {
+    const token = second.slice('shape:'.length);
+    if (!token)
+      return err('INVALID_COMMAND', `Missing shape id in target: ${trimmed}`, [], {
+        target: trimmed,
+      });
+    const asNum = Number(token);
+    parsed = {
+      ...parsed,
+      kind: 'shape',
+      ...(Number.isInteger(asNum) && String(asNum) === token
+        ? { shapeId: token }
+        : { shapeName: token }),
+    };
+  } else if (second.startsWith('placeholder:')) {
+    parsed = {
+      ...parsed,
+      kind: 'placeholder',
+      placeholder: second.slice('placeholder:'.length),
+    };
+  } else if (second === 'notes') {
+    if (base.kind !== 'slide')
+      return err('INVALID_COMMAND', `Unrecognized target segment: ${second}`, [], {
+        target: trimmed,
+      });
+    parsed = { ...parsed, kind: 'notes' };
+  } else {
+    return err('INVALID_COMMAND', `Unrecognized target segment: ${second}`, [], {
+      target: trimmed,
+    });
+  }
+
+  return parseShapeFocus(trimmed, segments, parsed);
+};
+
+export function parseTargetPath(raw: string): Result<ParsedTarget> {
+  const trimmed = raw.trim();
+  if (!trimmed) return err('INVALID_COMMAND', 'Target path is empty');
+  if (trimmed === 'presentation')
+    return { ok: true, value: { raw: trimmed, kind: 'presentation' }, diagnostics: [] };
+  if (trimmed === 'theme')
+    return { ok: true, value: { raw: trimmed, kind: 'theme' }, diagnostics: [] };
+
+  const segments = trimmed.split('/');
+  const head = segments[0] ?? '';
+  if (head.startsWith('layout:')) {
+    const layout = head.slice('layout:'.length);
+    if (!layout)
+      return err('INVALID_COMMAND', `Missing layout name in target: ${trimmed}`, [], {
+        target: trimmed,
+      });
+    return parseChildSegments(trimmed, segments, { raw: trimmed, kind: 'layout', layout });
+  }
+  if (head.startsWith('master:')) {
+    const master = head.slice('master:'.length);
+    if (!master)
+      return err('INVALID_COMMAND', `Missing master name in target: ${trimmed}`, [], {
+        target: trimmed,
+      });
+    return parseChildSegments(trimmed, segments, { raw: trimmed, kind: 'master', master });
+  }
+  if (!head.startsWith('slide:'))
+    return err('INVALID_COMMAND', `Unrecognized target path: ${trimmed}`, [], {
+      target: trimmed,
+      hint: 'Use slide:<n>/shape:<id-or-name>, layout:<name>/shape:<id>, master:<name>/shape:<id>, or theme.',
+    });
+
+  const slide = Number(head.slice('slide:'.length));
+  if (!Number.isInteger(slide) || slide < 1)
+    return err('INVALID_COMMAND', `Invalid slide index in target: ${trimmed}`, [], {
+      target: trimmed,
+    });
+
+  return parseChildSegments(trimmed, segments, { raw: trimmed, kind: 'slide', slide });
 }
 
 const slideByPage = (index: IndexFile, page: number): IndexedElement | undefined => {
@@ -208,11 +227,22 @@ const slideByPage = (index: IndexFile, page: number): IndexedElement | undefined
   return slides[page - 1];
 };
 
-const shapesOnSlide = (index: IndexFile, slide: IndexedElement): IndexedElement[] =>
+const shapesOnPart = (index: IndexFile, partUri: string): IndexedElement[] =>
   index.elements.filter(
-    (item) =>
-      SHAPE_KINDS.has(item.kind) && item.partUri === slide.partUri && item.kind !== 'tableCell',
+    (item) => SHAPE_KINDS.has(item.kind) && item.partUri === partUri && item.kind !== 'tableCell',
   );
+
+const shapesOnSlide = (index: IndexFile, slide: IndexedElement): IndexedElement[] =>
+  shapesOnPart(index, slide.partUri);
+
+const hostTargetForPart = (partUri: string, kind: 'master' | 'layout'): string => {
+  const name =
+    partUri
+      .split('/')
+      .pop()
+      ?.replace(/\.xml$/i, '') ?? partUri;
+  return `${kind}:${name}`;
+};
 
 const cNvPrIdOf = (item: IndexedElement): string | undefined =>
   typeof item.location?.['cNvPrId'] === 'string'
@@ -252,19 +282,28 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
         : undefined);
     return page ? `slide:${page}/notes` : (item.ref.elementId ?? 'notes');
   }
+  const hostKind = item.partUri.startsWith('/ppt/slideMasters/')
+    ? 'master'
+    : item.partUri.startsWith('/ppt/slideLayouts/')
+      ? 'layout'
+      : undefined;
   if (item.kind === 'tableCell') {
-    const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
     const tableId = typeof item.location?.['tableId'] === 'string' ? item.location['tableId'] : '';
-    const afterSlide = tableId.includes(':') ? tableId.slice(tableId.indexOf(':') + 1) : tableId;
-    const shapeId = afterSlide.split('.').at(-1) ?? afterSlide;
+    const afterOwner = tableId.includes(':') ? tableId.slice(tableId.indexOf(':') + 1) : tableId;
+    const shapeId = afterOwner.split('.').at(-1) ?? afterOwner;
     const row = item.location?.['row'];
     const col = item.location?.['column'];
-    if (page && shapeId && typeof row === 'number' && typeof col === 'number')
-      return `slide:${page}/shape:${shapeId}/cell:${row}:${col}`;
+    if (shapeId && typeof row === 'number' && typeof col === 'number') {
+      if (hostKind)
+        return `${hostTargetForPart(item.partUri, hostKind)}/shape:${shapeId}/cell:${row}:${col}`;
+      const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
+      if (page) return `slide:${page}/shape:${shapeId}/cell:${row}:${col}`;
+    }
   }
   if (item.slideId || item.partUri) {
-    const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
     const id = cNvPrIdOf(item);
+    if (id && hostKind) return `${hostTargetForPart(item.partUri, hostKind)}/shape:${id}`;
+    const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
     if (page && id) return `slide:${page}/shape:${id}`;
   }
   return item.ref.elementId ?? item.ref.path ?? 'unknown';
@@ -310,6 +349,127 @@ const matchNamedParts = (
   });
 };
 
+const resolveLayoutPart = (
+  index: IndexFile,
+  layout: string,
+  raw: string,
+): Result<IndexedElement> => {
+  if (/^\d+$/.test(layout)) {
+    const page = Number(layout);
+    const layouts = orderedLayouts(index);
+    const item = layouts[page - 1];
+    if (!item)
+      return err('TARGET_NOT_FOUND', `Layout index out of range: ${page}`, [], {
+        target: raw,
+        hint: 'Run deckuse list layouts --json.',
+      });
+    return { ok: true, value: item, diagnostics: [] };
+  }
+  const matches = matchNamedParts(index, 'layout', layout);
+  if (matches.length === 0)
+    return err('TARGET_NOT_FOUND', `Layout not found: ${layout}`, [], { target: raw });
+  if (matches.length > 1)
+    return err('AMBIGUOUS_NAME', `Layout name is ambiguous: ${layout}`, [], { target: raw });
+  return { ok: true, value: matches[0]!, diagnostics: [] };
+};
+
+const resolveMasterPart = (
+  index: IndexFile,
+  master: string,
+  raw: string,
+): Result<IndexedElement> => {
+  const matches = matchNamedParts(index, 'master', master);
+  if (matches.length === 0)
+    return err('TARGET_NOT_FOUND', `Master not found: ${master}`, [], { target: raw });
+  if (matches.length > 1)
+    return err('AMBIGUOUS_NAME', `Master name is ambiguous: ${master}`, [], { target: raw });
+  return { ok: true, value: matches[0]!, diagnostics: [] };
+};
+
+const resolveChildOnHost = (
+  index: IndexFile,
+  host: IndexedElement,
+  parsed: ParsedTarget,
+  raw: string,
+): Result<ResolvedTarget> => {
+  const hostLabel = targetPathForItem(index, host);
+  const shapes = shapesOnPart(index, host.partUri);
+  let matches: IndexedElement[] = [];
+  if (parsed.shapeId) {
+    matches = shapes.filter((item) => cNvPrIdOf(item) === parsed.shapeId);
+  } else if (parsed.shapeName) {
+    matches = shapes.filter((item) => item.name === parsed.shapeName);
+    if (matches.length > 1)
+      return err(
+        'AMBIGUOUS_NAME',
+        `Shape name "${parsed.shapeName}" is ambiguous on ${hostLabel}`,
+        [],
+        { target: raw },
+      );
+  } else if (parsed.placeholder) {
+    matches = shapes.filter((item) => {
+      const role = item.payload?.['placeholder'];
+      return typeof role === 'string' && role === parsed.placeholder;
+    });
+  }
+  const item = matches[0];
+  if (!item) {
+    const label = parsed.shapeId
+      ? `shape:${parsed.shapeId}`
+      : parsed.shapeName
+        ? `shape:${parsed.shapeName}`
+        : `placeholder:${parsed.placeholder ?? '?'}`;
+    const listHint =
+      host.kind === 'master'
+        ? `Run deckuse list shapes --master ${partBaseName(host.partUri)} --json.`
+        : `Run deckuse list shapes --layout ${partBaseName(host.partUri)} --json.`;
+    return err('TARGET_NOT_FOUND', `${label} does not exist on ${hostLabel}`, [], {
+      target: raw,
+      hint: listHint,
+    });
+  }
+  if (parsed.kind === 'tableCell' && parsed.cellRow !== undefined && parsed.cellCol !== undefined) {
+    if (item.kind !== 'table')
+      return err('TARGET_NOT_FOUND', `shape:${cNvPrIdOf(item) ?? '?'} is not a table`, [], {
+        target: raw,
+      });
+    const cell = index.elements.find(
+      (el) =>
+        el.kind === 'tableCell' &&
+        el.parentId === item.ref.elementId &&
+        el.location?.['row'] === parsed.cellRow &&
+        el.location?.['column'] === parsed.cellCol,
+    );
+    if (!cell)
+      return err(
+        'TARGET_NOT_FOUND',
+        `cell:${parsed.cellRow}:${parsed.cellCol} does not exist on ${hostLabel}/shape:${cNvPrIdOf(item) ?? '?'}`,
+        [],
+        { target: raw },
+      );
+    return {
+      ok: true,
+      value: {
+        target: targetPathForItem(index, cell),
+        uid: uidForItem(cell),
+        item: cell,
+        parsed,
+      },
+      diagnostics: [],
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      target: targetPathForItem(index, item),
+      uid: uidForItem(item),
+      item,
+      parsed,
+    },
+    diagnostics: [],
+  };
+};
+
 export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTarget> {
   const parsedResult = parseTargetPath(raw);
   if (!parsedResult.ok) return parsedResult;
@@ -349,52 +509,40 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
     };
   }
 
-  if (parsed.kind === 'layout' && parsed.layout) {
-    // Numeric layout:N matches list layouts 1-based index (natural basename order).
-    if (/^\d+$/.test(parsed.layout)) {
-      const page = Number(parsed.layout);
-      const layouts = orderedLayouts(index);
-      const item = layouts[page - 1];
-      if (!item)
-        return err('TARGET_NOT_FOUND', `Layout index out of range: ${page}`, [], {
-          target: raw,
-          hint: 'Run deckuse list layouts --json.',
-        });
+  if (parsed.layout) {
+    const host = resolveLayoutPart(index, parsed.layout, raw);
+    if (!host.ok) return host;
+    if (parsed.kind === 'layout') {
       return {
         ok: true,
-        value: { target: targetPathForItem(index, item), uid: uidForItem(item), item, parsed },
+        value: {
+          target: targetPathForItem(index, host.value),
+          uid: uidForItem(host.value),
+          item: host.value,
+          parsed,
+        },
         diagnostics: [],
       };
     }
-    const matches = matchNamedParts(index, 'layout', parsed.layout);
-    if (matches.length === 0)
-      return err('TARGET_NOT_FOUND', `Layout not found: ${parsed.layout}`, [], { target: raw });
-    if (matches.length > 1)
-      return err('AMBIGUOUS_NAME', `Layout name is ambiguous: ${parsed.layout}`, [], {
-        target: raw,
-      });
-    const item = matches[0]!;
-    return {
-      ok: true,
-      value: { target: targetPathForItem(index, item), uid: uidForItem(item), item, parsed },
-      diagnostics: [],
-    };
+    return resolveChildOnHost(index, host.value, parsed, raw);
   }
 
-  if (parsed.kind === 'master' && parsed.master) {
-    const matches = matchNamedParts(index, 'master', parsed.master);
-    if (matches.length === 0)
-      return err('TARGET_NOT_FOUND', `Master not found: ${parsed.master}`, [], { target: raw });
-    if (matches.length > 1)
-      return err('AMBIGUOUS_NAME', `Master name is ambiguous: ${parsed.master}`, [], {
-        target: raw,
-      });
-    const item = matches[0]!;
-    return {
-      ok: true,
-      value: { target: targetPathForItem(index, item), uid: uidForItem(item), item, parsed },
-      diagnostics: [],
-    };
+  if (parsed.master) {
+    const host = resolveMasterPart(index, parsed.master, raw);
+    if (!host.ok) return host;
+    if (parsed.kind === 'master') {
+      return {
+        ok: true,
+        value: {
+          target: targetPathForItem(index, host.value),
+          uid: uidForItem(host.value),
+          item: host.value,
+          parsed,
+        },
+        diagnostics: [],
+      };
+    }
+    return resolveChildOnHost(index, host.value, parsed, raw);
   }
 
   if (parsed.slide === undefined)
@@ -571,4 +719,4 @@ export function resolveToRef(
   };
 }
 
-export { cNvPrIdOf, shapesOnSlide, slideByPage };
+export { cNvPrIdOf, shapesOnPart, shapesOnSlide, slideByPage };

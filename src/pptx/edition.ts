@@ -17,6 +17,7 @@ export {
   clearPptxEditionExtension,
   getPptxEditionExtension,
   registerPptxEditionExtension,
+  type GatedMutationContext,
   type PptxEditionExtension,
 } from './edition-extension.js';
 
@@ -68,8 +69,9 @@ const hardDenyMessage = (kind: EditionGatedWriteKind): string => {
  * Returns a denial message when writing `item` is forbidden.
  *
  * Master / layout / theme / advanced-chart writes are hard-denied in shared code.
- * Only a registered `PptxEditionExtension.assertWritable` can allow them —
- * flipping `editionCapabilities` alone never opens these paths.
+ * `assertWritable` returning ok is not enough — the overlay must also provide
+ * `applyGatedMutation` / `writeGatedText`. Flipping `editionCapabilities` never
+ * opens these paths.
  */
 export const writeDenialReason = (
   item: IndexedElement,
@@ -81,11 +83,9 @@ export const writeDenialReason = (
   const ext = getPptxEditionExtension();
   if (ext?.assertWritable) {
     const verdict = ext.assertWritable(item, archive);
-    if (verdict !== undefined) {
-      if (verdict.ok) return undefined;
-      return verdict.error.message;
-    }
+    if (verdict !== undefined && !verdict.ok) return verdict.error.message;
   }
+  if (ext?.applyGatedMutation || ext?.writeGatedText) return undefined;
 
   return hardDenyMessage(kind);
 };
@@ -94,4 +94,13 @@ export const assertWritable = (item: IndexedElement, archive: OpcArchive): Resul
   const reason = writeDenialReason(item, archive);
   if (reason) return err('UNSUPPORTED_CAPABILITY', reason);
   return ok(undefined);
+};
+
+/** Hard deny a gated target regardless of registered hooks (missing apply path). */
+export const gatedWriteHardDeny = (item: IndexedElement, archive: OpcArchive): Result<never> => {
+  const kind = editionGatedWriteKind(item, archive);
+  const message = kind
+    ? hardDenyMessage(kind)
+    : `This write requires the commercial edition (edition=${EDITION})`;
+  return err('UNSUPPORTED_CAPABILITY', message);
 };
