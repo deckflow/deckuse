@@ -132,4 +132,4 @@ Chart series colors write to XML; **community `render` may not show them** — c
 
 `init|new → list/get/search/find → apply → validate → render → export`
 
-`deckuse find "the revenue card" --json` ranks elements with TypeSafe (`TYPESAFE_API_KEY`). It sends names and visible text to `api.typesafe.ai`. Literal `search` does not. If `data.verdict` is `absent`, do not write to a guessed target. `partial` means review matches first.
+`deckuse find "the revenue card" --json` returns `matches` in the same shape as `search`. It needs `TYPESAFE_API_KEY` and sends names plus visible text to `api.typesafe.ai`. An empty `matches` list means nothing fit.

@@ -3,8 +3,7 @@ import {
   FIND_CHOICE_LIMIT,
   FIND_CHUNK_SIZE,
   FIND_CONTAINER_CUMULATIVE,
-  FIND_EXISTS_ABSENT,
-  FIND_EXISTS_MATCHED,
+  FIND_MATCH_FLOOR,
   FIND_MAX_CONTAINERS,
   FIND_PREVIEW_LIMIT,
   FIND_TOP_PER_CHUNK,
@@ -22,21 +21,17 @@ import {
   type FindSystemOne,
 } from './client.js';
 
+/** Same element record search returns. Model scores stay inside the ranker. */
 export interface FindMatch {
   target: string;
-  score: number;
+  uid?: string;
   kind: string;
   name?: string;
   text?: string;
-  slide?: number;
+  context?: string;
 }
 
 export interface FindResultValue {
-  query: string;
-  verdict: 'matched' | 'partial' | 'absent';
-  exists: number;
-  model: string;
-  usage: { input_tokens: number; output_tokens: number };
   matches: FindMatch[];
 }
 
@@ -48,37 +43,16 @@ export interface RankFindInput {
   client?: FindSystemOne;
 }
 
-interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-}
-
 interface FindGroup {
   id: string;
   entries: CatalogEntry[];
 }
-
-const EMPTY_USAGE: Usage = { input_tokens: 0, output_tokens: 0 };
-
-const addUsage = (left: Usage, response: FindResponse): Usage => ({
-  input_tokens: left.input_tokens + (response.usage?.input_tokens ?? 0),
-  output_tokens: left.output_tokens + (response.usage?.output_tokens ?? 0),
-});
 
 const choiceQuestion = (instructions: string, ids: readonly string[]): FindQuestion => {
   const criteria: Record<string, string | null> = {};
   for (const id of ids) criteria[id] = null;
   return { type: 'choice', instructions, criteria };
 };
-
-const existsQuestion = (query: string): FindQuestion => ({
-  type: 'noul',
-  instructions: `Does any element directly match this request: ${JSON.stringify(query)}?`,
-  criteria: {
-    true: 'At least one element states or directly matches the request',
-    false: 'No element addresses this request',
-  },
-});
 
 const matchQuestion = (query: string, id: string): FindQuestion => ({
   type: 'noul',
@@ -150,15 +124,15 @@ const chunk = <T>(items: readonly T[], size: number): T[][] => {
   return out;
 };
 
-const toMatch = (entry: CatalogEntry, score: number): FindMatch => {
-  const text = truncateFindText(entry.text, FIND_PREVIEW_LIMIT);
+const toMatch = (entry: CatalogEntry): FindMatch => {
+  const text = entry.matchText?.slice(0, FIND_PREVIEW_LIMIT);
   return {
     target: entry.target,
-    score,
     kind: entry.kind,
+    ...(entry.uid ? { uid: entry.uid } : {}),
     ...(entry.name ? { name: entry.name } : {}),
     ...(text ? { text } : {}),
-    ...(entry.slide !== undefined ? { slide: entry.slide } : {}),
+    ...(entry.context ? { context: entry.context } : {}),
   };
 };
 
@@ -185,37 +159,12 @@ const noulValue = (response: FindResponse, key: string): Result<number> => {
   return ok(noul);
 };
 
-const verdictOf = (exists: number): FindResultValue['verdict'] => {
-  if (exists >= FIND_EXISTS_MATCHED) return 'matched';
-  if (exists < FIND_EXISTS_ABSENT) return 'absent';
-  return 'partial';
-};
-
 const finish = (
-  query: string,
-  exists: number,
   ranked: readonly { entry: CatalogEntry; score: number }[],
   limit: number,
-  model: string,
-  usage: Usage,
 ): Result<FindResultValue> => {
-  const verdict = verdictOf(exists);
-  const matches =
-    verdict === 'absent'
-      ? []
-      : ranked.slice(0, limit).map((item) => toMatch(item.entry, item.score));
-  return ok(
-    { query, verdict, exists, model, usage, matches },
-    verdict === 'partial'
-      ? [
-          {
-            severity: 'warning',
-            code: 'FIND_PARTIAL',
-            message: `Query is only partially addressed (exists ${exists.toFixed(2)}). Review matches before editing.`,
-          },
-        ]
-      : [],
-  );
+  const picked = ranked.filter((item) => item.score > FIND_MATCH_FLOOR);
+  return ok({ matches: picked.slice(0, limit).map((item) => toMatch(item.entry)) });
 };
 
 const rankScores = (
@@ -230,20 +179,9 @@ export const rankFind = async (input: RankFindInput): Promise<Result<FindResultV
   const model = input.model ?? DEFAULT_FIND_MODEL;
   const limit = input.limit ?? 8;
   const entries = assignCatalogIds(input.candidates);
-  if (entries.length === 0) {
-    return ok({
-      query: input.query,
-      verdict: 'absent',
-      exists: 0,
-      model,
-      usage: EMPTY_USAGE,
-      matches: [],
-    });
-  }
+  if (entries.length === 0) return ok({ matches: [] });
 
   const client = activeFindClient(input.client);
-  let usage = EMPTY_USAGE;
-  let modelSeen = model;
 
   const call = async (
     state: Record<string, unknown>,
@@ -251,10 +189,7 @@ export const rankFind = async (input: RankFindInput): Promise<Result<FindResultV
   ): Promise<Result<FindResponse>> => {
     const request: FindCall = { state, model, questions };
     try {
-      const response = await client(request);
-      usage = addUsage(usage, response);
-      if (response.model) modelSeen = response.model;
-      return ok(response);
+      return ok(await client(request));
     } catch (cause) {
       return upstreamFrom(cause);
     }
@@ -266,21 +201,11 @@ export const rankFind = async (input: RankFindInput): Promise<Result<FindResultV
         `Which element best matches this request: ${JSON.stringify(input.query)}?`,
         window.map((entry) => entry.id),
       ),
-      exists: existsQuestion(input.query),
     });
     if (!called.ok) return called;
     const probabilities = choiceProbabilities(called.value, 'where');
     if (!probabilities.ok) return probabilities;
-    const exists = noulValue(called.value, 'exists');
-    if (!exists.ok) return exists;
-    return finish(
-      input.query,
-      exists.value,
-      rankScores(window, probabilities.value),
-      limit,
-      modelSeen,
-      usage,
-    );
+    return finish(rankScores(window, probabilities.value), limit);
   };
 
   if (entries.length <= FIND_CHOICE_LIMIT) return rankWindow(entries);
@@ -357,16 +282,12 @@ export const rankFind = async (input: RankFindInput): Promise<Result<FindResultV
   }
 
   const rescored: { entry: CatalogEntry; score: number }[] = [];
-  let exists = 0;
-  for (const headChunk of chunk(heads, FIND_CHOICE_LIMIT - 1)) {
-    const questions: Record<string, FindQuestion> = { exists: existsQuestion(input.query) };
+  for (const headChunk of chunk(heads, FIND_CHOICE_LIMIT)) {
+    const questions: Record<string, FindQuestion> = {};
     for (const entry of headChunk)
       questions[`match_${entry.id}`] = matchQuestion(input.query, entry.id);
     const called = await call(elementState(headChunk), questions);
     if (!called.ok) return called;
-    const existsAnswer = noulValue(called.value, 'exists');
-    if (!existsAnswer.ok) return existsAnswer;
-    exists = Math.max(exists, existsAnswer.value);
     for (const entry of headChunk) {
       const score = noulValue(called.value, `match_${entry.id}`);
       if (!score.ok) return score;
@@ -376,5 +297,5 @@ export const rankFind = async (input: RankFindInput): Promise<Result<FindResultV
   rescored.sort((left, right) =>
     byScore({ id: left.entry.id, score: left.score }, { id: right.entry.id, score: right.score }),
   );
-  return finish(input.query, exists, rescored, limit, modelSeen, usage);
+  return finish(rescored, limit);
 };

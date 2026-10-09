@@ -14,7 +14,8 @@ export const collectDocxFindCandidates = (
     target: item.ref.path ?? item.ref.elementId ?? 'unknown',
     kind: item.kind,
     container: `section ${String(Math.floor(indexInKind / FIND_CHUNK_SIZE) + 1)}`,
+    ...(item.ref.elementId ? { uid: item.ref.elementId } : {}),
     ...(item.name ? { name: item.name } : {}),
-    ...(item.text ? { text: item.text } : {}),
+    ...(item.text ? { text: item.text, matchText: item.text } : {}),
   }));
 };

@@ -11,17 +11,21 @@ export const FIND_MAX_CONTAINERS = 12;
 export const FIND_TOP_PER_CHUNK = 5;
 export const FIND_TEXT_LIMIT = 240;
 export const FIND_PREVIEW_LIMIT = 200;
-/** Present answers in the semantic-find cookbook are typically >= 0.9; absent ones <= 0.05. */
-export const FIND_EXISTS_MATCHED = 0.7;
-export const FIND_EXISTS_ABSENT = 0.35;
+/** Drop ranked leftovers at or below this share. A clear top hit is kept even if the model's yes/no score is modest. */
+export const FIND_MATCH_FLOOR = 0.05;
 
 export interface FindCandidate {
   target: string;
+  uid?: string;
   kind: string;
   /** Grouping key for the coarse pass, such as `slide 2` or `section 1`. */
   container: string;
   name?: string;
+  /** Text sent to the model. May include chart titles and placeholder roles. */
   text?: string;
+  /** Caller-facing text, sliced the same way as search. */
+  matchText?: string;
+  context?: string;
   slide?: number;
   place?: string;
 }

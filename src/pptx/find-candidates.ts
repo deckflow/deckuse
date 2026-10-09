@@ -1,6 +1,6 @@
 import type { Command } from '../core/index.js';
 import { coarsePlace, type FindCandidate } from '../find/catalog.js';
-import { targetPathForItem } from './addressing.js';
+import { targetPathForItem, uidForItem } from './addressing.js';
 import { slidesForItem } from './indexer.js';
 import type { IndexFile, IndexedElement } from './types.js';
 
@@ -66,10 +66,13 @@ export const collectPptxFindCandidates = (
     const place = coarsePlace(item.transform);
     candidates.push({
       target: targetPathForItem(index, item),
+      uid: uidForItem(item),
       kind: item.kind,
       container: page !== undefined ? `slide ${String(page)}` : 'deck',
+      context: item.partUri,
       ...(item.name ? { name: item.name } : {}),
       ...(text ? { text } : {}),
+      ...(item.text ? { matchText: item.text } : {}),
       ...(page !== undefined ? { slide: page } : {}),
       ...(place ? { place } : {}),
     });

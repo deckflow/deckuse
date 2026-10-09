@@ -126,30 +126,29 @@ describe('find ranking', () => {
     });
     expect(ranked.ok).toBe(true);
     if (!ranked.ok) return;
-    expect(ranked.value.verdict).toBe('matched');
+    expect(Object.keys(ranked.value)).toEqual(['matches']);
     expect(ranked.value.matches.map((item) => item.target)).toEqual(['t-1', 't-0']);
-    expect(ranked.value.matches[0]?.score).toBe(0.8);
+    expect(ranked.value.matches[0]).not.toHaveProperty('score');
   });
 
-  it('drops the top-ranked line when the document does not answer the query', async () => {
+  it('keeps a clear hit when the yes/no score is low and drops zero-score siblings', async () => {
     const ranked = await rankFind({
-      query: 'arbitration',
-      candidates: many(2),
+      query: 'logo图片',
+      candidates: many(3),
       client: () =>
         Promise.resolve(
           reply({
-            where: choice({ E001: 0.86, E002: 0.14 }, 'E001'),
-            exists: { type: 'noul', noul: 0.14 },
+            where: choice({ E001: 1, E002: 0, E003: 0 }, 'E001'),
+            exists: { type: 'noul', noul: 0.35 },
           }),
         ),
     });
     expect(ranked.ok).toBe(true);
     if (!ranked.ok) return;
-    expect(ranked.value.verdict).toBe('absent');
-    expect(ranked.value.matches).toEqual([]);
+    expect(ranked.value.matches.map((item) => item.target)).toEqual(['t-0']);
   });
 
-  it('keeps matches and warns when the answer is only partial', async () => {
+  it('returns the best element when the answer is only partial', async () => {
     const ranked = await rankFind({
       query: 'parental permission',
       candidates: many(1),
@@ -163,9 +162,8 @@ describe('find ranking', () => {
     });
     expect(ranked.ok).toBe(true);
     if (!ranked.ok) return;
-    expect(ranked.value.verdict).toBe('partial');
-    expect(ranked.value.matches).toHaveLength(1);
-    expect(ranked.diagnostics[0]?.code).toBe('FIND_PARTIAL');
+    expect(ranked.diagnostics).toEqual([]);
+    expect(ranked.value.matches).toEqual([{ target: 't-0', kind: 'shape', name: 'N0' }]);
   });
 
   it('does not call TypeSafe when there are no candidates', async () => {
@@ -181,8 +179,7 @@ describe('find ranking', () => {
     expect(calls).toBe(0);
     expect(ranked.ok).toBe(true);
     if (!ranked.ok) return;
-    expect(ranked.value.verdict).toBe('absent');
-    expect(ranked.value.exists).toBe(0);
+    expect(ranked.value).toEqual({ matches: [] });
   });
 
   it('rescores heads with noul when a window exceeds the choice limit', async () => {
@@ -220,9 +217,8 @@ describe('find ranking', () => {
     expect(ranked.ok).toBe(true);
     if (!ranked.ok) return;
     expect(calls.some((call) => call.questions['match_E202']?.type === 'noul')).toBe(true);
-    expect(ranked.value.verdict).toBe('matched');
-    expect(ranked.value.matches[0]).toMatchObject({ target: 't-201', score: 0.92 });
-    expect(ranked.value.matches[0]?.score).not.toBe(0.99);
+    expect(ranked.value.matches[0]).toEqual({ target: 't-201', kind: 'shape', name: 'N201' });
+    expect(ranked.value.matches.some((item) => item.target === 't-0')).toBe(false);
   });
 
   it('returns UPSTREAM_ERROR and does not call fetch when the API key is missing', async () => {
@@ -255,7 +251,7 @@ describe('find help', () => {
     expect(topic).toContain('usage: deckuse find <query>');
     expect(topic).toContain('TYPESAFE_API_KEY');
     expect(topic).toContain('api.typesafe.ai');
-    expect(topic).toContain('absent');
+    expect(topic).toContain('data.matches');
   });
 });
 
@@ -364,9 +360,10 @@ describe('find adapters', () => {
     if (!found.ok) return;
     expect(sawChart).toBe(true);
     expect(sawLogo).toBe(true);
-    expect((found.value as { matches: { target: string }[] }).matches[0]?.target).toBe(
-      title?.target,
-    );
+    const foundMatches = (found.value as { matches: Record<string, unknown>[] }).matches;
+    expect(Object.keys(found.value as object)).toEqual(['matches']);
+    expect(foundMatches[0]).toEqual(title);
+    expect(foundMatches[0]).not.toHaveProperty('score');
 
     injectFindClient(() => Promise.reject(new Error('should not call')));
     const missed = await pptxAdapter.execute(
@@ -375,8 +372,7 @@ describe('find adapters', () => {
     );
     expect(missed.ok).toBe(true);
     if (!missed.ok) return;
-    expect((missed.value as { verdict: string; matches: unknown[] }).verdict).toBe('absent');
-    expect((missed.value as { matches: unknown[] }).matches).toEqual([]);
+    expect(missed.value).toEqual({ matches: [] });
   });
 
   it('uses the same DOCX target as search and rejects slide', async () => {
@@ -431,9 +427,7 @@ describe('find adapters', () => {
     );
     expect(found.ok).toBe(true);
     if (!found.ok) return;
-    expect((found.value as { matches: { target: string }[] }).matches[0]?.target).toBe(
-      hello?.target,
-    );
+    expect((found.value as { matches: { target: string }[] }).matches[0]).toEqual(hello);
 
     const rejected = await docxAdapter.execute(
       { version: '2.0', type: 'find', workspaceId: workspace, query: 'greeting', slide: 1 },
