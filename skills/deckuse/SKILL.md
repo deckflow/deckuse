@@ -63,6 +63,7 @@ deckuse new ./workspace --json
 # or: deckuse init master.pptx ./workspace --json
 deckuse status --workspace ./workspace --json
 deckuse list shapes --slide 1 --workspace ./workspace --json
+deckuse find "the revenue card" --workspace ./workspace --json
 deckuse apply --workspace ./workspace --input ops.json --json
 deckuse validate --workspace ./workspace --json
 deckuse render --page 1 --workspace ./workspace --output ./slide-1.png --json
@@ -70,6 +71,8 @@ deckuse export ./output.pptx --workspace ./workspace --json
 ```
 
 Default **`export` rebuilds from `source/`** (includes hand-edits). Use `--from-package` only to copy the existing snapshot. `status.packageStale` flags dirty `source/`.
+
+`find` ranks elements from a natural-language query. It needs `TYPESAFE_API_KEY` and sends names plus visible text to `api.typesafe.ai`. Literal `search` stays on this machine. If `data.verdict` is `absent`, `matches` is empty — do not edit a guessed target. `partial` means review the matches before `apply`. Jev is stronger in English than in Chinese.
 
 ### `setProperties` keys
 
@@ -217,6 +220,7 @@ deckuse undo --workspace ./workspace --steps 1 --json
 
 - Always use `--json` for agents. On `INVALID_COMMAND`, read **`error.message`** (includes first field path) and **`error.diagnostics[]`** (`path` + `message`).
 - `TARGET_NOT_FOUND`: list shapes; for dry-run, ensure the name was added in the **same** apply batch.
+- `find` / `UPSTREAM_ERROR`: set `TYPESAFE_API_KEY`. A verdict of `absent` is not a target.
 - `UNSUPPORTED_CAPABILITY`: community master/layout/theme gate.
 - `COMBO_CHART_RENDER_LIMITED` / `CHART_SERIES_COLOR_UNVERIFIED` / `TABLE_HEIGHT_MAY_CLIP` / `TABLE_OVERLAPS_SHAPE`: warnings, not write failures.
 - `NOTES_SLIDE_MISMATCH`: workspace cannot be written until `deckuse repair --workspace ./ws --json` (unambiguous notes back-pointers only).

@@ -25,6 +25,7 @@ Commands:
   get           Read a target's properties (with provenance)
   inspect       Structural diagnostic
   search        Search text or shapes
+  find          Rank elements with a natural-language query
   add           Add a slide, shape, paragraph, or table
   remove        Remove a slide or shape target
   set           Set text, slide layout, or dotted properties on a target
@@ -231,6 +232,30 @@ Options:
   --json                    Machine-readable envelope
 
 Run 'deckuse search <text|shape> --help' for details.`,
+  },
+
+  find: {
+    usage: 'deckuse find <query> [options]',
+    summary:
+      'Rank indexed elements by a natural-language query. Read-only. Literal search stays local.',
+    example: 'deckuse find "the revenue card" --limit 5 --json',
+    details: `Arguments:
+  <query>                   Plain-language description of the element
+
+Options:
+  --slide <n>               PPTX only. Limit candidates to one slide
+  --kind <a,b>              Candidate kinds (default: slide shapes and notes, or Word paragraphs, tables, bookmarks)
+  --limit <n>               Max matches (default: 8)
+  --model <id>              TypeSafe model (default: jev-latest)
+  --workspace <path>        Workspace root
+  --revision <rev>          Allowed on this read command
+  --json                    Machine-readable envelope
+
+Notes:
+  Requires TYPESAFE_API_KEY. Names and visible text are sent to api.typesafe.ai.
+  data.verdict is matched, partial, or absent. absent leaves matches empty — do not edit a guessed target.
+  partial means review matches before apply. Jev is stronger in English than in Chinese.
+  Use search for a literal substring. find does not write the workspace.`,
   },
 
   'search text': {

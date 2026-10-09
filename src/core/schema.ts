@@ -19,6 +19,7 @@ export const errorCodeSchema = z.enum([
   'UNSUPPORTED_CAPABILITY',
   'UNSUPPORTED_PROPERTY',
   'IO_ERROR',
+  'UPSTREAM_ERROR',
   'INTERNAL_ERROR',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -230,6 +231,22 @@ const searchCommandSchema = z
     name: z.string().min(1).optional(),
     scope: z.string().min(1).optional(),
     limit: z.number().int().positive().max(10000).default(100),
+  })
+  .strict();
+
+/** Default TypeSafe model for the read-only `find` command. */
+export const DEFAULT_FIND_MODEL = 'jev-latest';
+
+const findCommandSchema = z
+  .object({
+    ...commandBase,
+    type: z.literal('find'),
+    workspaceId: z.string().min(1),
+    query: z.string().min(1),
+    slide: z.number().int().positive().optional(),
+    kind: z.array(z.string().min(1)).min(1).optional(),
+    limit: z.number().int().positive().max(10000).default(8),
+    model: z.string().min(1).default(DEFAULT_FIND_MODEL),
   })
   .strict();
 
@@ -846,6 +863,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   listCommandSchema,
   getCommandSchema,
   searchCommandSchema,
+  findCommandSchema,
   inspectCommandSchema,
   queryCommandSchema,
   getTextCommandSchema,

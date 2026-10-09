@@ -130,4 +130,6 @@ Chart series colors write to XML; **community `render` may not show them** — c
 
 ## Loop
 
-`init|new → list/get/search → apply → validate → render → export`
+`init|new → list/get/search/find → apply → validate → render → export`
+
+`deckuse find "the revenue card" --json` ranks elements with TypeSafe (`TYPESAFE_API_KEY`). It sends names and visible text to `api.typesafe.ai`. Literal `search` does not. If `data.verdict` is `absent`, do not write to a guessed target. `partial` means review matches first.

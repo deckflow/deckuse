@@ -9,8 +9,10 @@ import {
   type Result,
   type WorkspaceManifest,
 } from '../core/index.js';
+import { rankFind } from '../find/rank.js';
 import { OpcArchive } from '../opc/index.js';
 import { isIntegerRevision, nextRevision } from '../workspace/index.js';
+import { collectDocxFindCandidates } from './find-candidates.js';
 import {
   buildIndex,
   collectHits,
@@ -359,6 +361,20 @@ export const docxAdapter: FormatAdapter = {
           return true;
         });
         return ok({ matches: items.slice(0, command.limit).map(summary) });
+      }
+
+      if (command.type === 'find') {
+        if (command.slide !== undefined) {
+          return err('INVALID_COMMAND', 'find slide is only supported for PPTX', [], {
+            hint: 'Omit --slide. Use --kind paragraph,table,bookmark to narrow Word elements.',
+          });
+        }
+        return await rankFind({
+          candidates: collectDocxFindCandidates(index, command),
+          query: command.query,
+          limit: command.limit,
+          model: command.model,
+        });
       }
 
       if (command.type === 'query') {

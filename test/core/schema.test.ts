@@ -26,6 +26,18 @@ describe('command schema', () => {
       true,
     );
   });
+  it('parses find with defaults', () => {
+    const parsed = commandSchema.parse({
+      version: '2.0',
+      type: 'find',
+      workspaceId: 'w',
+      query: 'revenue card',
+    });
+    expect(parsed.type).toBe('find');
+    if (parsed.type !== 'find') return;
+    expect(parsed.limit).toBe(8);
+    expect(parsed.model).toBe('jev-latest');
+  });
   it('parses setTableLayout at the top-level commandSchema', () => {
     expect(
       commandSchema.parse({

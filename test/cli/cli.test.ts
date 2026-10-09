@@ -147,6 +147,7 @@ describe('deckuse CLI', () => {
     );
     expect(help.stdout).toContain('render        Screenshot one slide to PNG');
     expect(help.stdout).toContain('repair        Fix unambiguous notesSlide back-pointers');
+    expect(help.stdout).toContain('find          Rank elements with a natural-language query');
   });
 
   it('provides progressive command and subcommand help', async () => {
@@ -203,6 +204,54 @@ describe('deckuse CLI', () => {
     expect(repairHelp.stdout).toContain('usage: deckuse repair');
     expect(repairHelp.stdout).toContain('notesSlide');
     expect(repairHelp.stdout).toContain('AMBIGUOUS_REFERENCE');
+
+    const findHelp = await run(['find', '--help']);
+    expect(findHelp).toMatchObject({ code: 0, stderr: '' });
+    expect(findHelp.stdout).toContain('usage: deckuse find <query>');
+    expect(findHelp.stdout).toContain('TYPESAFE_API_KEY');
+    expect(findHelp.stdout).toContain('api.typesafe.ai');
+  });
+
+  it('allows find --revision and reports a missing TypeSafe key', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-find-cli-'));
+    const source = join(root, 'in.pptx');
+    const workspace = join(root, 'ws');
+    await fixture(source);
+    const init = await run(['init', source, workspace, '--json']);
+    expect(init.code).toBe(0);
+
+    const found = await new Promise<{ code: number | null; stdout: string; stderr: string }>(
+      (done) => {
+        const child = spawn(
+          process.execPath,
+          [
+            resolve('dist/bin.js'),
+            'find',
+            'Hello',
+            '--workspace',
+            workspace,
+            '--revision',
+            '1',
+            '--json',
+          ],
+          { cwd: root, env: { ...process.env, TYPESAFE_API_KEY: '' } },
+        );
+        let stdout = '',
+          stderr = '';
+        child.stdout.on('data', (chunk) => (stdout += String(chunk)));
+        child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+        child.on('close', (code) => done({ code, stdout, stderr }));
+      },
+    );
+    expect(found.stdout).not.toContain('Write commands reject --revision');
+    const envelope = JSON.parse(found.stdout) as {
+      ok: boolean;
+      error?: { code?: string; hint?: string };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe('UPSTREAM_ERROR');
+    expect(envelope.error?.hint).toContain('TYPESAFE_API_KEY');
+    expect(found.code).toBe(1);
   });
 
   it('monitor status without workspace lists daemons instead of requiring a workspace', async () => {

@@ -185,6 +185,7 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
         'get',
         'inspect',
         'search',
+        'find',
         'query',
         'getText',
         'validate',
@@ -575,6 +576,31 @@ const main = async (): Promise<void> => {
           ...(query ? { query } : {}),
           ...(optionFrom(clean, '--name') ? { name: optionFrom(clean, '--name') } : {}),
           limit: Number(optionFrom(clean, '--limit') ?? 100),
+        });
+      } else if (action === 'find') {
+        const query = clean[1];
+        if (!query || query.startsWith('--'))
+          throw new Error(
+            'Usage: deckuse find <query> [--slide <n>] [--kind <a,b>] [--limit <n>] [--model <id>]',
+          );
+        const workspace = await findWorkspace(workspaceOpt);
+        const slide = optionFrom(clean, '--slide');
+        const kindRaw = optionFrom(clean, '--kind');
+        const limit = optionFrom(clean, '--limit');
+        const model = optionFrom(clean, '--model');
+        const kinds = kindRaw
+          ?.split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+        ok = await execute('deckuse find', {
+          version: PROTOCOL_VERSION,
+          type: 'find',
+          workspaceId: workspace,
+          query,
+          ...(slide ? { slide: Number(slide) } : {}),
+          ...(kinds && kinds.length > 0 ? { kind: kinds } : {}),
+          ...(limit ? { limit: Number(limit) } : {}),
+          ...(model ? { model } : {}),
         });
       } else if (action === 'add') {
         const what = clean[1];

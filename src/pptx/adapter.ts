@@ -11,7 +11,9 @@ import {
 } from '../core/index.js';
 import { OpcArchive } from '../opc/index.js';
 import { isIntegerRevision, nextRevision } from '../workspace/index.js';
+import { rankFind } from '../find/rank.js';
 import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addressing.js';
+import { collectPptxFindCandidates } from './find-candidates.js';
 import { editionCapabilities, editionMetadata } from './edition.js';
 import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
 import { loadIndex } from './index-sync.js';
@@ -772,6 +774,15 @@ export const pptxAdapter: FormatAdapter = {
             text: item.text?.slice(0, 200),
             context: item.partUri,
           })),
+        });
+      }
+
+      if (command.type === 'find') {
+        return await rankFind({
+          candidates: collectPptxFindCandidates(index, command),
+          query: command.query,
+          limit: command.limit,
+          model: command.model,
         });
       }
 
