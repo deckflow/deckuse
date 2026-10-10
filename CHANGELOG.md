@@ -1,5 +1,11 @@
 # @deckflow/deckuse
 
+## 1.5.0
+
+### Minor Changes
+
+- 94e98bc: Add a read-only `find` command that ranks document elements from a natural-language query via TypeSafe.
+
 ## 1.4.3
 
 ### Patch Changes
