@@ -1,6 +1,6 @@
 {
   "name": "@deckflow/deckuse",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "license": "AGPL-3.0",
   "type": "module",
   "private": false,
@@ -49,7 +49,7 @@
     "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore"
   },
   "dependencies": {
-    "@deckflow/deck2html": "^0.3.8",
+    "@deckflow/deck2html": "^0.5.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
