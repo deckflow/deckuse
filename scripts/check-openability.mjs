@@ -17,9 +17,10 @@
  * Exit 1 = a probe failed.
  */
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
+import { convertOfficeToPdf } from '../dist/office-backend.js';
 
 const PACKAGE_EXTS = new Set(['.pptx', '.docx']);
 
@@ -61,7 +62,7 @@ const which = async (names) => {
 
 /** Resolve a working LibreOffice binary (ignore broken Homebrew stubs). */
 const resolveSoffice = async () => {
-  const candidate = await which(['soffice', 'libreoffice']);
+  const candidate = process.env.DECKUSE_SOFFICE_PATH ?? (await which(['soffice', 'libreoffice']));
   if (!candidate) return undefined;
   const probe = await run(candidate, ['--version']);
   if (probe.code !== 0) return undefined;
@@ -89,24 +90,19 @@ const collectPackages = async (input) => {
 };
 
 const probeLibreOffice = async (soffice, file, outDir) => {
-  const result = await run(soffice, [
-    '--headless',
-    '--nologo',
-    '--nolockcheck',
-    '--convert-to',
-    'pdf',
-    '--outdir',
-    outDir,
-    file,
-  ]);
-  if (result.code !== 0) {
-    return {
-      ok: false,
-      backend: 'libreoffice',
-      error: result.stderr.trim() || result.stdout.trim() || `exit ${String(result.code)}`,
-    };
+  const previous = process.env.DECKUSE_SOFFICE_PATH;
+  process.env.DECKUSE_SOFFICE_PATH = soffice;
+  const profile = await mkdtemp(join(tmpdir(), 'deckuse-office-profile-'));
+  try {
+    await convertOfficeToPdf(file, outDir, profile);
+    return { ok: true, backend: 'libreoffice' };
+  } catch (cause) {
+    return { ok: false, backend: 'libreoffice', error: cause.message };
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+    if (previous === undefined) delete process.env.DECKUSE_SOFFICE_PATH;
+    else process.env.DECKUSE_SOFFICE_PATH = previous;
   }
-  return { ok: true, backend: 'libreoffice' };
 };
 
 const probeMacOpen = async (file) => {
@@ -155,9 +151,7 @@ const main = async () => {
 
   const soffice = await resolveSoffice();
   const canOsascript =
-    wantOsascript &&
-    process.platform === 'darwin' &&
-    (await which(['osascript'])) !== undefined;
+    wantOsascript && process.platform === 'darwin' && (await which(['osascript'])) !== undefined;
 
   if (!soffice && !canOsascript) {
     process.stdout.write(

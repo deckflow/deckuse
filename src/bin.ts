@@ -875,6 +875,9 @@ const main = async (): Promise<void> => {
         ok = await execute('deckuse replace-text', {
           ...(await mutationExtras(workspace)),
           type: 'replaceText',
+          ...(optionFrom(clean, '--format-policy')
+            ? { formatPolicy: optionFrom(clean, '--format-policy') }
+            : {}),
           find: source,
           replace: target,
           ...(clean.includes('--regex') ? { regex: true } : {}),
@@ -1028,8 +1031,10 @@ const main = async (): Promise<void> => {
         ok = await execute('deckuse validate', {
           version: PROTOCOL_VERSION,
           type: 'validate',
+          profile: optionFrom(clean, '--profile') ?? 'structure',
           workspaceId: workspace,
           level: optionFrom(clean, '--level') ?? 'full',
+          render: clean.includes('--render'),
           package: clean.includes('--package'),
           relationships: clean.includes('--relationships'),
           ...(optionFrom(clean, '--slide') ? { slide: Number(optionFrom(clean, '--slide')) } : {}),
@@ -1067,6 +1072,7 @@ const main = async (): Promise<void> => {
         ok = await execute('deckuse export', {
           version: PROTOCOL_VERSION,
           type: 'export',
+          profile: optionFrom(clean, '--profile') ?? 'structure',
           workspaceId: workspace,
           output: resolve(output),
           ...(revisionOpt ? { revision: revisionOpt } : {}),
@@ -1090,7 +1096,7 @@ const main = async (): Promise<void> => {
         const port = Number(optionFrom(clean, '--port') ?? 4173);
         if (!Number.isInteger(port) || port < 0 || port > 65535)
           throw new Error('--port must be an integer between 0 and 65535');
-        const host = optionFrom(clean, '--host') ?? '0.0.0.0';
+        const host = optionFrom(clean, '--host') ?? '127.0.0.1';
 
         if (sub === 'status' && !hasWorkspaceArg) {
           const result = await monitorStatusAll();
@@ -1209,7 +1215,11 @@ const main = async (): Promise<void> => {
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
         const outputOpt = optionFrom(clean, '--output');
         try {
+          const engine = optionFrom(clean, '--engine') ?? 'html';
+          if (engine !== 'html' && engine !== 'libreoffice')
+            throw new Error('Unknown render engine');
           const rendered = await renderPage(workspace, {
+            engine,
             page,
             ...(outputOpt ? { output: resolve(outputOpt) } : {}),
             ...(scale !== undefined ? { scale } : {}),
@@ -1219,6 +1229,7 @@ const main = async (): Promise<void> => {
             command: 'deckuse render',
             warnings: [...rendered.warnings],
             data: {
+              ...rendered,
               page: rendered.page,
               output: rendered.output,
               warnings: rendered.warnings,

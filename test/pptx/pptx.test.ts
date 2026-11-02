@@ -265,6 +265,14 @@ describe('pptx adapter', () => {
     const source = join(root, 'source.pptx'),
       workspace = join(root, 'workspace');
     await fixture(source);
+    // This success case uses literal data; referenced caches must fail closed.
+    const literal = await OpcArchive.openFile(source);
+    const chartXml = new TextDecoder()
+      .decode(literal.getPart('/ppt/charts/chart1.xml')!.data)
+      .replace('<c:numRef><c:numCache>', '<c:numLit>')
+      .replace('</c:numCache></c:numRef>', '</c:numLit>');
+    literal.setPart('/ppt/charts/chart1.xml', e.encode(chartXml));
+    await literal.writeFile(source, true);
     const init = await pptxAdapter.init(
       { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
       {},

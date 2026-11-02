@@ -1,3 +1,4 @@
+import { prepareChartData, refreshCaches, commitChart, type ChartOwner } from './chart-data.js';
 import { OpcArchive, parseXml } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import { parseLength, type LengthInput } from '../core/index.js';
@@ -503,15 +504,30 @@ export const duplicateElement = (doc: Document, node: Element): Element => {
   node.parentNode?.appendChild(clone);
   return clone;
 };
-export function updateChart(
+export async function updateChart(
   archive: OpcArchive,
   part: string,
   properties: Record<string, unknown>,
-): { workbook: boolean } {
+  owner?: ChartOwner,
+) {
+  if (owner) {
+    const chartRef = descendants(owner.node, 'chart').find((n) => n.namespaceURI === NS.c);
+    const id = chartRef?.getAttributeNS(NS.r, 'id');
+    const relationship = archive
+      .getRelationships(owner.part)
+      .find((r) => r.id === id && r.type === REL.chart && !r.external);
+    if (!relationship?.resolvedTarget) throw new Error('Chart owning relationship is missing');
+    part = relationship.resolvedTarget;
+  }
   const chart = archive.readXml(part);
-  applyChartProperties(chart, properties);
-  archive.writeXml(part, chart);
-  return { workbook: archive.getRelationships(part).some((r) => r.type === REL.package) };
+  const data = await prepareChartData(archive, part, chart, properties);
+  const applied = { ...properties };
+  const title = descendants(chart, 'title')[0];
+  if (data && title && typeof applied['title'] === 'string' && descendants(title, 'strRef').length)
+    delete applied['title'];
+  applyChartProperties(chart, applied);
+  if (data) refreshCaches(data);
+  return commitChart(archive, part, chart, data, owner);
 }
 
 export function setColor(node: Element, from: string, to: string): number {

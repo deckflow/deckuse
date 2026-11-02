@@ -91,6 +91,8 @@ const anchorFor = (
   if (!after) {
     const loaded = requireDocument(archive);
     if (!loaded.ok) return loaded;
+    const reason = protectionReason(wEl(loaded.value, 'p'));
+    if (reason) return err('UNSUPPORTED_CAPABILITY', reason);
     return ok({ doc: loaded.value });
   }
   const located = locate(archive, index, after);
@@ -101,6 +103,8 @@ const anchorFor = (
     });
   }
   const anchor = blockAnchor(located.value.element);
+  const reason = protectionReason(anchor);
+  if (reason) return err('UNSUPPORTED_CAPABILITY', reason, [], { target: after });
   if (anchor.localName === 'sectPr' || located.value.item.kind === 'style') {
     return err('INVALID_COMMAND', `Cannot insert after ${after}`);
   }
@@ -175,6 +179,7 @@ export function mutate(
     if (!loaded.ok) return loaded;
     const doc = loaded.value;
     let matched = 0;
+    const changes: unknown[] = [];
     const limit = command.limit;
     for (const hit of hitsFrom(doc, undefined)) {
       if (hit.kind !== 'paragraph') continue;
@@ -184,25 +189,51 @@ export function mutate(
       }
       const remaining = limit !== undefined ? limit - matched : undefined;
       if (remaining !== undefined && remaining <= 0) break;
+      const reason = protectionReason(hit.element);
+      // Only reject protected paragraphs when a match actually touches them.
       const replaced = replaceInParagraph(
         hit.element,
         command.find,
         command.replace,
         command.regex ?? false,
         remaining,
+        command.formatPolicy,
       );
       if ('error' in replaced) {
-        return err('UNSUPPORTED_CAPABILITY', replaced.error, [], {
-          target: hit.path,
-          hint: 'replaceText matches inside one paragraph and will not rewrite protected markup.',
-        });
+        return err(
+          replaced.invalid ? 'INVALID_COMMAND' : 'UNSUPPORTED_CAPABILITY',
+          replaced.error,
+          replaced.details
+            ? [
+                {
+                  severity: 'error',
+                  code: 'TEXT_REPLACEMENT_REFUSED',
+                  message: replaced.error,
+                  details: { target: hit.path, ...replaced.details },
+                },
+              ]
+            : [],
+          {
+            target: hit.path,
+            hint: 'replaceText matches inside one paragraph and will not rewrite protected markup.',
+          },
+        );
       }
+      if (replaced.matched > 0 && reason)
+        return err('UNSUPPORTED_CAPABILITY', reason, [], { target: hit.path });
+      changes.push(
+        ...replaced.changes.map((change) => ({
+          target: hit.path,
+          ...change,
+          runTargets: change.runs.map((run) => `${hit.path}/run:${String(run)}`),
+        })),
+      );
       if (replaced.matched > 0) ensureParaId(hit.element);
       matched += replaced.matched;
     }
     if (matched > 0) save(archive, doc);
     return ok(
-      outcome(matched > 0, matched > 0 ? [DOCUMENT_PART] : [], { matched }),
+      outcome(matched > 0, matched > 0 ? [DOCUMENT_PART] : [], { matched, changes }),
       matched === 0
         ? [
             {
@@ -211,7 +242,15 @@ export function mutate(
               message: 'replaceText matched no text',
             },
           ]
-        : [],
+        : command.formatPolicy === 'firstRun'
+          ? [
+              {
+                severity: 'warning',
+                code: 'TEXT_FORMAT_FIRST_RUN',
+                message: 'Replacement explicitly inherits the first run formatting',
+              },
+            ]
+          : [],
     );
   }
 
@@ -264,8 +303,7 @@ export function mutate(
       });
     }
     const reason = protectionReason(located.value.element);
-    if (reason && located.value.element.localName !== 'tbl')
-      return err('UNSUPPORTED_CAPABILITY', reason, [], { target });
+    if (reason) return err('UNSUPPORTED_CAPABILITY', reason, [], { target });
     const removed = removeElement(located.value.element);
     if (!removed.ok) return removed;
     save(archive, located.value.doc);

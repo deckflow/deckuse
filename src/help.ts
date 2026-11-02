@@ -466,7 +466,7 @@ Notes:
 
   'replace-text': {
     usage:
-      'deckuse replace-text --source <text> --target <text> [--regex] [--limit <n>] [--selector <sel>]',
+      'deckuse replace-text --source <text> --target <text> [--regex] [--limit <n>] [--selector <sel>] [--format-policy safe|firstRun]',
     summary: 'Find and replace text across matching indexed text nodes.',
     example: 'deckuse replace-text --source FY2025 --target FY2026 --json',
     details: `Required:
@@ -670,6 +670,8 @@ Notes:
 
 Options:
   --level <level>           Validation level (default: full)
+  --profile <mode>          structure (default) or delivery (strict data verification)
+  --render                  Include visual geometry and heuristic diagnostics
   --package                 Include package checks
   --relationships           Include relationship graph checks
   --slide <n>               Limit to one slide when supported
@@ -735,7 +737,8 @@ Notes:
 
 Options:
   --workspace <path>        Workspace root
-  --from-package            Copy existing package.pptx without rebuilding from source/
+  --from-package            Copy existing package snapshot without rebuilding from source/
+  --profile <mode>          structure (default) or delivery; strict failures preserve output
   --revision <rev>          Export a historical revision (not available in Phase 1a)
   --json                    Machine-readable envelope
 
@@ -761,7 +764,7 @@ Arguments:
   <workspace>               Optional workspace path (or use --workspace)
 
 Options:
-  --host <addr>             Bind address (default: 0.0.0.0)
+  --host <addr>             Bind address (default: 127.0.0.1)
   --port <n>                Port 0–65535 (default: 4173). Use 0 for an ephemeral free port.
   --workspace <path>        Workspace root
   --all                     With stop: stop every running monitor daemon
@@ -780,7 +783,8 @@ Examples:
   },
 
   render: {
-    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
+    usage:
+      'deckuse render --page <n> [--engine html|libreoffice] [--output <file.png>] [--scale <n>]',
     summary:
       'Convert one slide to HTML (deck2html), screenshot it with Playwright, then delete the HTML staging output.',
     example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',

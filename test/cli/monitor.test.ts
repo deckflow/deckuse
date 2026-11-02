@@ -1,3 +1,4 @@
+import { Script } from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
@@ -8,12 +9,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { startMonitor } from '../../src/monitor.js';
 
 const eventually = async (assertion: () => void | Promise<void>): Promise<void> => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       await assertion();
       return;
     } catch (error) {
-      if (attempt === 49) throw error;
+      if (attempt === 199) throw error;
       await new Promise((done) => setTimeout(done, 10));
     }
   }
@@ -196,6 +197,18 @@ describe('monitor', () => {
     );
     onChange?.();
     await eventually(() => expect(client.events.join('')).toContain('broken'));
+    expect(client.events.join('')).toContain('"stale":true');
+    expect(client.events.join('')).toContain('"previewStatus":"pending"');
+    expect(client.events.join('')).toContain('"backend":"deck2html (HTML)"');
+    const ui = await (await fetch(monitor.url)).text();
+    expect(ui).toContain('native Office visual verification pending');
+    for (const script of ui.matchAll(/<script>([\s\S]*?)<\/script>/g))
+      expect(() => new Script(script[1]!)).not.toThrow();
+    expect(ui).toContain('displayed image is stale');
+    const replay = await subscribe(monitor.url);
+    await eventually(() => expect(replay.events.join('')).toContain('"previewStatus":"error"'));
+    expect(replay.events.join('')).toContain('broken');
+    replay.close();
     expect((await fetch(new URL(render!, monitor.url))).status).toBe(200);
     client.close();
     await monitor.close();
@@ -230,7 +243,7 @@ describe('monitor', () => {
     });
     const client = await subscribe(monitor.url);
     await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
-    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(convertedInputs[0]).toBe('pptx'));
 
     await writeFile(
       join(workspace, '.deckuse', 'write.lock'),
@@ -250,7 +263,7 @@ describe('monitor', () => {
     await unlink(join(workspace, '.deckuse', 'write.lock'));
     onChange?.();
     await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
-    expect(convertedInputs[1]).toBe('fresh-after-pack');
+    await eventually(() => expect(convertedInputs[1]).toBe('fresh-after-pack'));
     await eventually(() => expect(client.events.join('')).toContain('"revision":"undone"'));
     client.close();
     await monitor.close();
@@ -289,12 +302,12 @@ describe('monitor', () => {
     });
     const client = await subscribe(monitor.url);
     await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
-    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(convertedInputs[0]).toBe('pptx'));
 
     await writeFile(join(workspace, 'package.pptx'), 'repacked');
     onChange?.();
     await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
-    expect(convertedInputs[1]).toBe('repacked');
+    await eventually(() => expect(convertedInputs[1]).toBe('repacked'));
     client.close();
     await monitor.close();
   });
@@ -448,7 +461,7 @@ describe('monitor', () => {
     expect(second.status).toBe(202);
     expect(await first.json()).toMatchObject({ status: 'converting' });
     expect(await second.json()).toMatchObject({ status: 'converting' });
-    expect(converter).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(converter).toHaveBeenCalledTimes(1));
 
     await finishConversion();
     let readyBody: {
@@ -796,7 +809,7 @@ describe('monitor', () => {
 
     const client = await subscribe(`${monitor.url}preview/`);
     await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
-    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(convertedInputs[0]).toBe('pptx'));
     await eventually(() => expect(client.events.join('')).toContain('event: ready'));
 
     await writeFile(
@@ -816,7 +829,7 @@ describe('monitor', () => {
     await unlink(join(workspace, '.deckuse', 'write.lock'));
     // No extra watch event after unlock — retry scheduled during the lock must pick this up.
     await eventually(() => expect(converter).toHaveBeenCalledTimes(2));
-    expect(convertedInputs[1]).toBe('fresh-after-pack');
+    await eventually(() => expect(convertedInputs[1]).toBe('fresh-after-pack'));
     await eventually(() => expect(client.events.join('')).toContain('"revision":"2"'));
 
     client.close();
@@ -852,7 +865,7 @@ describe('monitor', () => {
 
     const client = await subscribe(`${monitor.url}preview/`);
     await eventually(() => expect(converter).toHaveBeenCalledTimes(1));
-    expect(convertedInputs[0]).toBe('pptx');
+    await eventually(() => expect(convertedInputs[0]).toBe('pptx'));
     await eventually(() => expect(client.events.join('')).toContain('event: ready'));
 
     const replacePackage = async (contents: string, revision: string): Promise<void> => {

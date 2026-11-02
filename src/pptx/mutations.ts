@@ -373,12 +373,12 @@ const materializeNotes = (archive: OpcArchive, item: IndexedElement): Result<Ind
   });
 };
 
-const writeText = (
+const writeText = async (
   archive: OpcArchive,
   item: IndexedElement,
   text: string,
   diagnostics: Diagnostic[],
-): Result<void> => {
+): Promise<Result<void>> => {
   const gatedKind = editionGatedWriteKind(item, archive);
   if (gatedKind) {
     const ext = getPptxEditionExtension();
@@ -390,7 +390,22 @@ const writeText = (
     return gatedWriteHardDeny(item, archive);
   }
   if (item.kind === 'chart' && typeof item.payload?.['chartPart'] === 'string') {
-    const result = updateChart(archive, item.payload['chartPart'], { title: text });
+    const ownerDoc = archive.readXml(item.partUri);
+    const ownerNode = nodeFor(ownerDoc, item);
+    if (!ownerNode) return err('ELEMENT_NOT_FOUND', 'Chart owner missing');
+    const result = await updateChart(
+      archive,
+      item.payload['chartPart'],
+      { title: text },
+      { part: item.partUri, node: ownerNode },
+    );
+    archive.writeXml(item.partUri, ownerDoc);
+    diagnostics.push({
+      severity: 'info',
+      code: 'CHART_DATA_UPDATE',
+      message: 'Chart update planned',
+      details: { ...result },
+    });
     if (result.workbook)
       diagnostics.push({
         severity: 'warning',
@@ -431,11 +446,11 @@ const narrowReplaceTextCandidates = (candidates: IndexedElement[]): IndexedEleme
   });
 };
 
-const applyReplaceText = (
+const applyReplaceText = async (
   command: Extract<AtomicCommand, { type: 'replaceText' }>,
   archive: OpcArchive,
   index: IndexFile,
-): Result<MutationOutcome> => {
+): Promise<Result<MutationOutcome>> => {
   if (command.regex) {
     try {
       new RegExp(command.find, 'u');
@@ -467,7 +482,7 @@ const applyReplaceText = (
   for (const item of selected) {
     const next = replaced(item.text ?? '');
     if (next === item.text) continue;
-    const written = writeText(archive, item, next, diagnostics);
+    const written = await writeText(archive, item, next, diagnostics);
     if (!written.ok) return written;
     refs.push(item.ref);
     slidePages.push(...slidesForItem(index, item));
@@ -782,6 +797,8 @@ export async function mutate(
   >
 > {
   let tableLayout: TableFrameLayout | undefined;
+  if (command.type === 'replaceText' && command.formatPolicy !== undefined)
+    return err('UNSUPPORTED_CAPABILITY', 'formatPolicy is DOCX-only');
   if (command.type === 'replaceText') return applyReplaceText(command, archive, index);
 
   if (command.type === 'addSlide') {
@@ -1143,7 +1160,18 @@ export async function mutate(
       if (text === undefined)
         return err('INVALID_COMMAND', 'setText requires text, value, or blocks');
       if (chartPart) {
-        const result = updateChart(archive, chartPart, { title: text });
+        const result = await updateChart(
+          archive,
+          chartPart,
+          { title: text },
+          { part: liveItem.partUri, node: shapeNode },
+        );
+        diagnostics.push({
+          severity: 'info',
+          code: 'CHART_DATA_UPDATE',
+          message: 'Chart update planned',
+          details: { ...result },
+        });
         chartMutated = true;
         if (result.workbook)
           diagnostics.push({
@@ -1228,7 +1256,16 @@ export async function mutate(
       const chartProps = { ...properties };
       if (typeof chartProps['text'] === 'string' && chartProps['title'] === undefined)
         chartProps['title'] = chartProps['text'];
-      const result = updateChart(archive, chartPart, chartProps);
+      const result = await updateChart(archive, chartPart, chartProps, {
+        part: liveItem.partUri,
+        node: shapeNode,
+      });
+      diagnostics.push({
+        severity: 'info',
+        code: 'CHART_DATA_UPDATE',
+        message: 'Chart update planned',
+        details: { ...result },
+      });
       chartMutated = true;
       if (result.workbook)
         diagnostics.push({

@@ -1,3 +1,5 @@
+import { auditVisuals } from './pptx/visual-audit.js';
+import { renderLibreOffice } from './render-libreoffice.js';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,7 +8,6 @@ import deck2html from '@deckflow/deck2html';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import type { Diagnostic } from './core/index.js';
 import { OpcArchive } from './opc/index.js';
-import { chartRenderDiagnostics } from './pptx/render-fidelity.js';
 import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
 import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
@@ -29,6 +30,7 @@ export interface RenderDependencies {
 
 export interface RenderOptions {
   /** 1-based page index; exactly one page per call. */
+  readonly engine?: 'html' | 'libreoffice';
   readonly page: number;
   /** PNG path; default: `<workspace>/.deckuse/render/page-<n>.png`. */
   readonly output?: string;
@@ -38,6 +40,13 @@ export interface RenderOptions {
 }
 
 export interface RenderResult {
+  readonly engine?: string;
+  readonly engineVersion?: string;
+  readonly pages?: number;
+  readonly revision?: string;
+  readonly inputSha256?: string;
+  readonly fontVerification?: string;
+  readonly nativeVerification?: string;
   readonly page: number;
   readonly output: string;
   readonly warnings: readonly string[];
@@ -137,6 +146,12 @@ export const renderPage = async (
   }
 
   const absoluteWorkspace = resolve(workspace);
+  if (options.engine === 'libreoffice')
+    return renderLibreOffice(
+      absoluteWorkspace,
+      page,
+      options.output ?? joinRenderDefault(absoluteWorkspace, page),
+    );
   await ensureGitignore(absoluteWorkspace);
 
   let snapshot = PACKAGE_PPTX;
@@ -203,10 +218,10 @@ const inspectChartRenderFidelity = async (
     const packed = resolve(workspace, PACKAGE_PPTX);
     try {
       const archive = await OpcArchive.openFile(packed);
-      return chartRenderDiagnostics(archive, page);
+      return auditVisuals(archive, page).diagnostics;
     } catch {
       const archive = await OpcArchive.openDirectory(sourceDir(workspace));
-      return chartRenderDiagnostics(archive, page);
+      return auditVisuals(archive, page).diagnostics;
     }
   } catch {
     return [];

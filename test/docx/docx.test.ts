@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -79,6 +79,7 @@ describe('docx adapter', () => {
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
+    expect((created.value as { availableStyles: string[] }).availableStyles).toContain('Normal');
 
     const listed = await docxAdapter.execute({
       version: '2.0',
@@ -125,6 +126,7 @@ describe('docx adapter', () => {
     const replaced = await docxAdapter.execute({
       ...base(workspace),
       type: 'replaceText',
+      formatPolicy: 'firstRun',
       find: 'ell',
       replace: 'XX',
     });
@@ -137,6 +139,7 @@ describe('docx adapter', () => {
     const styled = await docxAdapter.execute({
       ...base(workspace, '2'),
       type: 'replaceText',
+      formatPolicy: 'firstRun',
       find: 'BC',
       replace: 'X',
     });
@@ -436,5 +439,42 @@ describe('docx adapter', () => {
     });
     expect(exported.ok).toBe(true);
     if (exported.ok) expect((exported.value as { valid: boolean }).valid).toBe(true);
+  });
+});
+
+describe('delivery export', () => {
+  it('validates the actual package snapshot and preserves an existing output on failure', async () => {
+    const { workspace, source } = await fixture();
+    await docxAdapter.init({
+      version: '2.0',
+      type: 'init',
+      workspaceId: workspace,
+      format: 'docx',
+      source,
+    });
+    const snapshot = join(workspace, 'package.docx');
+    const archive = await OpcArchive.openFile(snapshot);
+    archive.setRelationships('/word/document.xml', [
+      ...archive.getRelationships('/word/document.xml'),
+      {
+        id: 'missing',
+        type: 'http://example.test/missing',
+        target: 'missing.xml',
+        external: false,
+      },
+    ]);
+    await archive.writeFile(snapshot, true);
+    const output = join(workspace, 'delivery.docx');
+    await writeFile(output, 'preserve-output');
+    const result = await docxAdapter.execute({
+      version: '2.0',
+      type: 'export',
+      workspaceId: workspace,
+      output,
+      fromPackage: true,
+      profile: 'delivery',
+    });
+    expect(result.ok).toBe(false);
+    expect(await readFile(output, 'utf8')).toBe('preserve-output');
   });
 });

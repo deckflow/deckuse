@@ -1,0 +1,153 @@
+[
+  {
+    "name": "column-colors-legend",
+    "chartType": "column",
+    "title": "Revenue and cost",
+    "fontSize": 16,
+    "legend": "b",
+    "showDataLabels": true,
+    "categories": ["Q1", "Q2"],
+    "series": [
+      {
+        "name": "Revenue",
+        "values": [42, 72],
+        "color": "2563EB"
+      },
+      {
+        "name": "Cost",
+        "values": [20, 30],
+        "color": "EA580C"
+      }
+    ]
+  },
+  {
+    "name": "bar-axis-labels",
+    "chartType": "bar",
+    "title": "Long category labels",
+    "fontSize": 14,
+    "legend": "r",
+    "showDataLabels": true,
+    "categories": ["Enterprise customers", "Small business customers"],
+    "series": [
+      {
+        "name": "Users",
+        "values": [100, 250],
+        "color": "16A34A"
+      }
+    ]
+  },
+  {
+    "name": "line-colors",
+    "chartType": "line",
+    "title": "Quarterly trend",
+    "fontSize": 18,
+    "legend": "t",
+    "categories": ["Q1", "Q2", "Q3"],
+    "series": [
+      {
+        "name": "Bookings",
+        "values": [40, 60, 55],
+        "color": "9333EA"
+      }
+    ]
+  },
+  {
+    "name": "pie-labels",
+    "chartType": "pie",
+    "title": "Portfolio",
+    "fontSize": 16,
+    "legend": "r",
+    "showDataLabels": true,
+    "categories": ["A", "B", "C"],
+    "series": [
+      {
+        "name": "Share",
+        "values": [30, 40, 30]
+      }
+    ]
+  },
+  {
+    "name": "combo",
+    "chartType": "combo",
+    "title": "Revenue and margin",
+    "fontSize": 16,
+    "legend": "b",
+    "showDataLabels": true,
+    "categories": ["Q1", "Q2"],
+    "series": [
+      {
+        "name": "Revenue",
+        "values": [42, 72],
+        "chart": "column",
+        "color": "2563EB"
+      },
+      {
+        "name": "Margin",
+        "values": [0.15, 0.2],
+        "chart": "line",
+        "axis": "secondary",
+        "color": "DC2626"
+      }
+    ]
+  },
+  {
+    "name": "dual-axis",
+    "chartType": "combo",
+    "title": "Volume and conversion rate",
+    "fontSize": 14,
+    "legend": "t",
+    "categories": ["2025", "2026"],
+    "series": [
+      {
+        "name": "Volume",
+        "values": [1000, 1200],
+        "chart": "column",
+        "color": "0D9488"
+      },
+      {
+        "name": "Conversion",
+        "values": [0.03, 0.04],
+        "chart": "line",
+        "axis": "secondary",
+        "color": "D97706"
+      }
+    ]
+  },
+  {
+    "name": "long-title",
+    "chartType": "column",
+    "title": "Long chart title: year-on-year commercial performance across all business segments",
+    "fontSize": 20,
+    "legend": false,
+    "showDataLabels": true,
+    "categories": ["2025", "2026"],
+    "series": [
+      {
+        "name": "Revenue",
+        "values": [69, 72],
+        "color": "4F46E5"
+      }
+    ]
+  },
+  {
+    "name": "chinese-fonts",
+    "chartType": "column",
+    "title": "中文字体与图表标签：营业收入",
+    "fontSize": 18,
+    "legend": "b",
+    "showDataLabels": true,
+    "categories": ["第一季度", "第二季度"],
+    "series": [
+      {
+        "name": "营收",
+        "values": [6900, 7200],
+        "color": "2563EB"
+      },
+      {
+        "name": "利润",
+        "values": [800, 960],
+        "color": "EA580C"
+      }
+    ]
+  }
+]

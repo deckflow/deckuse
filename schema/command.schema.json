@@ -534,6 +534,13 @@
           "type": "string",
           "const": "export"
         },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "structure",
+            "delivery"
+          ]
+        },
         "workspaceId": {
           "type": "string",
           "minLength": 1
@@ -692,6 +699,13 @@
         "type": {
           "type": "string",
           "const": "validate"
+        },
+        "profile": {
+          "type": "string",
+          "enum": [
+            "structure",
+            "delivery"
+          ]
         },
         "workspaceId": {
           "type": "string",
@@ -1136,6 +1150,13 @@
         "type": {
           "type": "string",
           "const": "replaceText"
+        },
+        "formatPolicy": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "firstRun"
+          ]
         },
         "find": {
           "type": "string",

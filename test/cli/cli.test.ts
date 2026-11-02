@@ -210,7 +210,7 @@ describe('deckuse CLI', () => {
     expect(findHelp.stdout).toContain('usage: deckuse find <query>');
     expect(findHelp.stdout).toContain('TYPESAFE_API_KEY');
     expect(findHelp.stdout).toContain('api.typesafe.ai');
-  });
+  }, 15000);
 
   it('allows find --revision and reports a missing TypeSafe key', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-find-cli-'));

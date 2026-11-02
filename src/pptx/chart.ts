@@ -84,8 +84,8 @@ const numLitPoints = (values: number[], formatCode = 'General') =>
     .map((v, i) => `<c:pt idx="${String(i)}"><c:v>${String(v)}</c:v></c:pt>`)
     .join('')}`;
 
-const seriesSpPrXml = (color: string) =>
-  `<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr>`;
+const seriesSpPrXml = (color: string, line = false) =>
+  `<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln${line ? ' w="25400"' : ''}>${line ? `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>` : '<a:noFill/>'}</a:ln></c:spPr>`;
 
 const dLblsXml = (show: boolean) =>
   `<c:dLbls><c:showLegendKey val="0"/><c:showVal val="${show ? '1' : '0'}"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
@@ -93,7 +93,13 @@ const dLblsXml = (show: boolean) =>
 const seriesXml = (
   series: ChartSeriesInput[],
   categories: string[],
-  options: { formatCode?: string; axIdVal?: string; startIndex?: number } = {},
+  options: {
+    formatCode?: string;
+    axIdVal?: string;
+    startIndex?: number;
+    line?: boolean;
+    pie?: boolean;
+  } = {},
 ) =>
   series
     .map((ser, localIndex) => {
@@ -107,7 +113,7 @@ const seriesXml = (
       const color = ser.color
         ? normalizeHexColor(ser.color)
         : DEFAULT_SERIES_COLORS[index % DEFAULT_SERIES_COLORS.length]!;
-      return `<c:ser><c:idx val="${String(index)}"/><c:order val="${String(index)}"/>${tx}${seriesSpPrXml(color)}${cats}${vals}</c:ser>`;
+      return `<c:ser><c:idx val="${String(index)}"/><c:order val="${String(index)}"/>${tx}${options.pie && !ser.color ? '' : seriesSpPrXml(color, options.line === true || ser.chart === 'line')}${cats}${vals}</c:ser>`;
     })
     .join('');
 
@@ -144,24 +150,28 @@ const plotXml = (
     const leftoverBarSec = take(secondaryBar);
     const barChart =
       primaryBar.length || barSeries.length
-        ? `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${barPrimary}${leftoverBarSec}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`
+        ? `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/><c:varyColors val="0"/>${barPrimary}${leftoverBarSec}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`
         : '';
     const lineAxId = useSecondary ? '3' : '2';
     const lineChart =
       lineSeries.length > 0
-        ? `<c:lineChart><c:grouping val="standard"/>${useSecondary ? lineOnSecondary : leftoverLine}<c:marker val="1"/>${dLblsXml(showDataLabels)}<c:axId val="1"/><c:axId val="${lineAxId}"/></c:lineChart>`
+        ? `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${useSecondary ? lineOnSecondary : leftoverLine}${dLblsXml(showDataLabels)}<c:marker val="1"/><c:axId val="1"/><c:axId val="${lineAxId}"/></c:lineChart>`
         : '';
     return `${barChart}${lineChart}`;
   }
-  const ser = seriesXml(series, categories, formatCode !== undefined ? { formatCode } : {});
+  const ser = seriesXml(series, categories, {
+    ...(formatCode !== undefined ? { formatCode } : {}),
+    line: chartType === 'line',
+    pie: chartType === 'pie',
+  });
   if (chartType === 'pie') {
     return `<c:pieChart><c:varyColors val="1"/>${ser}${dLblsXml(showDataLabels)}</c:pieChart>`;
   }
   if (chartType === 'line') {
-    return `<c:lineChart><c:grouping val="standard"/>${ser}<c:marker val="1"/>${dLblsXml(showDataLabels)}<c:axId val="1"/><c:axId val="2"/></c:lineChart>`;
+    return `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${ser}${dLblsXml(showDataLabels)}<c:marker val="1"/><c:axId val="1"/><c:axId val="2"/></c:lineChart>`;
   }
   const barDir = chartType === 'bar' ? 'bar' : 'col';
-  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/>${ser}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
+  return `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/><c:varyColors val="0"/>${ser}${dLblsXml(showDataLabels)}<c:gapWidth val="100"/><c:overlap val="0"/><c:axId val="1"/><c:axId val="2"/></c:barChart>`;
 };
 
 const axesXml = (
@@ -485,6 +495,17 @@ const setSeriesColor = (ser: Element, colorInput: string): void => {
   solid.appendChild(srgb);
   if (spPr.firstChild) spPr.insertBefore(solid, spPr.firstChild);
   else spPr.appendChild(solid);
+  if (ser.parentNode && (ser.parentNode as Element).localName === 'lineChart') {
+    let ln = directChild(spPr, 'ln');
+    if (!ln) {
+      ln = doc.createElementNS(NS.a, 'a:ln');
+      spPr.appendChild(ln);
+    }
+    for (const child of [...children(ln)])
+      if (['noFill', 'solidFill', 'gradFill', 'pattFill'].includes(child.localName ?? ''))
+        ln.removeChild(child);
+    ln.appendChild(solid.cloneNode(true));
+  }
   if (!directChild(spPr, 'ln')) {
     const ln = doc.createElementNS(NS.a, 'a:ln');
     ln.appendChild(doc.createElementNS(NS.a, 'a:noFill'));

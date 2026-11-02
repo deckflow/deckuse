@@ -1,3 +1,7 @@
+import type { Diagnostic } from './core/index.js';
+import { OpcArchive } from './opc/index.js';
+import { auditVisuals, type ReviewItem } from './pptx/visual-audit.js';
+import { verifyChartData } from './pptx/chart-data.js';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
@@ -39,6 +43,12 @@ interface MonitorMeta {
   readonly slideCount: number;
   readonly summary: string;
   readonly record: OperationRecord | null;
+  readonly revision?: string;
+  readonly renderedRevision?: string;
+  readonly backend?: string;
+  readonly previewStatus?: 'pending' | 'ready' | 'error';
+  readonly diagnostics?: Diagnostic[];
+  readonly reviewItems?: ReviewItem[];
 }
 
 interface MonitorState extends MonitorMeta {
@@ -50,6 +60,8 @@ interface PreviewMeta {
   readonly fingerprint: string;
   readonly convertedAt: string;
   readonly indexHtml: string;
+  readonly diagnostics?: Diagnostic[];
+  readonly reviewItems?: ReviewItem[];
 }
 
 interface PreviewEnsureResult {
@@ -59,6 +71,9 @@ interface PreviewEnsureResult {
   readonly fingerprint?: string;
   readonly cached?: boolean;
   readonly message?: string;
+  readonly backend?: string;
+  readonly diagnostics?: Diagnostic[];
+  readonly reviewItems?: ReviewItem[];
 }
 
 export interface MonitorWatcher {
@@ -222,6 +237,7 @@ html,body{height:100%;margin:0;background:#171717;color:#e8e8e8;font:14px system
 </style></head><body>
 <div id="app">
   <div id="preview"><iframe title="Presentation preview"></iframe><div id="status">Waiting for preview…</div></div>
+  <div id="quality" role="status" aria-live="polite" style="padding:8px 14px;white-space:pre-wrap">HTML preview · native Office visual verification pending</div>
   <div id="dock">
     <div id="change"><span class="chevron">▸</span><div id="summary"><span class="muted">Waiting for workspace…</span></div><a id="full-preview" href="/preview" target="_blank" rel="noopener">完整预览</a></div>
     <div id="details"><pre></pre></div>
@@ -236,8 +252,15 @@ const summary=document.querySelector('#summary');
 const details=document.querySelector('#details');
 const detailsPre=document.querySelector('#details pre');
 const slides=document.querySelector('#slides');
+const quality=document.querySelector('#quality');
 let open=false;
 const applyMeta=(data)=>{
+  const issues=Array.isArray(data.diagnostics)?data.diagnostics:[];
+  const reviews=Array.isArray(data.reviewItems)?data.reviewItems:[];
+  quality.textContent=(data.backend||'HTML preview')+' · revision '+(data.revision||'?')+' · '+(data.previewStatus||'pending')+' · native Office visual verification pending'+
+    '\\n'+issues.map(d=>'['+d.severity+'] '+d.code+': '+d.message).join('\\n')+
+    (reviews.length?'\\nNeeds review: '+reviews.map(r=>r.target+': '+r.reason).join('; '):'');
+  if(data.previewStatus==='pending'){status.hidden=false;status.textContent='Updating preview; displayed image may be stale (rendered revision '+(data.renderedRevision||'none')+')';}
   const page=Math.max(1,Number(data.page)||1);
   const count=Math.max(page,Number(data.slideCount)||1);
   const affected=new Set(Array.isArray(data.record?.slides)?data.record.slides:[]);
@@ -265,7 +288,7 @@ events.addEventListener('render',event=>{
   applyMeta(data);
   status.hidden=true;
 });
-events.addEventListener('error-message',event=>{status.hidden=false;status.textContent=JSON.parse(event.data).message});
+events.addEventListener('error-message',event=>{status.hidden=false;status.textContent='Preview failed — displayed image is stale. '+JSON.parse(event.data).message;quality.dataset.state='error'});
 events.onerror=()=>{status.hidden=false;status.textContent='Preview connection lost; reconnecting…'};
 </script></body></html>`;
 
@@ -288,6 +311,7 @@ html,body{height:100%;margin:0;background:#111;color:#e8e8e8;font:14px system-ui
 #status[hidden]{display:none!important}
 </style></head><body>
 <div id="app">
+  <div id="full-quality" role="status" style="padding:8px 14px;white-space:pre-wrap">HTML preview · native Office visual verification pending · review charts, fonts and images before delivery</div>
   <div id="bar"><span class="title">完整预览</span><span class="meta" id="meta"></span><span class="badge" id="badge"></span></div>
   <div id="frame-wrap"><iframe title="Full presentation preview" hidden></iframe><div id="status">正在准备全量预览…</div></div>
 </div>
@@ -315,11 +339,14 @@ const showError=(message)=>{
   status.hidden=false;
   status.classList.remove('overlay');
   status.classList.add('error');
-  status.textContent=message;
+  status.textContent=message+(frame.hidden?'':' — displayed preview is stale');
   badge.textContent='';
   showBar();
 };
 const applyReady=(data)=>{
+  document.querySelector('#full-quality').textContent=(data.backend||'HTML preview')+' · native Office visual verification pending'+
+    (data.diagnostics||[]).map(d=>' ['+d.severity+'] '+d.code+': '+d.message).join('')+
+    ((data.reviewItems||[]).length?' · Needs review: '+data.reviewItems.map(r=>r.target+': '+r.reason).join('; '):'');
   const fingerprint=data.fingerprint||'';
   meta.textContent=data.revision?('revision '+data.revision):'';
   badge.textContent=data.cached?'已缓存':'已更新';
@@ -496,6 +523,8 @@ export const startMonitor = async (
   let lastStateSignature: string | undefined;
   let latestMeta: MonitorMeta | undefined;
   let latestRenderUrl: string | undefined;
+  let latestRenderMeta: MonitorMeta | undefined;
+  let latestMonitorError: string | undefined;
   let version = 0;
   let generation = 0;
 
@@ -508,7 +537,6 @@ export const startMonitor = async (
   let fullPreviewJobIdentity: { revision: string; fingerprint: string } | undefined;
   let fullPreviewQueued: { revision: string; fingerprint: string } | undefined;
   let fullPreviewError: string | undefined;
-  let latestFullPreview: PreviewEnsureResult | undefined;
 
   const broadcast = (event: string, value: unknown): void => {
     for (const client of clients) sendEvent(client, event, value);
@@ -519,11 +547,39 @@ export const startMonitor = async (
   };
 
   const publishMeta = async (state: MonitorState): Promise<MonitorMeta> => {
+    let diagnostics: Diagnostic[] = [];
+    let reviewItems: ReviewItem[] = [];
+    try {
+      const archive = await OpcArchive.openFile(packagePath);
+      const audit = auditVisuals(archive, state.page);
+      diagnostics = audit.diagnostics;
+      reviewItems = audit.reviewItems;
+      for (const check of await verifyChartData(archive))
+        if (check.status === 'inconsistent' || check.status === 'unverified')
+          diagnostics.push({
+            severity: 'warning',
+            code: 'CHART_DATA_' + check.status.toUpperCase(),
+            message: check.reason ?? `Chart data is ${check.status}`,
+            details: { ...check },
+          });
+    } catch (cause) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'QA_UNAVAILABLE',
+        message: cause instanceof Error ? cause.message : 'Package audit unavailable',
+      });
+    }
     const meta: MonitorMeta = {
       page: state.page,
       slideCount: state.slideCount,
       summary: summarizeRecord(state.record ?? undefined, state.page),
       record: state.record,
+      revision: state.record?.revision ?? '1',
+      ...(latestRenderMeta?.revision ? { renderedRevision: latestRenderMeta.revision } : {}),
+      backend: 'deck2html (HTML)',
+      previewStatus: 'pending',
+      diagnostics,
+      reviewItems,
     };
     latestMeta = meta;
     broadcast('state', meta);
@@ -562,15 +618,38 @@ export const startMonitor = async (
       )
         throw new Error('deck2html returned an output outside its version directory');
       if (!queued && mainActive && generation === runGeneration) {
-        const meta = await publishMeta(state);
+        const pending = await publishMeta(state);
+        const meta: MonitorMeta = {
+          ...pending,
+          previewStatus: 'ready',
+          renderedRevision: pending.revision ?? '1',
+        };
+        latestMeta = meta;
+        latestRenderMeta = meta;
+        latestMonitorError = undefined;
         latestRenderUrl = `/render/${encodeURIComponent(versionName)}${entryRelative ? `/${entryRelative.split(sep).map(encodeURIComponent).join('/')}` : ''}`;
         broadcast('render', { url: latestRenderUrl, ...meta });
       }
     } catch (error) {
-      if (!queued && mainActive && generation === runGeneration)
+      if (!queued && mainActive && generation === runGeneration) {
+        latestMonitorError = error instanceof Error ? error.message : 'Preview conversion failed';
+        if (latestMeta) {
+          latestMeta = {
+            ...latestMeta,
+            previewStatus: 'error',
+            diagnostics: [
+              ...(latestMeta.diagnostics ?? []),
+              { severity: 'error', code: 'PREVIEW_CONVERSION_FAILED', message: latestMonitorError },
+            ],
+          };
+          broadcast('state', latestMeta);
+        }
         broadcast('error-message', {
-          message: error instanceof Error ? error.message : 'Preview conversion failed',
+          message: latestMonitorError,
+          stale: Boolean(latestRenderUrl),
+          renderedRevision: latestRenderMeta?.revision,
         });
+      }
     } finally {
       converting = false;
       const next = takeQueued();
@@ -664,17 +743,21 @@ export const startMonitor = async (
     revision: meta.revision,
     fingerprint: meta.fingerprint,
     cached,
+    backend: 'deck2html (HTML)',
+    diagnostics: meta.diagnostics ?? [],
+    reviewItems: meta.reviewItems ?? [],
   });
 
   const cachedPreviewResult = async (
     fingerprint: string,
+    revision: string,
   ): Promise<PreviewEnsureResult | undefined> => {
     const existing = await readPreviewMeta(fullPreviewRoot);
     if (!existing || existing.fingerprint !== fingerprint) return undefined;
     const entry = resolve(fullPreviewRoot, existing.indexHtml);
     try {
       const info = await stat(entry);
-      if (info.isFile()) return readyPreviewResult(existing, true);
+      if (info.isFile()) return readyPreviewResult({ ...existing, revision }, true);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -682,7 +765,6 @@ export const startMonitor = async (
   };
 
   const publishFullPreviewReady = (result: PreviewEnsureResult): void => {
-    latestFullPreview = result;
     broadcastPreview('ready', result);
   };
 
@@ -706,8 +788,7 @@ export const startMonitor = async (
         const result = await converter(packagePath, {
           output: staging,
         });
-        if (result.exitCode !== 0)
-          throw new Error(result.stderr || 'deck2html conversion failed');
+        if (result.exitCode !== 0) throw new Error(result.stderr || 'deck2html conversion failed');
         const entry = resolve(result.indexHtmlPath);
         const entryRelative = relative(staging, entry);
         if (
@@ -716,11 +797,28 @@ export const startMonitor = async (
           resolve(staging, entryRelative) !== entry
         )
           throw new Error('deck2html returned an output outside the preview directory');
+        let quality: { diagnostics: Diagnostic[]; reviewItems: ReviewItem[] };
+        try {
+          quality = auditVisuals(await OpcArchive.openFile(packagePath));
+        } catch (cause) {
+          quality = {
+            diagnostics: [
+              {
+                severity: 'warning',
+                code: 'QA_UNAVAILABLE',
+                message: cause instanceof Error ? cause.message : 'Package audit unavailable',
+              },
+            ],
+            reviewItems: [],
+          };
+        }
         const meta: PreviewMeta = {
           revision: identity.revision,
           fingerprint: identity.fingerprint,
           convertedAt: new Date().toISOString(),
           indexHtml: entryRelative || 'index.html',
+          diagnostics: quality.diagnostics,
+          reviewItems: quality.reviewItems,
         };
         await writeFile(previewMetaPath(staging), `${JSON.stringify(meta, null, 2)}\n`);
         await rm(fullPreviewRoot, { recursive: true, force: true });
@@ -758,7 +856,7 @@ export const startMonitor = async (
     if (identity.fingerprint === 'missing') {
       return { status: 'error', message: 'package.pptx is missing' };
     }
-    const cached = await cachedPreviewResult(identity.fingerprint);
+    const cached = await cachedPreviewResult(identity.fingerprint, identity.revision);
     if (cached) return cached;
     if (fullPreviewError && !fullPreviewJob) {
       const message = fullPreviewError;
@@ -869,7 +967,6 @@ export const startMonitor = async (
     }
     if (requestUrl.pathname === '/preview/ensure') {
       void ensureFullPreview().then((result) => {
-        if (result.status === 'ready') latestFullPreview = result;
         const status = result.status === 'ready' ? 200 : result.status === 'converting' ? 202 : 500;
         response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
         response.end(`${JSON.stringify(result)}\n`);
@@ -905,9 +1002,15 @@ export const startMonitor = async (
       clients.add(response);
       startMainWatching();
       if (latestMeta) sendEvent(response, 'state', latestMeta);
-      if (latestRenderUrl && latestMeta)
-        sendEvent(response, 'render', { url: latestRenderUrl, ...latestMeta });
+      if (latestRenderUrl && latestRenderMeta)
+        sendEvent(response, 'render', { url: latestRenderUrl, ...latestRenderMeta });
       else if (latestRenderUrl) sendEvent(response, 'render', { url: latestRenderUrl });
+      if (latestMeta) sendEvent(response, 'state', latestMeta);
+      if (latestMonitorError)
+        sendEvent(response, 'error-message', {
+          message: latestMonitorError,
+          stale: Boolean(latestRenderUrl),
+        });
       request.on('close', () => {
         clients.delete(response);
         if (clients.size === 0) stopMainWatching();
@@ -921,7 +1024,7 @@ export const startMonitor = async (
     response.writeHead(404).end();
   });
 
-  const host = options.host ?? '0.0.0.0';
+  const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 4173;
   await new Promise<void>((done, reject) => {
     server.once('error', (error: NodeJS.ErrnoException) => {

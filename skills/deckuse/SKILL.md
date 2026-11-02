@@ -286,7 +286,7 @@ deckuse export ./output.docx --workspace ./workspace --json
 
 ### `replaceText`
 
-Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatting). `replaceText` concatenates visible `w:t` text **inside one paragraph**, then splices only the matched span and keeps neighboring `rPr`. It fails instead of rewriting tracked changes, fields, comments, content controls, or equations.
+Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatting). `replaceText` plans matches from the original text **inside one paragraph**, preserving unchanged run text and refusing ambiguous formatting by default. It fails instead of rewriting tracked changes, fields, comments, content controls, or equations.
 
 ### Create
 
@@ -311,6 +311,25 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
 ]
 ```
 
-`deckuse render --page` does not paginate DOCX. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
+`deckuse render --page` with the default HTML engine does not paginate DOCX; use the optional LibreOffice engine. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
 
 Schema: `deckuse schema --type addParagraph --json`.
+
+## Scenario routing and verification
+
+Check `schema` for `formatPolicy` and `profile` before using the safety options below; older releases may not support them. Use the older-version guards in the scenario references when those fields are absent.
+
+Read only the reference matching the task:
+
+- [create-deck](references/create-deck.md), [edit-deck](references/edit-deck.md), [audit-deck](references/audit-deck.md), [replicate](references/replicate.md).
+- [create-doc](references/create-doc.md), [edit-doc](references/edit-doc.md), [audit-doc](references/audit-doc.md).
+
+For existing files, record the original SHA-256 and object inventory, produce a no-edit export baseline, scope the edits, dry-run, apply, compare package parts against that baseline, validate, and perform available layout/native verification. Byte differences alone are not proof of corruption; comparisons must preserve text whitespace, order, and relationships.
+
+`replaceText.formatPolicy` defaults to `safe` for DOCX. Common unchanged prefixes/suffixes retain their runs. Ambiguous formatting is refused. `firstRun` explicitly accepts formatting inheritance and emits a warning; it never authorizes protected content edits. Replacement text is literal, including when regex is used.
+
+`validate --profile delivery` and `export --profile delivery` refuse unverified referenced chart data. Supported fixed-length A1 constant ranges in embedded XLSX workbooks are synchronized atomically, with shared chart/workbook isolation. Formula dependencies, external links, resizing, pivot data and unrecognized extensions are refused. Do not bypass this by modifying chart caches directly. Ordinary structure export remains available for diagnosis.
+
+`render --engine libreoffice --page N` requires LibreOffice and Poppler (`pdfinfo`, `pdftoppm`). Set `DECKUSE_SOFFICE_PATH` if needed. It renders the package snapshot, reports its SHA-256 and engine version, and leaves font/native verification unknown. Compare against a baseline rendered with the same engine and font environment. Missing software is unverified, never a visual pass.
+
+Use separate delivery states: structure verified, external layout reviewed, native open tested, native visual reviewed. Only record a state when its check was performed. HTML render/monitor is a process preview. Local monitor defaults to 127.0.0.1; expose it only with an explicit --host.

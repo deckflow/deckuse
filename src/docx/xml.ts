@@ -77,6 +77,13 @@ export const ensureW14 = (doc: Document): void => {
 };
 
 export const protectionReason = (node: Element): string | undefined => {
+  if (inProtectedRange(node)) return 'Cannot rewrite content inside a field or comment range';
+  let ancestor = node.parentNode;
+  while (ancestor?.nodeType === 1) {
+    if (PROTECTED.has((ancestor as Element).localName ?? ''))
+      return 'Cannot rewrite protected ancestor markup';
+    ancestor = ancestor.parentNode;
+  }
   const hit = PROTECTED.has(node.localName ?? '')
     ? node
     : descendants(node).find((item) => PROTECTED.has(item.localName ?? ''));
@@ -88,4 +95,46 @@ export const writeTextNode = (node: Element, value: string): void => {
   node.textContent = value;
   if (/^\s|\s$/.test(value) || value.includes('  ')) node.setAttribute('xml:space', 'preserve');
   else if (node.hasAttribute('xml:space')) node.removeAttribute('xml:space');
+};
+
+/** Conservatively protect whole paragraphs touched by document-spanning ranges. */
+const inProtectedRange = (target: Element): boolean => {
+  const doc = target.ownerDocument;
+  if (!doc) return false;
+  const state = { fields: 0, protectedTarget: false, uncertain: false };
+  const comments = new Set<string>();
+  const within = new Set([target, ...descendants(target)]);
+  const ancestors = new Set<Element>();
+  let parent = target.parentNode;
+  while (parent?.nodeType === 1) {
+    ancestors.add(parent as Element);
+    parent = parent.parentNode;
+  }
+  const visit = (node: Element): void => {
+    const intersects = within.has(node) || ancestors.has(node);
+    if (intersects && (state.fields > 0 || comments.size > 0)) state.protectedTarget = true;
+    if (node.localName === 'fldChar') {
+      const type = node.getAttributeNS(NS.w, 'fldCharType');
+      if (type === 'begin') state.fields++;
+      else if (type === 'end') {
+        if (!state.fields) state.uncertain = true;
+        state.fields = Math.max(0, state.fields - 1);
+      } else if (type !== 'separate' || !state.fields) state.uncertain = true;
+    }
+    if (node.localName === 'commentRangeStart' || node.localName === 'commentRangeEnd') {
+      const id = node.getAttributeNS(NS.w, 'id');
+      if (!id) state.uncertain = true;
+      else if (node.localName === 'commentRangeStart') {
+        if (comments.has(id)) state.uncertain = true;
+        comments.add(id);
+      } else {
+        if (!comments.has(id)) state.uncertain = true;
+        comments.delete(id);
+      }
+    }
+    if (intersects && (state.fields > 0 || comments.size > 0)) state.protectedTarget = true;
+    for (const child of children(node)) visit(child);
+  };
+  if (doc.documentElement) visit(doc.documentElement);
+  return state.protectedTarget || state.uncertain || state.fields > 0 || comments.size > 0;
 };

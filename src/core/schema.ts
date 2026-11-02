@@ -309,6 +309,7 @@ const replaceTextCommandSchema = z
     ...commandBase,
     ...mutationBase,
     type: z.literal('replaceText'),
+    formatPolicy: z.enum(['safe', 'firstRun']).optional(),
     find: z.string().min(1),
     replace: z.string(),
     regex: z.boolean().optional(),
@@ -774,6 +775,7 @@ const exportCommandSchema = z
   .object({
     ...commandBase,
     type: z.literal('export'),
+    profile: z.enum(['structure', 'delivery']).optional(),
     workspaceId: z.string().min(1),
     output: z.string().min(1),
     revision: z.union([z.string().min(1), z.number().int().positive()]).optional(),
@@ -814,6 +816,7 @@ const validateCommandSchema = z
   .object({
     ...commandBase,
     type: z.literal('validate'),
+    profile: z.enum(['structure', 'delivery']).optional(),
     workspaceId: z.string().min(1),
     level: z.enum(['fast', 'full']).default('full'),
     package: z.boolean().optional(),

@@ -1,4 +1,5 @@
-import { copyFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { copyFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   err,
@@ -226,6 +227,10 @@ export const docxAdapter: FormatAdapter = {
         source: saved.source,
         revision: saved.revision,
         elementCount: index.elements.length,
+        availableStyles: index.elements
+          .filter((item) => item.kind === 'style')
+          .map((item) => item.ref.path?.replace(/^style:/, ''))
+          .filter((id): id is string => typeof id === 'string'),
       });
     } catch (cause) {
       return err('IO_ERROR', cause instanceof Error ? cause.message : 'DOCX init failed');
@@ -288,7 +293,7 @@ export const docxAdapter: FormatAdapter = {
           elementCount: index.elements.length,
           capabilities: docxCapabilities,
           branch: 'main',
-          valid: diagnostics.length === 0,
+          valid: !diagnostics.some((d) => d.severity === 'error'),
           diagnostics,
         });
       }
@@ -401,7 +406,7 @@ export const docxAdapter: FormatAdapter = {
 
       if (command.type === 'validate') {
         const diagnostics = validateArchive(archive);
-        return diagnostics.length
+        return diagnostics.some((d) => d.severity === 'error')
           ? err('VALIDATION_FAILED', 'DOCX validation failed', diagnostics)
           : ok({ valid: true, revision: index.revision, capabilities: docxCapabilities });
       }
@@ -424,17 +429,44 @@ export const docxAdapter: FormatAdapter = {
           exportRevision = packed.manifest.revision;
           repacked = true;
         }
-        await copyFile(packagePath(workspace), output);
-        const exported = await openWorkspaceArchive(workspace);
-        const diagnostics = validateArchive(exported);
-        return ok({
-          output,
-          revision: exportRevision,
-          repacked,
-          fromPackage,
-          valid: diagnostics.length === 0,
-          diagnostics,
-        });
+        const temporary = `${output}.${randomUUID()}.tmp`;
+        try {
+          await copyFile(packagePath(workspace), temporary);
+          let exported: OpcArchive;
+          try {
+            exported = await OpcArchive.openFile(temporary);
+          } catch (cause) {
+            await rm(temporary, { force: true });
+            throw cause;
+          }
+          const diagnostics = validateArchive(exported);
+          if (command.profile === 'delivery') {
+            if (diagnostics.some((d) => d.severity === 'error')) {
+              await rm(temporary, { force: true });
+              return err(
+                'VALIDATION_FAILED',
+                'Delivery validation failed; output was not replaced',
+                diagnostics,
+              );
+            }
+          }
+          try {
+            await rename(temporary, output);
+          } finally {
+            await rm(temporary, { force: true });
+          }
+
+          return ok({
+            output,
+            revision: exportRevision,
+            repacked,
+            fromPackage,
+            valid: !diagnostics.some((d) => d.severity === 'error'),
+            diagnostics,
+          });
+        } finally {
+          await rm(temporary, { force: true });
+        }
       }
 
       if (command.type === 'repair') {
@@ -501,7 +533,7 @@ export const docxAdapter: FormatAdapter = {
             }
           }
           const validation = validateArchive(working);
-          if (validation.length)
+          if (validation.some((d) => d.severity === 'error'))
             return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
           if (dryRun) {
             return ok(
@@ -543,7 +575,7 @@ export const docxAdapter: FormatAdapter = {
         const result = mutate(command, working, currentIndex);
         if (!result.ok) return result;
         const validation = validateArchive(working);
-        if (validation.length)
+        if (validation.some((d) => d.severity === 'error'))
           return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
         if (command.dryRun) {
           return ok(

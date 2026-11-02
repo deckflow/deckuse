@@ -22,7 +22,10 @@
   "files": [
     "dist",
     "assets",
-    "schema"
+    "schema",
+    "skills",
+    "docs/1.6-safety-migration.md",
+    "docs/verification-1.6-safety.md"
   ],
   "bin": {
     "deckuse": "./dist/bin.js"

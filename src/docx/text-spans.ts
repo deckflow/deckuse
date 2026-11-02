@@ -1,4 +1,4 @@
-import type { Element } from '@xmldom/xmldom';
+import { XMLSerializer, type Element } from '@xmldom/xmldom';
 import { children, writeTextNode } from './xml.js';
 
 const PROTECTED = new Set([
@@ -60,7 +60,11 @@ const walk = (container: Element, acc: ParagraphText, inheritedProtected: boolea
     const protectedHere = inheritedProtected || PROTECTED.has(name);
     if (name === 'r') {
       for (const inner of children(child)) {
-        if (inner.localName !== 't') continue;
+        if (inner.localName === 'rPr') continue;
+        if (inner.localName !== 't') {
+          acc.text += '\u0000';
+          continue;
+        }
         const value = inner.textContent ?? '';
         const start = acc.text.length;
         acc.text += value;
@@ -75,7 +79,12 @@ const walk = (container: Element, acc: ParagraphText, inheritedProtected: boolea
       continue;
     }
     if (SKIP.has(name)) continue;
-    if (children(child).length > 0) walk(child, acc, protectedHere);
+    if (name === 'hyperlink') {
+      acc.text += '\u0000';
+      walk(child, acc, protectedHere);
+      acc.text += '\u0000';
+    } else if (children(child).length > 0 && PROTECTED.has(name)) walk(child, acc, true);
+    else acc.text += '\u0000';
   }
 };
 
@@ -110,47 +119,98 @@ const applyRange = (spans: TextSpan[], start: number, end: number, replacement: 
   writeTextNode(last.node, suffix);
 };
 
+export interface ReplacementChange {
+  start: number;
+  end: number;
+  replacement: string;
+  policy: 'safe' | 'firstRun';
+  formats: string[];
+  runs: number[];
+}
+
+const formatOf = (span: TextSpan): string => {
+  const properties = children(span.run).find((n) => n.localName === 'rPr');
+  return properties ? new XMLSerializer().serializeToString(properties) : '';
+};
+
 export const replaceInParagraph = (
   paragraph: Element,
   find: string,
   replacement: string,
   regex: boolean,
   maxMatches?: number,
-): { matched: number } | { error: string } => {
-  let pattern: RegExp | undefined;
-  if (regex) {
-    try {
-      pattern = new RegExp(find, 'g');
-    } catch (cause) {
-      return { error: cause instanceof Error ? cause.message : 'Invalid regular expression' };
-    }
+  policy: 'safe' | 'firstRun' = 'safe',
+):
+  | { matched: number; changes: ReplacementChange[] }
+  | { error: string; invalid?: boolean; details?: Record<string, unknown> } => {
+  const { text, spans } = collectSpans(paragraph);
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(regex ? find : find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gu');
+  } catch (cause) {
+    return { error: String(cause), invalid: true };
   }
+  const changes: ReplacementChange[] = [];
   let matched = 0;
-  for (let guard = 0; guard < 10_000; guard += 1) {
-    const { text, spans } = collectSpans(paragraph);
-    let start = -1;
-    let end = -1;
-    if (pattern) {
-      pattern.lastIndex = 0;
-      const found = pattern.exec(text);
-      if (!found || found[0].length === 0) break;
-      start = found.index;
-      end = start + found[0].length;
-    } else {
-      start = text.indexOf(find);
-      if (start < 0) break;
-      end = start + find.length;
-    }
-    const overlapping = spans.filter((span) => span.end > start && span.start < end);
-    if (overlapping.length === 0) break;
-    if (overlapping.some((span) => span.protected)) {
-      return {
-        error: 'Match overlaps tracked changes, fields, comments, content controls, or equations',
-      };
-    }
-    applyRange(overlapping, start, end, replacement);
-    matched += 1;
+  for (const match of text.matchAll(pattern)) {
     if (maxMatches !== undefined && matched >= maxMatches) break;
+    if (!match[0].length)
+      return { error: 'Zero-length regex matches are not supported', invalid: true };
+    let start = match.index;
+    let end = start + match[0].length;
+    if (match[0].includes('\u0000')) return { error: 'Match crosses an inline object boundary' };
+    const original = spans.filter((s) => s.end > start && s.start < end);
+    if (original.some((s) => s.protected)) return { error: 'Match overlaps protected markup' };
+    let value = replacement;
+    if (policy === 'safe') {
+      const old = Array.from(match[0]);
+      const next = Array.from(value);
+      while (old.length && next.length && old[0] === next[0]) {
+        start += (old.shift() ?? '').length;
+        next.shift();
+      }
+      while (old.length && next.length && old.at(-1) === next.at(-1)) {
+        end -= (old.pop() ?? '').length;
+        next.pop();
+      }
+      value = next.join('');
+    }
+    matched++;
+    if (start === end && !value) continue;
+    const affected = spans.filter((s) =>
+      start === end
+        ? s.start <= start && s.end >= end && s.end > s.start
+        : s.end > start && s.start < end,
+    );
+    const formats = [...new Set(affected.map(formatOf))];
+    const paragraphRuns = Array.from(
+      paragraph.getElementsByTagNameNS(
+        'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+        'r',
+      ),
+    );
+    const runs = [...new Set(affected.map((span) => paragraphRuns.indexOf(span.run)))];
+    if (policy === 'safe' && formats.length > 1)
+      return {
+        error:
+          'Ambiguous run formatting; use formatPolicy firstRun explicitly or narrow the replacement',
+        details: { start, end, policy, formats, runs },
+      };
+    if (!affected.length) return { error: 'Cannot determine insertion formatting' };
+    changes.push({ start, end, replacement: value, policy, formats, runs });
   }
-  return { matched };
+  for (const change of [...changes].reverse()) {
+    const affected = spans.filter((s) =>
+      change.start === change.end
+        ? s.start <= change.start && s.end >= change.end && s.end > s.start
+        : s.end > change.start && s.start < change.end,
+    );
+    applyRange(
+      change.start === change.end ? affected.slice(0, 1) : affected,
+      change.start,
+      change.end,
+      change.replacement,
+    );
+  }
+  return { matched, changes };
 };

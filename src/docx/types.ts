@@ -22,6 +22,7 @@ export interface IndexFile {
 export interface MutationOutcome {
   changed: boolean;
   matched?: number;
+  changes?: unknown[];
   refs?: ElementRef[];
   partUri?: string;
   slides?: number[];

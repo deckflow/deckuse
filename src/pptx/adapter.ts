@@ -1,4 +1,7 @@
-import { copyFile } from 'node:fs/promises';
+import { auditVisuals } from './visual-audit.js';
+import { ChartDataError, verifyChartData } from './chart-data.js';
+import { randomUUID } from 'node:crypto';
+import { copyFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   err,
@@ -221,6 +224,19 @@ export const pptxCapabilities = {
 
 const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>
   OpcArchive.openDirectory(sourceDir(workspace));
+
+const chartDataDiagnostics = (
+  items: Awaited<ReturnType<typeof verifyChartData>>,
+  strict: boolean,
+): Diagnostic[] =>
+  items
+    .filter((item) => item.status === 'unverified' || item.status === 'inconsistent')
+    .map((item) => ({
+      severity: strict ? 'error' : 'warning',
+      code: item.status === 'inconsistent' ? 'CHART_DATA_INCONSISTENT' : 'CHART_DATA_UNVERIFIED',
+      message: item.reason ?? `Chart data is ${item.status}`,
+      details: { ...item },
+    }));
 
 const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
   const diagnostics: Diagnostic[] = [];
@@ -716,7 +732,7 @@ export const pptxAdapter: FormatAdapter = {
           capabilities: pptxCapabilities,
           ...editionMetadata,
           branch: 'main',
-          valid: diagnostics.length === 0,
+          valid: !diagnostics.some((d) => d.severity === 'error'),
           diagnostics,
         });
       }
@@ -859,18 +875,31 @@ export const pptxAdapter: FormatAdapter = {
 
       if (command.type === 'validate') {
         const diagnostics = validateArchive(archive, workspace);
-        return diagnostics.length
+        const chartData = await verifyChartData(archive);
+        const visual = auditVisuals(archive, command.slide);
+        if (command.render) diagnostics.push(...visual.diagnostics);
+        else if (command.profile === 'delivery')
+          diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
+        diagnostics.push(...chartDataDiagnostics(chartData, command.profile === 'delivery'));
+
+        return diagnostics.some((d) => d.severity === 'error')
           ? err(
               'VALIDATION_FAILED',
               'PPTX validation failed',
               diagnostics,
               notesRepairHintExtra(workspace, diagnostics),
             )
-          : ok({
-              valid: true,
-              revision: index.revision,
-              capabilities: pptxCapabilities,
-            });
+          : ok(
+              {
+                valid: true,
+                revision: index.revision,
+                capabilities: pptxCapabilities,
+                chartData,
+                visual,
+                diagnostics,
+              },
+              diagnostics,
+            );
       }
 
       if (command.type === 'export') {
@@ -890,17 +919,52 @@ export const pptxAdapter: FormatAdapter = {
           exportRevision = packed.manifest.revision;
           repacked = true;
         }
-        await copyFile(packagePath(workspace), output);
-        const exported = await openWorkspaceArchive(workspace);
-        const diagnostics = validateArchive(exported, workspace);
-        return ok({
-          output,
-          revision: exportRevision,
-          repacked,
-          fromPackage,
-          valid: diagnostics.length === 0,
-          diagnostics,
-        });
+        const temporary = `${output}.${randomUUID()}.tmp`;
+        try {
+          await copyFile(packagePath(workspace), temporary);
+          let exported: OpcArchive;
+          try {
+            exported = await OpcArchive.openFile(temporary);
+          } catch (cause) {
+            await rm(temporary, { force: true });
+            throw cause;
+          }
+          const diagnostics = validateArchive(exported, workspace);
+          const chartData = await verifyChartData(exported);
+          const visual = auditVisuals(exported);
+          if (command.profile !== 'delivery')
+            diagnostics.push(...chartDataDiagnostics(chartData, false));
+          if (command.profile === 'delivery') {
+            diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
+            diagnostics.push(...chartDataDiagnostics(chartData, true));
+            if (diagnostics.some((d) => d.severity === 'error')) {
+              await rm(temporary, { force: true });
+              return err(
+                'VALIDATION_FAILED',
+                'Delivery validation failed; output was not replaced',
+                diagnostics,
+              );
+            }
+          }
+          try {
+            await rename(temporary, output);
+          } finally {
+            await rm(temporary, { force: true });
+          }
+
+          return ok({
+            output,
+            revision: exportRevision,
+            repacked,
+            fromPackage,
+            chartData,
+            visual,
+            valid: !diagnostics.some((d) => d.severity === 'error'),
+            diagnostics,
+          });
+        } finally {
+          await rm(temporary, { force: true });
+        }
       }
 
       if (command.type === 'repair') {
@@ -923,7 +987,7 @@ export const pptxAdapter: FormatAdapter = {
           }
           if (planned.fixes.length === 0) {
             const validation = validateArchive(working, workspace);
-            if (validation.length)
+            if (validation.some((d) => d.severity === 'error'))
               return err(
                 'VALIDATION_FAILED',
                 'PPTX validation failed',
@@ -939,7 +1003,7 @@ export const pptxAdapter: FormatAdapter = {
           }
           applyNotesSlideRepairs(working, planned.fixes);
           const validation = validateArchive(working, workspace);
-          if (validation.length)
+          if (validation.some((d) => d.severity === 'error'))
             return err(
               'VALIDATION_FAILED',
               'PPTX validation failed after notes repair',
@@ -989,6 +1053,10 @@ export const pptxAdapter: FormatAdapter = {
         const working = await openWorkspaceArchive(workspace);
         let currentIndex = await loadIndex(workspace, working, currentManifest);
         const STRUCTURAL_TYPES = new Set([
+          'set',
+          'setProperties',
+          'setText',
+          'replaceText',
           'addShape',
           'addSlide',
           'setSlideLayout',
@@ -1027,7 +1095,7 @@ export const pptxAdapter: FormatAdapter = {
           syncAppSlideCounts(working);
           const changedParts = working.getDirtyParts();
           const validation = validateArchive(working, workspace);
-          if (validation.length)
+          if (validation.some((d) => d.severity === 'error'))
             return err(
               'VALIDATION_FAILED',
               'PPTX validation failed',
@@ -1089,7 +1157,7 @@ export const pptxAdapter: FormatAdapter = {
         syncAppSlideCounts(working);
         const changedParts = working.getDirtyParts();
         const validation = validateArchive(working);
-        if (validation.length)
+        if (validation.some((d) => d.severity === 'error'))
           return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
         if (command.dryRun)
           return ok(
@@ -1123,7 +1191,10 @@ export const pptxAdapter: FormatAdapter = {
         );
       });
     } catch (cause) {
-      return err('IO_ERROR', cause instanceof Error ? cause.message : 'PPTX operation failed');
+      return err(
+        cause instanceof ChartDataError ? 'UNSUPPORTED_CAPABILITY' : 'IO_ERROR',
+        cause instanceof Error ? cause.message : 'PPTX operation failed',
+      );
     }
   },
 };

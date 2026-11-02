@@ -133,7 +133,7 @@ export async function monitorStatusAll(): Promise<{ monitors: MonitorStatusEntry
     const ws = resolve(disc.workspace);
     const existing = byWorkspace.get(ws);
     if (existing && existing.pid === disc.pid) continue;
-    const host = disc.host ?? existing?.host ?? '0.0.0.0';
+    const host = disc.host ?? existing?.host ?? '127.0.0.1';
     const port = disc.port ?? existing?.port ?? 4173;
     byWorkspace.set(ws, {
       pid: disc.pid,
@@ -209,7 +209,7 @@ export async function monitorStop(
       (d) => resolve(d.workspace) === abs,
     );
     if (disc) {
-      const host = disc.host ?? '0.0.0.0';
+      const host = disc.host ?? '127.0.0.1';
       const port = disc.port ?? 4173;
       target = {
         pid: disc.pid,
@@ -273,7 +273,7 @@ export async function monitorStart(
     await monitorStop(abs);
   }
 
-  const host = options.host ?? '0.0.0.0';
+  const host = options.host ?? '127.0.0.1';
   const port = options.port ?? 4173;
   const bin = process.argv[1];
   if (!bin) throw new Error('Cannot resolve deckuse binary path for daemon start');
@@ -336,14 +336,14 @@ export async function runMonitorForeground(
 ): Promise<MonitorHandle> {
   const abs = resolve(workspace);
   const monitor = await startMonitor(abs, {
-    host: options.host ?? '0.0.0.0',
+    host: options.host ?? '127.0.0.1',
     port: options.port ?? 4173,
   });
   if (options.asDaemonWorker) {
     const port = Number(new URL(monitor.url).port || (options.port ?? 4173));
     await writeDaemonMeta(abs, {
       pid: process.pid,
-      host: options.host ?? '0.0.0.0',
+      host: options.host ?? '127.0.0.1',
       port,
       url: monitor.url,
       workspace: abs,
