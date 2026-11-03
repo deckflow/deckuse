@@ -1,3 +1,6 @@
+import { timed } from '../timing.js';
+import { withWorkspaceTransaction } from '../workspace/transaction.js';
+import { withInitialization } from '../workspace/initialize.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -93,7 +96,7 @@ const packPackage = async (
   manifest: WorkspaceManifest,
 ): Promise<WorkspaceManifest> => {
   const path = packagePath(workspace);
-  const { checksum } = await snapshotArchive(archive, path);
+  const { checksum } = await timed('pack', () => snapshotArchive(archive, path));
   const withFiles: WorkspaceManifest = {
     ...manifest,
     files: [
@@ -132,19 +135,21 @@ export async function initializeWorkspace(
   index: IndexFile,
 ): Promise<WorkspaceManifest> {
   const root = resolve(workspace);
-  await mkdir(root, { recursive: true });
-  await mkdir(deckuseDir(root), { recursive: true });
-  await archive.writeDirectory(sourceDir(root), true);
-  const packed = await packPackage(root, archive, manifest);
-  const next: WorkspaceManifest = {
-    ...packed,
-    revision: index.revision,
-    updatedAt: new Date().toISOString(),
-  };
-  await writeMetadata(root, next, index);
-  await writeOperations(root, []);
-  await initGitRepo(root, 'deckuse: init');
-  return next;
+  return withInitialization(root, async (staging) => {
+    const root = staging;
+    await mkdir(deckuseDir(root), { recursive: true });
+    await archive.writeDirectory(sourceDir(root), true);
+    const packed = await packPackage(root, archive, manifest);
+    const next: WorkspaceManifest = {
+      ...packed,
+      revision: index.revision,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeMetadata(root, next, index);
+    await writeOperations(root, []);
+    await initGitRepo(root, 'deckuse: init');
+    return next;
+  });
 }
 
 export async function persistWrite(
@@ -159,28 +164,35 @@ export async function persistWrite(
   const rev = index.revision;
   const source = sourceDir(root);
   const sourceTmp = `${source}.${randomUUID()}.tmp`;
-  try {
-    await archive.writeDirectory(sourceTmp);
-    await rm(source, { recursive: true, force: true });
-    await rename(sourceTmp, source);
-    const next: WorkspaceManifest = {
-      ...manifest,
-      revision: rev,
-      updatedAt: new Date().toISOString(),
-    };
-    const packed = await packPackage(root, archive, next);
-    await writeMetadata(root, packed, index);
-    await appendOperationCommit(root, {
-      at: new Date().toISOString(),
-      revision: rev,
-      operation,
-      slides: [...new Set(slides)].sort((a, b) => a - b),
-    });
-    return packed;
-  } catch (error) {
-    await rm(sourceTmp, { recursive: true, force: true });
-    throw error;
-  }
+  return withWorkspaceTransaction(root, async (transactionId, prepareCommit) => {
+    try {
+      await archive.writeDirectory(sourceTmp);
+      await rm(source, { recursive: true, force: true });
+      await rename(sourceTmp, source);
+      const next: WorkspaceManifest = {
+        ...manifest,
+        revision: rev,
+        updatedAt: new Date().toISOString(),
+      };
+      const packed = await packPackage(root, archive, next);
+      await writeMetadata(root, packed, index);
+      await appendOperationCommit(
+        root,
+        {
+          at: new Date().toISOString(),
+          revision: rev,
+          operation,
+          slides: [...new Set(slides)].sort((a, b) => a - b),
+        },
+        transactionId,
+        prepareCommit,
+      );
+      return packed;
+    } catch (error) {
+      await rm(sourceTmp, { recursive: true, force: true });
+      throw error;
+    }
+  });
 }
 
 export async function undoWrites(

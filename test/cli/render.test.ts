@@ -50,7 +50,7 @@ describe('renderPage', () => {
     });
 
     expect(convert).toHaveBeenCalledWith(
-      join(workspace, 'package.pptx'),
+      expect.stringContaining('deckuse-single-snapshot-'),
       expect.objectContaining({ pages: '2' }),
     );
     expect(result.page).toBe(2);

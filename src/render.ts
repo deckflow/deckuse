@@ -1,6 +1,12 @@
+import { createRequire } from 'node:module';
+import { timed } from './timing.js';
+import { createHash } from 'node:crypto';
+import { withWriteLock } from './workspace/lock.js';
+import { recoverTransaction } from './workspace/transaction.js';
+import { renderLibreOfficePages } from './render-libreoffice.js';
 import { auditVisuals } from './pptx/visual-audit.js';
 import { renderLibreOffice } from './render-libreoffice.js';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -20,7 +26,7 @@ export type ConvertFn = typeof deck2html.convert;
 export type ScreenshotFn = (options: {
   readonly indexHtmlPath: string;
   readonly outputPath: string;
-  readonly scale?: number;
+  readonly scale?: number | undefined;
 }) => Promise<void>;
 
 export interface RenderDependencies {
@@ -35,7 +41,7 @@ export interface RenderOptions {
   /** PNG path; default: `<workspace>/.deckuse/render/page-<n>.png`. */
   readonly output?: string;
   /** Device scale factor for screenshot (default 1). */
-  readonly scale?: number;
+  readonly scale?: number | undefined;
   readonly dependencies?: RenderDependencies;
 }
 
@@ -106,13 +112,15 @@ const launchChromium = async (): Promise<Browser> => {
   );
 };
 
-const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath, scale }) => {
-  const browser = await launchChromium();
+const screenshotWithBrowser = async (
+  browser: Browser,
+  { indexHtmlPath, outputPath, scale }: Parameters<ScreenshotFn>[0],
+) => {
+  const context = await browser.newContext({
+    viewport: DEFAULT_VIEWPORT,
+    deviceScaleFactor: scale && scale > 0 ? scale : 1,
+  });
   try {
-    const context = await browser.newContext({
-      viewport: DEFAULT_VIEWPORT,
-      deviceScaleFactor: scale && scale > 0 ? scale : 1,
-    });
     const page = await context.newPage();
     const url = pathToFileURL(indexHtmlPath).href;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
@@ -129,14 +137,21 @@ const defaultScreenshot: ScreenshotFn = async ({ indexHtmlPath, outputPath, scal
 
     await mkdir(dirname(outputPath), { recursive: true });
     await page.locator('#deck').screenshot({ path: outputPath, type: 'png' });
+  } finally {
     await context.close();
+  }
+};
+const defaultScreenshot: ScreenshotFn = async (options) => {
+  const browser = await launchChromium();
+  try {
+    await screenshotWithBrowser(browser, options);
   } finally {
     await browser.close();
   }
 };
 
 /** Convert one workspace slide to PNG via deck2html + playwright-core. */
-export const renderPage = async (
+const renderPageSnapshot = async (
   workspace: string,
   options: RenderOptions,
 ): Promise<RenderResult> => {
@@ -155,10 +170,12 @@ export const renderPage = async (
   await ensureGitignore(absoluteWorkspace);
 
   let snapshot = PACKAGE_PPTX;
+  let renderedRevision: string | undefined;
   try {
     const manifest = JSON.parse(
       await readFile(join(absoluteWorkspace, '.deckuse', 'manifest.json'), 'utf8'),
-    ) as { format?: string };
+    ) as { format?: string; revision?: string };
+    renderedRevision = manifest.revision;
     if (manifest.format === 'docx') snapshot = 'package.docx';
   } catch {
     // Missing manifest keeps the PPTX snapshot path used by existing render callers.
@@ -180,10 +197,12 @@ export const renderPage = async (
 
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-'));
   try {
-    const result = await converter(packagePath, {
-      output: staging,
-      pages: String(page),
-    });
+    const result = await timed('convert', () =>
+      converter(packagePath, {
+        output: staging,
+        pages: String(page),
+      }),
+    );
     if (result.exitCode !== 0) {
       throw new Error(result.stderr || 'deck2html conversion failed');
     }
@@ -199,14 +218,83 @@ export const renderPage = async (
     }
 
     await mkdir(dirname(output), { recursive: true });
-    await screenshot({
-      indexHtmlPath,
-      outputPath: output,
-      ...(options.scale !== undefined ? { scale: options.scale } : {}),
-    });
-    return { page, output, warnings, diagnostics };
+    await timed('screenshot', () =>
+      screenshot({
+        indexHtmlPath,
+        outputPath: output,
+        ...(options.scale !== undefined ? { scale: options.scale } : {}),
+      }),
+    );
+    return {
+      page,
+      output,
+      warnings,
+      diagnostics,
+      engine: 'html',
+      ...(renderedRevision ? { revision: renderedRevision } : {}),
+      engineVersion: (
+        JSON.parse(
+          await readFile(
+            join(
+              dirname(createRequire(import.meta.url).resolve('@deckflow/deck2html')),
+              'package.json',
+            ),
+            'utf8',
+          ),
+        ) as { version: string }
+      ).version,
+      inputSha256: createHash('sha256')
+        .update(await readFile(packagePath))
+        .digest('hex'),
+      fontVerification: 'unknown',
+      nativeVerification: 'unverified',
+    };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+/** Capture package and revision under the same lock before either renderer reads. */
+export const renderPage = async (
+  workspace: string,
+  options: RenderOptions,
+): Promise<RenderResult> => {
+  if (!Number.isInteger(options.page) || options.page < 1)
+    throw new Error('--page must be a positive integer (one page per render call)');
+  const root = resolve(workspace);
+  const staging = await mkdtemp(join(tmpdir(), 'deckuse-single-snapshot-'));
+  try {
+    await withWriteLock(root, async () => {
+      await recoverTransaction(root);
+      let manifest: { format?: string; revision?: string } = {};
+      try {
+        manifest = JSON.parse(
+          await readFile(join(root, '.deckuse/manifest.json'), 'utf8'),
+        ) as typeof manifest;
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+      }
+      const format = manifest.format ?? 'pptx';
+      if (format === 'docx' && options.engine !== 'libreoffice')
+        throw new Error(
+          'DOCX page render is not available with HTML. Use --engine libreoffice or open the document in Word.',
+        );
+      if (format !== 'pptx' && format !== 'docx') throw new Error('Unsupported render format');
+      const bytes = await readFile(join(root, `package.${format}`));
+      await mkdir(join(staging, '.deckuse'));
+      await writeFile(
+        join(staging, '.deckuse/manifest.json'),
+        JSON.stringify({ ...manifest, format }),
+      );
+      await writeFile(join(staging, `package.${format}`), bytes);
+      await ensureGitignore(root);
+    });
+    return await renderPageSnapshot(staging, {
+      ...options,
+      output: options.output ?? joinRenderDefault(root, options.page),
+    });
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
 };
 
@@ -230,3 +318,145 @@ const inspectChartRenderFidelity = async (
 
 const joinRenderDefault = (workspace: string, page: number): string =>
   resolve(renderDir(workspace), `page-${String(page)}.png`);
+
+export interface RenderPagesOptions {
+  readonly engine?: 'html' | 'libreoffice';
+  readonly pages?: readonly number[] | undefined;
+  readonly all?: boolean;
+  readonly outputDir?: string | undefined;
+  readonly scale?: number | undefined;
+  readonly dependencies?: RenderDependencies;
+}
+export interface RenderPageOutcome {
+  readonly page: number;
+  readonly ok: boolean;
+  readonly result?: RenderResult;
+  readonly error?: string;
+}
+export interface RenderPagesResult {
+  readonly ok: boolean;
+  readonly engine: string;
+  readonly revision: string;
+  readonly inputSha256: string;
+  readonly results: readonly RenderPageOutcome[];
+}
+export function parsePageSelection(raw: string): number[] {
+  const pages = new Set<number>();
+  for (const token of raw.split(',')) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(token.trim());
+    if (!match) throw new Error('Invalid page selection; use 1,3-5');
+    const first = Number(match[1]),
+      last = Number(match[2] ?? match[1]);
+    if (
+      !Number.isSafeInteger(first) ||
+      !Number.isSafeInteger(last) ||
+      first < 1 ||
+      last < first ||
+      last - first > 10000
+    )
+      throw new Error('Invalid page range');
+    for (let page = first; page <= last; page++) pages.add(page);
+  }
+  return [...pages].sort((a, b) => a - b);
+}
+/** Every result belongs to one immutable package snapshot, even if writes continue. */
+export async function renderPages(
+  workspace: string,
+  options: RenderPagesOptions,
+): Promise<RenderPagesResult> {
+  if (Boolean(options.all) === Boolean(options.pages?.length))
+    throw new Error('Choose pages or all');
+  if (options.scale !== undefined && (!Number.isFinite(options.scale) || options.scale <= 0))
+    throw new Error('Invalid render scale');
+  const root = resolve(workspace);
+  const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-batch-'));
+  let browser: Browser | undefined;
+  try {
+    const snapshot = await withWriteLock(root, async () => {
+      await recoverTransaction(root);
+      const manifest = JSON.parse(await readFile(join(root, '.deckuse/manifest.json'), 'utf8')) as {
+        format: string;
+        revision: string;
+      };
+      if (!['pptx', 'docx'].includes(manifest.format)) throw new Error('Unsupported render format');
+      const bytes = await readFile(join(root, `package.${manifest.format}`));
+      return { manifest, bytes };
+    });
+    const { manifest, bytes } = snapshot;
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    await mkdir(join(staging, '.deckuse'));
+    await writeFile(join(staging, '.deckuse/manifest.json'), JSON.stringify(manifest));
+    await writeFile(join(staging, `package.${manifest.format}`), bytes);
+    const outputDir = resolve(options.outputDir ?? join(root, '.deckuse/render'));
+    if (options.engine === 'libreoffice') {
+      const results = await renderLibreOfficePages(
+        staging,
+        options.all ? undefined : options.pages,
+        outputDir,
+      );
+      return {
+        ok: results.every((r) => r.ok),
+        engine: 'libreoffice',
+        revision: manifest.revision,
+        inputSha256: sha,
+        results,
+      };
+    }
+    if (manifest.format !== 'pptx')
+      throw new Error('HTML rendering supports PPTX only; use --engine libreoffice for DOCX');
+    const archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
+    const count = archive
+      .readXml('/ppt/presentation.xml')
+      .getElementsByTagNameNS(
+        'http://schemas.openxmlformats.org/presentationml/2006/main',
+        'sldId',
+      ).length;
+    const pages = options.all
+      ? Array.from({ length: count }, (_, i) => i + 1)
+      : [...new Set(options.pages)];
+    if (pages.some((p) => !Number.isInteger(p) || p < 1 || p > count))
+      throw new Error('Requested page does not exist');
+    if (!options.dependencies?.screenshot) browser = await launchChromium();
+    const shared = browser;
+    const results: RenderPageOutcome[] = [];
+    for (const page of pages) {
+      try {
+        const result = await renderPageSnapshot(staging, {
+          page,
+          output: join(outputDir, `page-${String(page)}.png`),
+          scale: options.scale,
+          dependencies: {
+            ...options.dependencies,
+            screenshot:
+              options.dependencies?.screenshot ??
+              (async (opts) => {
+                if (!shared) throw new Error('Browser unavailable');
+                await screenshotWithBrowser(shared, opts);
+              }),
+          },
+        });
+        results.push({
+          page,
+          ok: true,
+          result: { ...result, revision: manifest.revision, inputSha256: sha },
+        });
+      } catch (cause) {
+        results.push({
+          page,
+          ok: false,
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      }
+    }
+    return {
+      ok: results.every((r) => r.ok),
+      engine: 'html',
+      revision: manifest.revision,
+      inputSha256: sha,
+      results,
+    };
+  } finally {
+    await browser?.close();
+    await rm(staging, { recursive: true, force: true });
+  }
+}

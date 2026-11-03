@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { withWriteLock } from './workspace/lock.js';
+import { recoverTransaction } from './workspace/transaction.js';
+import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { AdapterRegistry, Executor, type Result } from './core/index.js';
 import { pptxAdapter } from './pptx/index.js';
@@ -17,6 +19,8 @@ export const createDefaultExecutor = (): Executor =>
     {
       resolveAdapter: async (workspaceId) => {
         try {
+          await access(join(workspaceId, '.deckuse'));
+          await withWriteLock(workspaceId, () => recoverTransaction(workspaceId));
           const manifest = JSON.parse(
             await readFile(join(resolve(workspaceId), '.deckuse', 'manifest.json'), 'utf8'),
           ) as { format?: string };
@@ -29,7 +33,8 @@ export const createDefaultExecutor = (): Executor =>
                 .register(numbersAdapter)
                 .get(manifest.format)
             : undefined;
-        } catch {
+        } catch (cause) {
+          if (cause instanceof Error && cause.name === 'RecoveryRequiredError') return pptxAdapter;
           return undefined;
         }
       },
@@ -41,6 +46,10 @@ export const runCommand = async (input: unknown): Promise<Result<unknown>> =>
 export { startMonitor, type MonitorHandle, type MonitorOptions } from './monitor.js';
 export {
   renderPage,
+  renderPages,
+  parsePageSelection,
+  type RenderPagesOptions,
+  type RenderPagesResult,
   type RenderDependencies,
   type RenderOptions,
   type RenderResult,

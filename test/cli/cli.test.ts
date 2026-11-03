@@ -319,7 +319,7 @@ describe('deckuse CLI', () => {
     const workspace = join(root, 'workspace');
     const missing = await run(['new', '--json']);
     expect(missing.code).toBe(2);
-    expect(missing.stderr).toContain('Usage: deckuse new <workspace/>');
+    expect(JSON.parse(missing.stdout).error.message).toContain('Usage: deckuse new <workspace/>');
 
     const created = await run(['new', workspace, '--json']);
     expect(created.code).toBe(0);

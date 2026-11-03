@@ -23,7 +23,7 @@ import {
   monitorStopAll,
   runMonitorForeground,
 } from './monitor-daemon.js';
-import { renderPage } from './render.js';
+import { renderPage, renderPages, parsePageSelection } from './render.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
 
@@ -382,6 +382,12 @@ const main = async (): Promise<void> => {
       let ok = true;
 
       if (action === 'schema') {
+        if (clean.includes('--type') && !optionFrom(clean, '--type'))
+          throw new Error('--type requires a command type');
+        if (clean.includes('--list') && clean.includes('--type'))
+          throw new Error('Choose --list or --type');
+        if (clean.includes('--command'))
+          throw new Error('Use schema --type addShape instead of --command add');
         const typeOpt =
           optionFrom(clean, '--type') ??
           (clean[1] && !clean[1].startsWith('--') ? clean[1] : undefined);
@@ -415,6 +421,23 @@ const main = async (): Promise<void> => {
           const nested = resolveRef(typeProp);
           return typeof nested?.['const'] === 'string' ? nested['const'] : undefined;
         };
+        const types = (full.oneOf ?? full.anyOf ?? [])
+          .map(typeOf)
+          .filter((x): x is string => Boolean(x));
+        if (clean.includes('--list')) {
+          outputEnvelope({
+            ok: true,
+            command: 'deckuse schema',
+            data: {
+              cliVersion: version,
+              protocolVersion: PROTOCOL_VERSION,
+              edition: EDITION,
+              types,
+              batchTypes: types.filter((type) => APPLY_WRITE_TYPES.has(type)),
+            },
+          });
+          return;
+        }
         let schema: unknown = full;
         if (typeOpt) {
           const variants = full.oneOf ?? full.anyOf ?? [];
@@ -425,7 +448,26 @@ const main = async (): Promise<void> => {
               `Unknown command type for schema: ${typeOpt}. Known: ${known || '(none)'}`,
             );
           }
-          schema = { ...(resolveRef(match) ?? match), $defs: defs };
+          const root = resolveRef(match) ?? match;
+          const reachable: Record<string, unknown> = {};
+          const visit = (value: unknown): void => {
+            if (!value || typeof value !== 'object') return;
+            if (Array.isArray(value)) {
+              value.forEach(visit);
+              return;
+            }
+            const record = value as Record<string, unknown>;
+            if (typeof record['$ref'] === 'string' && record['$ref'].startsWith('#/$defs/')) {
+              const key = record['$ref'].slice(8);
+              if (!(key in reachable) && key in defs) {
+                reachable[key] = defs[key];
+                visit(defs[key]);
+              }
+            }
+            Object.values(record).forEach(visit);
+          };
+          visit(root);
+          schema = { ...root, $defs: reachable };
         }
         const payload = {
           ok: true,
@@ -1201,6 +1243,45 @@ const main = async (): Promise<void> => {
         return;
       } else if (action === 'render') {
         const pageRaw = optionFrom(clean, '--page');
+        const pagesRaw = optionFrom(clean, '--pages');
+        const all = clean.includes('--all');
+        if (pagesRaw !== undefined || all) {
+          if (pageRaw || optionFrom(clean, '--output') || (pagesRaw !== undefined && all))
+            throw new Error(
+              'Use --pages or --all with --output-dir; do not combine with --page/--output',
+            );
+          const engine = optionFrom(clean, '--engine') ?? 'html';
+          if (engine !== 'html' && engine !== 'libreoffice')
+            throw new Error('Unknown render engine');
+          const workspace = await findWorkspace(workspaceOpt);
+          const selection = pagesRaw !== undefined ? parsePageSelection(pagesRaw) : undefined;
+          try {
+            const rendered = await renderPages(workspace, {
+              engine,
+              all,
+              pages: selection,
+              outputDir: optionFrom(clean, '--output-dir'),
+              scale: optionFrom(clean, '--scale')
+                ? Number(optionFrom(clean, '--scale'))
+                : undefined,
+            });
+            outputEnvelope({ ok: rendered.ok, command: 'deckuse render', data: rendered });
+            if (!rendered.ok) process.exitCode = 1;
+          } catch (cause) {
+            outputEnvelope({
+              ok: false,
+              command: 'deckuse render',
+              error: {
+                code: 'RENDER_FAILED',
+                message: cause instanceof Error ? cause.message : String(cause),
+              },
+            });
+            process.exitCode = 1;
+          }
+          return;
+        }
+        if (optionFrom(clean, '--output-dir'))
+          throw new Error('--output-dir requires --pages or --all');
         if (!pageRaw)
           throw new Error('Usage: deckuse render --page <n> [--output <file.png>] [--scale <n>]');
         if (/\s|,|-/.test(pageRaw))
@@ -1308,7 +1389,15 @@ const main = async (): Promise<void> => {
       if (!ok) process.exitCode = 1;
     }
   } catch (cause) {
-    process.stderr.write(`deckuse: ${cause instanceof Error ? cause.message : 'Invalid input'}\n`);
+    const message = cause instanceof Error ? cause.message : 'Invalid input';
+    if (json)
+      outputEnvelope({
+        ok: false,
+        command: `deckuse ${clean[0] ?? 'cli'}`,
+        warnings: [],
+        error: { code: 'INVALID_INPUT', message },
+      });
+    else process.stderr.write(`deckuse: ${message}\n`);
     process.exitCode = 2;
   }
 };

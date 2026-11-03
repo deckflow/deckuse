@@ -1,3 +1,4 @@
+import { timed } from '../timing.js';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { commitWorkspace, operationCommitMessage } from './git.js';
 import { deckuseDir, operationsPath } from './paths.js';
@@ -36,11 +37,20 @@ export const writeOperations = async (
 export const appendOperationCommit = async (
   workspace: string,
   record: OperationRecord,
+  transactionId?: string,
+  prepareCommit?: () => Promise<void>,
 ): Promise<string> => {
   const records = await readOperations(workspace);
   records.push(record);
   await writeOperations(workspace, records);
-  return commitWorkspace(workspace, operationCommitMessage(record.operation));
+  await prepareCommit?.();
+  return timed('git', () =>
+    commitWorkspace(
+      workspace,
+      operationCommitMessage(record.operation) +
+        (transactionId ? `\n\nDeckuse-Transaction: ${transactionId}` : ''),
+    ),
+  );
 };
 
 export const readHistory = async (

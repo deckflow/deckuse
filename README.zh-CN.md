@@ -365,3 +365,9 @@ pnpm build
 ```
 
 完整英文文档与命令措辞见 [README.md](README.md)。
+
+### Agent 可靠性与批量渲染
+
+参见 [Agent 可靠性说明](docs/agent-reliability.md)：包含 JSON 错误处理、事务恢复、
+非空目录保护，以及固定输入快照的 `render --pages 1,3-5` / `render --all`。
+使用 `schema --list --json` 查看可批处理命令；`addSlide` 可与页面内容一起提交。

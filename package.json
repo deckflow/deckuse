@@ -25,7 +25,9 @@
     "schema",
     "skills",
     "docs/1.6-safety-migration.md",
-    "docs/verification-1.6-safety.md"
+    "docs/verification-1.6-safety.md",
+    "docs/agent-reliability.md",
+    "docs/verification-agent-reliability.md"
   ],
   "bin": {
     "deckuse": "./dist/bin.js"
@@ -49,7 +51,9 @@
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore"
+    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore",
+    "test:agent-package": "node scripts/check-agent-package.mjs",
+    "benchmark:agent": "node scripts/benchmark-agent-workflow.mjs"
   },
   "dependencies": {
     "@deckflow/deck2html": "^0.5.0",

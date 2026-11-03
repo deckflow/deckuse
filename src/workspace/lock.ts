@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { resolve } from 'node:path';
 import { mkdir, open, readFile, rm } from 'node:fs/promises';
 import { deckuseDir, lockPath } from './paths.js';
 
@@ -91,13 +93,18 @@ export const acquireWriteLock = async (workspace: string): Promise<() => Promise
   };
 };
 
+const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>();
+
 export const withWriteLock = async <T>(
   workspace: string,
   operation: () => Promise<T>,
 ): Promise<T> => {
+  const key = resolve(workspace);
+  const held = heldLocks.getStore();
+  if (held?.has(key)) return operation();
   const release = await acquireWriteLock(workspace);
   try {
-    return await operation();
+    return await heldLocks.run(new Set([...(held ?? []), key]), operation);
   } finally {
     await release();
   }

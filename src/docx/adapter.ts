@@ -1,5 +1,12 @@
+import { timedSync } from '../timing.js';
+import {
+  recoverTransaction,
+  RecoveryRequiredError,
+  historyHealth,
+} from '../workspace/transaction.js';
+import { WorkspaceNotEmptyError } from '../workspace/initialize.js';
 import { randomUUID } from 'node:crypto';
-import { copyFile, rename, rm } from 'node:fs/promises';
+import { access, copyFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   err,
@@ -15,7 +22,7 @@ import { OpcArchive } from '../opc/index.js';
 import { isIntegerRevision, nextRevision } from '../workspace/index.js';
 import { collectDocxFindCandidates } from './find-candidates.js';
 import {
-  buildIndex,
+  buildIndex as buildIndexImpl,
   collectHits,
   findIndexed,
   locate,
@@ -41,6 +48,9 @@ import {
   undoWrites,
   withWriteLock,
 } from './workspace.js';
+
+const buildIndex: typeof buildIndexImpl = (...args) =>
+  timedSync('index', () => buildIndexImpl(...args));
 
 const VERSION = '0.1.0';
 const DOCX_LIST = new Set(['paragraphs', 'tables', 'sections', 'styles', 'bookmarks']);
@@ -233,319 +243,382 @@ export const docxAdapter: FormatAdapter = {
           .filter((id): id is string => typeof id === 'string'),
       });
     } catch (cause) {
-      return err('IO_ERROR', cause instanceof Error ? cause.message : 'DOCX init failed');
+      return err(
+        cause instanceof WorkspaceNotEmptyError ? 'WORKSPACE_NOT_EMPTY' : 'IO_ERROR',
+        cause instanceof Error ? cause.message : 'DOCX init failed',
+      );
     }
   },
   async execute(command) {
     const workspace = resolve(command.workspaceId);
     try {
-      if (command.type === 'undo') {
-        return await withWriteLock(workspace, async () => {
-          try {
-            return ok(await undoWrites(workspace, command.steps));
-          } catch (cause) {
-            return err('VALIDATION_FAILED', cause instanceof Error ? cause.message : 'Undo failed');
-          }
-        });
-      }
-      if (command.type === 'history') {
-        const { records, total } = await readHistory(workspace, command.limit, command.offset);
-        const slide = command.slide;
-        const filtered =
-          slide !== undefined ? records.filter((record) => record.slides.includes(slide)) : records;
-        return ok({
-          records: filtered,
-          total: slide !== undefined ? filtered.length : total,
-        });
-      }
+      await access(resolve(workspace, '.deckuse'));
+    } catch (cause) {
+      return err(
+        (cause as NodeJS.ErrnoException).code === 'ENOENT' ? 'WORKSPACE_NOT_FOUND' : 'IO_ERROR',
+        cause instanceof Error ? cause.message : 'Workspace unavailable',
+      );
+    }
+    return withWriteLock(workspace, async () => {
+      try {
+        await withWriteLock(workspace, () => recoverTransaction(workspace));
+        if (command.type === 'undo') {
+          return await withWriteLock(workspace, async () => {
+            try {
+              return ok(await undoWrites(workspace, command.steps));
+            } catch (cause) {
+              return err(
+                'VALIDATION_FAILED',
+                cause instanceof Error ? cause.message : 'Undo failed',
+              );
+            }
+          });
+        }
+        if (command.type === 'history') {
+          const { records, total } = await readHistory(workspace, command.limit, command.offset);
+          const slide = command.slide;
+          const filtered =
+            slide !== undefined
+              ? records.filter((record) => record.slides.includes(slide))
+              : records;
+          return ok({
+            records: filtered,
+            total: slide !== undefined ? filtered.length : total,
+          });
+        }
 
-      const manifest = await readManifest(workspace);
-      const schemaVersion = manifest.schemaVersion as string;
-      if (schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
+        const manifest = await readManifest(workspace);
+        const schemaVersion = manifest.schemaVersion as string;
+        if (schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
+          if (command.type === 'status') {
+            return ok({
+              workspaceId: workspace,
+              format: manifest.format,
+              revision: manifest.revision,
+              schemaVersion: manifest.schemaVersion,
+              compatible: false,
+              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
+              capabilities: manifest.metadata?.['capabilities'],
+            });
+          }
+        }
+
+        const archive = await openWorkspaceArchive(workspace);
+        const index = await loadIndex(workspace, archive, manifest, { persist: true });
+
         if (command.type === 'status') {
+          const diagnostics = validateArchive(archive);
           return ok({
             workspaceId: workspace,
             format: manifest.format,
             revision: manifest.revision,
             schemaVersion: manifest.schemaVersion,
-            compatible: false,
-            hint: 'Re-run deckuse init to upgrade this workspace to protocol 2.0.',
-            capabilities: manifest.metadata?.['capabilities'],
-          });
-        }
-      }
-
-      const archive = await openWorkspaceArchive(workspace);
-      const index = await loadIndex(workspace, archive, manifest, { persist: true });
-
-      if (command.type === 'status') {
-        const diagnostics = validateArchive(archive);
-        return ok({
-          workspaceId: workspace,
-          format: manifest.format,
-          revision: manifest.revision,
-          schemaVersion: manifest.schemaVersion,
-          compatible: true,
-          adapterVersion: manifest.adapterVersion,
-          source: manifest.source,
-          package: packagePath(workspace),
-          packageStale: await isPackageStale(workspace, manifest),
-          elementCount: index.elements.length,
-          capabilities: docxCapabilities,
-          branch: 'main',
-          valid: !diagnostics.some((d) => d.severity === 'error'),
-          diagnostics,
-        });
-      }
-
-      if (command.type === 'list') {
-        if (!DOCX_LIST.has(command.resource)) {
-          return err(
-            'UNSUPPORTED_CAPABILITY',
-            `list ${command.resource} is not available for DOCX`,
-            [],
-            { hint: 'Use paragraphs, tables, sections, styles, or bookmarks.' },
-          );
-        }
-        return ok({ resource: command.resource, items: listItems(index, command.resource) });
-      }
-
-      if (command.type === 'get' || command.type === 'inspect') {
-        if (command.type === 'inspect' && !command.target && !command.ref) {
-          return ok({
-            document: { format: 'docx', revision: index.revision, capabilities: docxCapabilities },
-            elements: index.elements.map(summary),
-          });
-        }
-        if (command.type === 'inspect' && command.ref && !command.target) {
-          const item = findIndexed(index, command.ref);
-          return item
-            ? ok(summary(item))
-            : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
-        }
-        const target = command.type === 'get' ? command.target : command.target;
-        if (!target) return err('INVALID_COMMAND', 'Missing target');
-        const resolved = resolveItem(index, target);
-        if (!resolved.ok) return resolved;
-        const located = locate(archive, index, target);
-        if (!located.ok) return located;
-        const details = readProperties(located.value.element, resolved.value.kind);
-        return ok({
-          target: resolved.value.ref.path,
-          uid: resolved.value.ref.elementId,
-          kind: resolved.value.kind,
-          ...(resolved.value.name ? { name: resolved.value.name } : {}),
-          text: resolved.value.text ?? '',
-          partUri: resolved.value.partUri,
-          properties: details,
-          ...(command.type === 'inspect' && command.visualTree
-            ? {
-                visualTree: index.elements
-                  .filter((item) => item.partUri === resolved.value.partUri)
-                  .map(summary),
-              }
-            : {}),
-        });
-      }
-
-      if (command.type === 'search') {
-        if (command.kind === 'shape') {
-          return err('UNSUPPORTED_CAPABILITY', 'DOCX has no shapes', [], {
-            hint: 'Search text, or list bookmarks.',
-          });
-        }
-        const items = index.elements.filter((item) => {
-          if (item.kind !== 'paragraph' && item.kind !== 'tableCell' && item.kind !== 'bookmark')
-            return false;
-          if (command.name && item.name !== command.name) return false;
-          if (
-            command.query &&
-            !(item.text ?? '').toLowerCase().includes(command.query.toLowerCase())
-          )
-            return false;
-          return true;
-        });
-        return ok({ matches: items.slice(0, command.limit).map(summary) });
-      }
-
-      if (command.type === 'find') {
-        if (command.slide !== undefined) {
-          return err('INVALID_COMMAND', 'find slide is only supported for PPTX', [], {
-            hint: 'Omit --slide. Use --kind paragraph,table,bookmark to narrow Word elements.',
-          });
-        }
-        return await rankFind({
-          candidates: collectDocxFindCandidates(index, command),
-          query: command.query,
-          limit: command.limit,
-          model: command.model,
-        });
-      }
-
-      if (command.type === 'query') {
-        const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
-        return ok({
-          items: matched.slice(0, command.limit).map(summary),
-          total: matched.length,
-          truncated: matched.length > command.limit,
-        });
-      }
-
-      if (command.type === 'getText') {
-        const item = findIndexed(index, command.ref);
-        return item
-          ? ok({
-              ref: item.ref,
-              target: item.ref.path,
-              uid: item.ref.elementId,
-              text: item.text ?? '',
-              kind: item.kind,
-            })
-          : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
-      }
-
-      if (command.type === 'validate') {
-        const diagnostics = validateArchive(archive);
-        return diagnostics.some((d) => d.severity === 'error')
-          ? err('VALIDATION_FAILED', 'DOCX validation failed', diagnostics)
-          : ok({ valid: true, revision: index.revision, capabilities: docxCapabilities });
-      }
-
-      if (command.type === 'export') {
-        if (command.revision !== undefined && String(command.revision) !== manifest.revision) {
-          return err(
-            'UNSUPPORTED_CAPABILITY',
-            'Export of historical revisions is not available',
-            [],
-            { hint: 'Omit --revision to export the current workspace package.' },
-          );
-        }
-        const output = resolve(command.output);
-        const fromPackage = command.fromPackage === true;
-        let repacked = false;
-        let exportRevision = manifest.revision;
-        if (!fromPackage) {
-          const packed = await repackWorkspace(workspace);
-          exportRevision = packed.manifest.revision;
-          repacked = true;
-        }
-        const temporary = `${output}.${randomUUID()}.tmp`;
-        try {
-          await copyFile(packagePath(workspace), temporary);
-          let exported: OpcArchive;
-          try {
-            exported = await OpcArchive.openFile(temporary);
-          } catch (cause) {
-            await rm(temporary, { force: true });
-            throw cause;
-          }
-          const diagnostics = validateArchive(exported);
-          if (command.profile === 'delivery') {
-            if (diagnostics.some((d) => d.severity === 'error')) {
-              await rm(temporary, { force: true });
-              return err(
-                'VALIDATION_FAILED',
-                'Delivery validation failed; output was not replaced',
-                diagnostics,
-              );
-            }
-          }
-          try {
-            await rename(temporary, output);
-          } finally {
-            await rm(temporary, { force: true });
-          }
-
-          return ok({
-            output,
-            revision: exportRevision,
-            repacked,
-            fromPackage,
+            compatible: true,
+            adapterVersion: manifest.adapterVersion,
+            source: manifest.source,
+            package: packagePath(workspace),
+            health: await historyHealth(workspace),
+            packageStale: await isPackageStale(workspace, manifest),
+            elementCount: index.elements.length,
+            capabilities: docxCapabilities,
+            branch: 'main',
             valid: !diagnostics.some((d) => d.severity === 'error'),
             diagnostics,
           });
-        } finally {
-          await rm(temporary, { force: true });
         }
-      }
 
-      if (command.type === 'repair') {
-        return err(
-          'UNSUPPORTED_CAPABILITY',
-          'repair is only available for PPTX notes relationships',
-          [],
-          { hint: 'Word workspaces do not use notesSlide back-pointers.' },
-        );
-      }
+        if (command.type === 'list') {
+          if (!DOCX_LIST.has(command.resource)) {
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              `list ${command.resource} is not available for DOCX`,
+              [],
+              { hint: 'Use paragraphs, tables, sections, styles, or bookmarks.' },
+            );
+          }
+          return ok({ resource: command.resource, items: listItems(index, command.resource) });
+        }
 
-      if (SLIDE_COMMANDS.has(command.type)) {
-        return err('UNSUPPORTED_CAPABILITY', `${command.type} is a slide command`, [], {
-          hint: 'Word documents are a flow, not a slide canvas. Use addParagraph, addTable, insertBreak, setText, or setProperties.',
-        });
-      }
+        if (command.type === 'get' || command.type === 'inspect') {
+          if (command.type === 'inspect' && !command.target && !command.ref) {
+            return ok({
+              document: {
+                format: 'docx',
+                revision: index.revision,
+                capabilities: docxCapabilities,
+              },
+              elements: index.elements.map(summary),
+            });
+          }
+          if (command.type === 'inspect' && command.ref && !command.target) {
+            const item = findIndexed(index, command.ref);
+            return item
+              ? ok(summary(item))
+              : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
+          }
+          const target = command.type === 'get' ? command.target : command.target;
+          if (!target) return err('INVALID_COMMAND', 'Missing target');
+          const resolved = resolveItem(index, target);
+          if (!resolved.ok) return resolved;
+          const located = locate(archive, index, target);
+          if (!located.ok) return located;
+          const details = readProperties(located.value.element, resolved.value.kind);
+          return ok({
+            target: resolved.value.ref.path,
+            uid: resolved.value.ref.elementId,
+            kind: resolved.value.kind,
+            ...(resolved.value.name ? { name: resolved.value.name } : {}),
+            text: resolved.value.text ?? '',
+            partUri: resolved.value.partUri,
+            properties: details,
+            ...(command.type === 'inspect' && command.visualTree
+              ? {
+                  visualTree: index.elements
+                    .filter((item) => item.partUri === resolved.value.partUri)
+                    .map(summary),
+                }
+              : {}),
+          });
+        }
 
-      if (!WRITE_TYPES.has(command.type))
-        return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
+        if (command.type === 'search') {
+          if (command.kind === 'shape') {
+            return err('UNSUPPORTED_CAPABILITY', 'DOCX has no shapes', [], {
+              hint: 'Search text, or list bookmarks.',
+            });
+          }
+          const items = index.elements.filter((item) => {
+            if (item.kind !== 'paragraph' && item.kind !== 'tableCell' && item.kind !== 'bookmark')
+              return false;
+            if (command.name && item.name !== command.name) return false;
+            if (
+              command.query &&
+              !(item.text ?? '').toLowerCase().includes(command.query.toLowerCase())
+            )
+              return false;
+            return true;
+          });
+          return ok({ matches: items.slice(0, command.limit).map(summary) });
+        }
 
-      if (command.type === 'applyTransaction') {
-        return err(
-          'UNSUPPORTED_CAPABILITY',
-          'DOCX apply does not accept low-level transaction ops',
-          [],
-          {
-            hint: 'Use high-level commands with "type": "addParagraph" | "setText" | "replaceText".',
-          },
-        );
-      }
+        if (command.type === 'find') {
+          if (command.slide !== undefined) {
+            return err('INVALID_COMMAND', 'find slide is only supported for PPTX', [], {
+              hint: 'Omit --slide. Use --kind paragraph,table,bookmark to narrow Word elements.',
+            });
+          }
+          return await rankFind({
+            candidates: collectDocxFindCandidates(index, command),
+            query: command.query,
+            limit: command.limit,
+            model: command.model,
+          });
+        }
 
-      const conflict = assertExpectRevision(command, manifest.revision);
-      if (conflict) return conflict;
+        if (command.type === 'query') {
+          const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+          return ok({
+            items: matched.slice(0, command.limit).map(summary),
+            total: matched.length,
+            truncated: matched.length > command.limit,
+          });
+        }
 
-      return await withWriteLock(workspace, async () => {
-        const currentManifest = await readManifest(workspace);
-        const locked = assertExpectRevision(command, currentManifest.revision);
-        if (locked) return locked;
-        const working = await openWorkspaceArchive(workspace);
-        let currentIndex = await loadIndex(workspace, working, currentManifest);
+        if (command.type === 'getText') {
+          const item = findIndexed(index, command.ref);
+          return item
+            ? ok({
+                ref: item.ref,
+                target: item.ref.path,
+                uid: item.ref.elementId,
+                text: item.text ?? '',
+                kind: item.kind,
+              })
+            : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
+        }
 
-        const runBatch = async (
-          nestedCommands: AtomicCommand[],
-          dryRun: boolean | undefined,
-          operation: unknown,
-        ) => {
-          const results: unknown[] = [];
-          const diagnostics: Diagnostic[] = [];
-          const changedTargets: string[] = [];
-          const changedParts: string[] = [];
-          for (const nested of nestedCommands) {
-            const result = mutate(nested, working, currentIndex);
-            diagnostics.push(...result.diagnostics);
-            if (!result.ok) return result;
-            results.push(result.value);
-            if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
-            if (result.value.changedParts) changedParts.push(...result.value.changedParts);
-            if (STRUCTURAL_TYPES.has(nested.type)) {
-              currentIndex = buildIndex(
-                working,
-                currentManifest.workspaceId,
-                currentManifest.revision,
+        if (command.type === 'validate') {
+          const diagnostics = validateArchive(archive);
+          return diagnostics.some((d) => d.severity === 'error')
+            ? err('VALIDATION_FAILED', 'DOCX validation failed', diagnostics)
+            : ok({ valid: true, revision: index.revision, capabilities: docxCapabilities });
+        }
+
+        if (command.type === 'export') {
+          if (command.revision !== undefined && String(command.revision) !== manifest.revision) {
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              'Export of historical revisions is not available',
+              [],
+              { hint: 'Omit --revision to export the current workspace package.' },
+            );
+          }
+          const output = resolve(command.output);
+          const fromPackage = command.fromPackage === true;
+          let repacked = false;
+          let exportRevision = manifest.revision;
+          if (!fromPackage) {
+            const packed = await repackWorkspace(workspace);
+            exportRevision = packed.manifest.revision;
+            repacked = true;
+          }
+          const temporary = `${output}.${randomUUID()}.tmp`;
+          try {
+            await copyFile(packagePath(workspace), temporary);
+            let exported: OpcArchive;
+            try {
+              exported = await OpcArchive.openFile(temporary);
+            } catch (cause) {
+              await rm(temporary, { force: true });
+              throw cause;
+            }
+            const diagnostics = validateArchive(exported);
+            if (command.profile === 'delivery') {
+              if (diagnostics.some((d) => d.severity === 'error')) {
+                await rm(temporary, { force: true });
+                return err(
+                  'VALIDATION_FAILED',
+                  'Delivery validation failed; output was not replaced',
+                  diagnostics,
+                );
+              }
+            }
+            try {
+              await rename(temporary, output);
+            } finally {
+              await rm(temporary, { force: true });
+            }
+
+            return ok({
+              output,
+              revision: exportRevision,
+              repacked,
+              fromPackage,
+              valid: !diagnostics.some((d) => d.severity === 'error'),
+              diagnostics,
+            });
+          } finally {
+            await rm(temporary, { force: true });
+          }
+        }
+
+        if (command.type === 'repair') {
+          return err(
+            'UNSUPPORTED_CAPABILITY',
+            'repair is only available for PPTX notes relationships',
+            [],
+            { hint: 'Word workspaces do not use notesSlide back-pointers.' },
+          );
+        }
+
+        if (SLIDE_COMMANDS.has(command.type)) {
+          return err('UNSUPPORTED_CAPABILITY', `${command.type} is a slide command`, [], {
+            hint: 'Word documents are a flow, not a slide canvas. Use addParagraph, addTable, insertBreak, setText, or setProperties.',
+          });
+        }
+
+        if (!WRITE_TYPES.has(command.type))
+          return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
+
+        if (command.type === 'applyTransaction') {
+          return err(
+            'UNSUPPORTED_CAPABILITY',
+            'DOCX apply does not accept low-level transaction ops',
+            [],
+            {
+              hint: 'Use high-level commands with "type": "addParagraph" | "setText" | "replaceText".',
+            },
+          );
+        }
+
+        const conflict = assertExpectRevision(command, manifest.revision);
+        if (conflict) return conflict;
+
+        return await withWriteLock(workspace, async () => {
+          const currentManifest = await readManifest(workspace);
+          const locked = assertExpectRevision(command, currentManifest.revision);
+          if (locked) return locked;
+          const working = await openWorkspaceArchive(workspace);
+          let currentIndex = await loadIndex(workspace, working, currentManifest);
+
+          const runBatch = async (
+            nestedCommands: AtomicCommand[],
+            dryRun: boolean | undefined,
+            operation: unknown,
+          ) => {
+            const results: unknown[] = [];
+            const diagnostics: Diagnostic[] = [];
+            const changedTargets: string[] = [];
+            const changedParts: string[] = [];
+            for (const nested of nestedCommands) {
+              const result = timedSync('mutation', () => mutate(nested, working, currentIndex));
+              diagnostics.push(...result.diagnostics);
+              if (!result.ok) return result;
+              results.push(result.value);
+              if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
+              if (result.value.changedParts) changedParts.push(...result.value.changedParts);
+              if (STRUCTURAL_TYPES.has(nested.type)) {
+                currentIndex = buildIndex(
+                  working,
+                  currentManifest.workspaceId,
+                  currentManifest.revision,
+                );
+              }
+            }
+            const validation = validateArchive(working);
+            if (validation.some((d) => d.severity === 'error'))
+              return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
+            if (dryRun) {
+              return ok(
+                {
+                  results,
+                  revision: currentManifest.revision,
+                  dryRun: true,
+                  changedTargets: [...new Set(changedTargets)],
+                  changedParts: [...new Set(changedParts)],
+                  affectedSlides: [],
+                },
+                diagnostics,
               );
             }
-          }
-          const validation = validateArchive(working);
-          if (validation.some((d) => d.severity === 'error'))
-            return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
-          if (dryRun) {
+            const rev = nextRevision(currentManifest.revision);
+            const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+            const saved = await persistWrite(
+              workspace,
+              working,
+              currentManifest,
+              nextIndex,
+              operation,
+              [],
+            );
             return ok(
               {
                 results,
-                revision: currentManifest.revision,
-                dryRun: true,
+                revision: saved.revision,
                 changedTargets: [...new Set(changedTargets)],
                 changedParts: [...new Set(changedParts)],
                 affectedSlides: [],
               },
               diagnostics,
+            );
+          };
+
+          if (command.type === 'batch') return runBatch(command.commands, command.dryRun, command);
+
+          const result = timedSync('mutation', () => mutate(command, working, currentIndex));
+          if (!result.ok) return result;
+          const validation = validateArchive(working);
+          if (validation.some((d) => d.severity === 'error'))
+            return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
+          if (command.dryRun) {
+            return ok(
+              {
+                ...result.value,
+                revision: currentManifest.revision,
+                dryRun: true,
+                affectedSlides: [],
+              },
+              result.diagnostics,
             );
           }
           const rev = nextRevision(currentManifest.revision);
@@ -555,56 +628,20 @@ export const docxAdapter: FormatAdapter = {
             working,
             currentManifest,
             nextIndex,
-            operation,
+            command,
             [],
           );
           return ok(
-            {
-              results,
-              revision: saved.revision,
-              changedTargets: [...new Set(changedTargets)],
-              changedParts: [...new Set(changedParts)],
-              affectedSlides: [],
-            },
-            diagnostics,
-          );
-        };
-
-        if (command.type === 'batch') return runBatch(command.commands, command.dryRun, command);
-
-        const result = mutate(command, working, currentIndex);
-        if (!result.ok) return result;
-        const validation = validateArchive(working);
-        if (validation.some((d) => d.severity === 'error'))
-          return err('VALIDATION_FAILED', 'DOCX validation failed', validation);
-        if (command.dryRun) {
-          return ok(
-            {
-              ...result.value,
-              revision: currentManifest.revision,
-              dryRun: true,
-              affectedSlides: [],
-            },
+            { ...result.value, revision: saved.revision, affectedSlides: [] },
             result.diagnostics,
           );
-        }
-        const rev = nextRevision(currentManifest.revision);
-        const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
-        const saved = await persistWrite(
-          workspace,
-          working,
-          currentManifest,
-          nextIndex,
-          command,
-          [],
+        });
+      } catch (cause) {
+        return err(
+          cause instanceof RecoveryRequiredError ? 'RECOVERY_REQUIRED' : 'IO_ERROR',
+          cause instanceof Error ? cause.message : 'DOCX operation failed',
         );
-        return ok(
-          { ...result.value, revision: saved.revision, affectedSlides: [] },
-          result.diagnostics,
-        );
-      });
-    } catch (cause) {
-      return err('IO_ERROR', cause instanceof Error ? cause.message : 'DOCX operation failed');
-    }
+      }
+    });
   },
 };

@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { access, readdir, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { add, checkout, commit, currentBranch, init, log, statusMatrix } from 'isomorphic-git';
 import { gitignorePath } from './paths.js';
@@ -11,6 +11,10 @@ const WORKSPACE_GITIGNORE = `package.*
 .deckuse/preview.next/
 .deckuse/render/
 .deckuse/*.tmp
+.deckuse/transaction/
+.deckuse/transaction.*.tmp/
+.deckuse-init.lock
+source.*.tmp/
 `;
 
 const DEFAULT_BRANCH = 'main';
@@ -38,7 +42,22 @@ export const hasWorkspaceGitRepo = async (workspace: string): Promise<boolean> =
 };
 
 export const ensureGitignore = async (workspace: string): Promise<void> => {
-  await writeFile(gitignorePath(workspace), WORKSPACE_GITIGNORE);
+  const path = gitignorePath(workspace);
+  let current = '';
+  try {
+    current = await readFile(path, 'utf8');
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+  }
+  const existing = new Set(current.split(/\r?\n/));
+  const missing = WORKSPACE_GITIGNORE.trim()
+    .split('\n')
+    .filter((line) => !existing.has(line));
+  if (missing.length)
+    await writeFile(
+      path,
+      current + (current && !current.endsWith('\n') ? '\n' : '') + missing.join('\n') + '\n',
+    );
 };
 
 export const initGitRepo = async (workspace: string, message: string): Promise<string> => {

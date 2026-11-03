@@ -1,7 +1,14 @@
+import { timed, timedSync } from '../timing.js';
+import {
+  recoverTransaction,
+  RecoveryRequiredError,
+  historyHealth,
+} from '../workspace/transaction.js';
+import { WorkspaceNotEmptyError } from '../workspace/initialize.js';
 import { auditVisuals } from './visual-audit.js';
 import { ChartDataError, verifyChartData } from './chart-data.js';
 import { randomUUID } from 'node:crypto';
-import { copyFile, rename, rm } from 'node:fs/promises';
+import { access, copyFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   err,
@@ -18,7 +25,12 @@ import { rankFind } from '../find/rank.js';
 import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addressing.js';
 import { collectPptxFindCandidates } from './find-candidates.js';
 import { editionCapabilities, editionMetadata } from './edition.js';
-import { buildIndex, findIndexed, matchesSelector, mergeSlides } from './indexer.js';
+import {
+  buildIndex as buildIndexImpl,
+  findIndexed,
+  matchesSelector,
+  mergeSlides,
+} from './indexer.js';
 import { loadIndex } from './index-sync.js';
 import {
   layoutDisplayName,
@@ -48,6 +60,9 @@ import {
   withWriteLock,
 } from './workspace.js';
 import { NS, REL, descendants } from './xml.js';
+
+const buildIndex: typeof buildIndexImpl = (...args) =>
+  timedSync('index', () => buildIndexImpl(...args));
 
 const VERSION = '0.5.0';
 const WRITE_TYPES = new Set([
@@ -109,6 +124,18 @@ export const pptxCapabilities = {
     comboDualAxis: true,
     fill: true,
     embeddedWorkbook: false,
+    createEmbeddedWorkbook: false,
+    updateEmbeddedWorkbook: {
+      supported: true,
+      fixedLengthA1: true,
+      constantCellsOnly: true,
+      sharedWorkbookIsolation: true,
+      formulas: false,
+      resizeRanges: false,
+    },
+    grouping: ['clustered'],
+    secondaryAxis: 'combo',
+    rendering: { html: 'approximate', libreoffice: 'optional', nativeOfficeReviewRequired: true },
     createFamilies: ['bar', 'column', 'line', 'pie', 'combo'],
     editExistingAdvanced: !editionCapabilities.chartBasicOnly,
   },
@@ -670,322 +697,474 @@ export const pptxAdapter: FormatAdapter = {
         elementCount: index.elements.length,
       });
     } catch (cause) {
-      return err('IO_ERROR', cause instanceof Error ? cause.message : 'PPTX init failed');
+      return err(
+        cause instanceof WorkspaceNotEmptyError ? 'WORKSPACE_NOT_EMPTY' : 'IO_ERROR',
+        cause instanceof Error ? cause.message : 'PPTX init failed',
+      );
     }
   },
   async execute(command) {
     const workspace = resolve(command.workspaceId);
     try {
-      if (command.type === 'undo') {
-        return await withWriteLock(workspace, async () => {
-          try {
-            const result = await undoWrites(workspace, command.steps);
-            return ok(result);
-          } catch (cause) {
-            return err('VALIDATION_FAILED', cause instanceof Error ? cause.message : 'Undo failed');
-          }
-        });
-      }
-      if (command.type === 'history') {
-        const { records, total } = await readHistory(workspace, command.limit, command.offset);
-        const filtered =
-          command.slide !== undefined
-            ? records.filter((record) => record.slides.includes(command.slide!))
-            : records;
-        return ok({
-          records: filtered,
-          total: command.slide !== undefined ? filtered.length : total,
-        });
-      }
+      await access(resolve(workspace, '.deckuse'));
+    } catch (cause) {
+      return err(
+        (cause as NodeJS.ErrnoException).code === 'ENOENT' ? 'WORKSPACE_NOT_FOUND' : 'IO_ERROR',
+        cause instanceof Error ? cause.message : 'Workspace unavailable',
+      );
+    }
+    return withWriteLock(workspace, async () => {
+      try {
+        await withWriteLock(workspace, () => recoverTransaction(workspace));
+        if (command.type === 'undo') {
+          return await withWriteLock(workspace, async () => {
+            try {
+              const result = await undoWrites(workspace, command.steps);
+              return ok(result);
+            } catch (cause) {
+              return err(
+                'VALIDATION_FAILED',
+                cause instanceof Error ? cause.message : 'Undo failed',
+              );
+            }
+          });
+        }
+        if (command.type === 'history') {
+          const { records, total } = await readHistory(workspace, command.limit, command.offset);
+          const filtered =
+            command.slide !== undefined
+              ? records.filter((record) => record.slides.includes(command.slide!))
+              : records;
+          return ok({
+            records: filtered,
+            total: command.slide !== undefined ? filtered.length : total,
+          });
+        }
 
-      const manifest = await readManifest(workspace);
-      if (manifest.schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
+        const manifest = await readManifest(workspace);
+        if (manifest.schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
+          if (command.type === 'status') {
+            return ok({
+              workspaceId: workspace,
+              format: manifest.format,
+              revision: manifest.revision,
+              schemaVersion: manifest.schemaVersion,
+              compatible: false,
+              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
+              capabilities: manifest.metadata?.['capabilities'],
+            });
+          }
+        }
+
+        const archive = await openWorkspaceArchive(workspace);
+        const index = await loadIndex(workspace, archive, manifest, { persist: true });
+
         if (command.type === 'status') {
+          const diagnostics = validateArchive(archive, workspace);
           return ok({
             workspaceId: workspace,
             format: manifest.format,
             revision: manifest.revision,
             schemaVersion: manifest.schemaVersion,
-            compatible: false,
-            hint: 'Re-run deckuse init to upgrade this workspace to protocol 2.0.',
-            capabilities: manifest.metadata?.['capabilities'],
-          });
-        }
-      }
-
-      const archive = await openWorkspaceArchive(workspace);
-      const index = await loadIndex(workspace, archive, manifest, { persist: true });
-
-      if (command.type === 'status') {
-        const diagnostics = validateArchive(archive, workspace);
-        return ok({
-          workspaceId: workspace,
-          format: manifest.format,
-          revision: manifest.revision,
-          schemaVersion: manifest.schemaVersion,
-          compatible: true,
-          adapterVersion: manifest.adapterVersion,
-          source: manifest.source,
-          package: packagePath(workspace),
-          packageStale: await isPackageStale(workspace, manifest),
-          elementCount: index.elements.length,
-          capabilities: pptxCapabilities,
-          ...editionMetadata,
-          branch: 'main',
-          valid: !diagnostics.some((d) => d.severity === 'error'),
-          diagnostics,
-        });
-      }
-
-      if (command.type === 'list') {
-        const listed = listResource(archive, index, command.resource, {
-          ...(command.slide !== undefined ? { slide: command.slide } : {}),
-          ...(command.master !== undefined ? { master: command.master } : {}),
-          ...(command.layout !== undefined ? { layout: command.layout } : {}),
-        });
-        if (listed && typeof listed === 'object' && 'ok' in listed && listed.ok === false)
-          return listed;
-        return ok({ resource: command.resource, items: listed });
-      }
-
-      if (command.type === 'get') {
-        const resolved = resolveTarget(index, command.target);
-        if (!resolved.ok) return resolved;
-        const details = resolveProperties(archive, resolved.value, {
-          resolve: command.resolve,
-          ...(command.props ? { props: command.props } : {}),
-          provenance: command.provenance ?? true,
-        });
-        if (!details.ok) return details;
-        return ok(details.value);
-      }
-
-      if (command.type === 'search') {
-        const items = index.elements.filter((item) => {
-          if (command.kind === 'text') {
-            if (!item.text) return false;
-            if (command.query && !item.text.toLowerCase().includes(command.query.toLowerCase()))
-              return false;
-          } else {
-            if (command.name && item.name !== command.name) return false;
-            if (
-              command.query &&
-              !(item.name ?? '').toLowerCase().includes(command.query.toLowerCase())
-            )
-              return false;
-          }
-          return true;
-        });
-        if (command.kind === 'shape' && command.name) {
-          const named = items.filter((item) => item.name === command.name);
-          if (named.length > 1)
-            return err('AMBIGUOUS_NAME', `Shape name is ambiguous: ${command.name}`);
-        }
-        return ok({
-          matches: items.slice(0, command.limit).map((item) => ({
-            target: targetPathForItem(index, item),
-            uid: uidForItem(item),
-            name: item.name,
-            kind: item.kind,
-            text: item.text?.slice(0, 200),
-            context: item.partUri,
-          })),
-        });
-      }
-
-      if (command.type === 'find') {
-        return await rankFind({
-          candidates: collectPptxFindCandidates(index, command),
-          query: command.query,
-          limit: command.limit,
-          model: command.model,
-        });
-      }
-
-      if (command.type === 'inspect') {
-        if (command.target) {
-          const resolved = resolveTarget(index, command.target);
-          if (!resolved.ok) return resolved;
-          const details = resolveProperties(archive, resolved.value, {
-            resolve: 'both',
-            provenance: true,
-          });
-          if (!details.ok) return details;
-          return ok({
-            target: resolved.value.target,
-            uid: resolved.value.uid,
-            kind: resolved.value.item.kind,
-            name: resolved.value.item.name,
-            partUri: resolved.value.item.partUri,
-            transform: resolved.value.item.transform,
-            visualTree: command.visualTree
-              ? index.elements
-                  .filter((item) => item.partUri === resolved.value.item.partUri)
-                  .map((item) => ({
-                    target: targetPathForItem(index, item),
-                    kind: item.kind,
-                    name: item.name,
-                  }))
-              : undefined,
-            properties: details.value.properties,
-            warnings: details.value.warnings,
-          });
-        }
-        if (command.ref) {
-          const item = findIndexed(index, command.ref);
-          return item ? ok(item) : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
-        }
-        return ok({
-          document: { format: 'pptx', revision: index.revision, capabilities: pptxCapabilities },
-          elements: index.elements,
-        });
-      }
-
-      if (command.type === 'query') {
-        const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
-        return ok({
-          items: matched.slice(0, command.limit),
-          total: matched.length,
-          truncated: matched.length > command.limit,
-        });
-      }
-
-      if (command.type === 'getText') {
-        const item = findIndexed(index, command.ref);
-        return item
-          ? ok({
-              ref: item.ref,
-              target: targetPathForItem(index, item),
-              uid: uidForItem(item),
-              slide: item.slideId,
-              text: item.text ?? '',
-              kind: item.kind,
-              geometry: item.transform,
-              location: item.location,
-              payload:
-                item.kind === 'chart' ||
-                item.kind === 'picture' ||
-                item.kind === 'video' ||
-                item.kind === 'audio'
-                  ? item.payload
-                  : undefined,
-            })
-          : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
-      }
-
-      if (command.type === 'validate') {
-        const diagnostics = validateArchive(archive, workspace);
-        const chartData = await verifyChartData(archive);
-        const visual = auditVisuals(archive, command.slide);
-        if (command.render) diagnostics.push(...visual.diagnostics);
-        else if (command.profile === 'delivery')
-          diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
-        diagnostics.push(...chartDataDiagnostics(chartData, command.profile === 'delivery'));
-
-        return diagnostics.some((d) => d.severity === 'error')
-          ? err(
-              'VALIDATION_FAILED',
-              'PPTX validation failed',
-              diagnostics,
-              notesRepairHintExtra(workspace, diagnostics),
-            )
-          : ok(
-              {
-                valid: true,
-                revision: index.revision,
-                capabilities: pptxCapabilities,
-                chartData,
-                visual,
-                diagnostics,
-              },
-              diagnostics,
-            );
-      }
-
-      if (command.type === 'export') {
-        if (command.revision !== undefined && String(command.revision) !== manifest.revision)
-          return err(
-            'UNSUPPORTED_CAPABILITY',
-            'Export of historical revisions is not available in Phase 1a',
-            [],
-            { hint: 'Omit --revision to export the current workspace package.' },
-          );
-        const output = resolve(command.output);
-        const fromPackage = command.fromPackage === true;
-        let repacked = false;
-        let exportRevision = manifest.revision;
-        if (!fromPackage) {
-          const packed = await repackWorkspace(workspace);
-          exportRevision = packed.manifest.revision;
-          repacked = true;
-        }
-        const temporary = `${output}.${randomUUID()}.tmp`;
-        try {
-          await copyFile(packagePath(workspace), temporary);
-          let exported: OpcArchive;
-          try {
-            exported = await OpcArchive.openFile(temporary);
-          } catch (cause) {
-            await rm(temporary, { force: true });
-            throw cause;
-          }
-          const diagnostics = validateArchive(exported, workspace);
-          const chartData = await verifyChartData(exported);
-          const visual = auditVisuals(exported);
-          if (command.profile !== 'delivery')
-            diagnostics.push(...chartDataDiagnostics(chartData, false));
-          if (command.profile === 'delivery') {
-            diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
-            diagnostics.push(...chartDataDiagnostics(chartData, true));
-            if (diagnostics.some((d) => d.severity === 'error')) {
-              await rm(temporary, { force: true });
-              return err(
-                'VALIDATION_FAILED',
-                'Delivery validation failed; output was not replaced',
-                diagnostics,
-              );
-            }
-          }
-          try {
-            await rename(temporary, output);
-          } finally {
-            await rm(temporary, { force: true });
-          }
-
-          return ok({
-            output,
-            revision: exportRevision,
-            repacked,
-            fromPackage,
-            chartData,
-            visual,
+            compatible: true,
+            adapterVersion: manifest.adapterVersion,
+            source: manifest.source,
+            package: packagePath(workspace),
+            health: await historyHealth(workspace),
+            packageStale: await isPackageStale(workspace, manifest),
+            elementCount: index.elements.length,
+            capabilities: pptxCapabilities,
+            ...editionMetadata,
+            branch: 'main',
             valid: !diagnostics.some((d) => d.severity === 'error'),
             diagnostics,
           });
-        } finally {
-          await rm(temporary, { force: true });
         }
-      }
 
-      if (command.type === 'repair') {
+        if (command.type === 'list') {
+          const listed = listResource(archive, index, command.resource, {
+            ...(command.slide !== undefined ? { slide: command.slide } : {}),
+            ...(command.master !== undefined ? { master: command.master } : {}),
+            ...(command.layout !== undefined ? { layout: command.layout } : {}),
+          });
+          if (listed && typeof listed === 'object' && 'ok' in listed && listed.ok === false)
+            return listed;
+          return ok({ resource: command.resource, items: listed });
+        }
+
+        if (command.type === 'get') {
+          const resolved = resolveTarget(index, command.target);
+          if (!resolved.ok) return resolved;
+          const details = resolveProperties(archive, resolved.value, {
+            resolve: command.resolve,
+            ...(command.props ? { props: command.props } : {}),
+            provenance: command.provenance ?? true,
+          });
+          if (!details.ok) return details;
+          return ok(details.value);
+        }
+
+        if (command.type === 'search') {
+          const items = index.elements.filter((item) => {
+            if (command.kind === 'text') {
+              if (!item.text) return false;
+              if (command.query && !item.text.toLowerCase().includes(command.query.toLowerCase()))
+                return false;
+            } else {
+              if (command.name && item.name !== command.name) return false;
+              if (
+                command.query &&
+                !(item.name ?? '').toLowerCase().includes(command.query.toLowerCase())
+              )
+                return false;
+            }
+            return true;
+          });
+          if (command.kind === 'shape' && command.name) {
+            const named = items.filter((item) => item.name === command.name);
+            if (named.length > 1)
+              return err('AMBIGUOUS_NAME', `Shape name is ambiguous: ${command.name}`);
+          }
+          return ok({
+            matches: items.slice(0, command.limit).map((item) => ({
+              target: targetPathForItem(index, item),
+              uid: uidForItem(item),
+              name: item.name,
+              kind: item.kind,
+              text: item.text?.slice(0, 200),
+              context: item.partUri,
+            })),
+          });
+        }
+
+        if (command.type === 'find') {
+          return await rankFind({
+            candidates: collectPptxFindCandidates(index, command),
+            query: command.query,
+            limit: command.limit,
+            model: command.model,
+          });
+        }
+
+        if (command.type === 'inspect') {
+          if (command.target) {
+            const resolved = resolveTarget(index, command.target);
+            if (!resolved.ok) return resolved;
+            const details = resolveProperties(archive, resolved.value, {
+              resolve: 'both',
+              provenance: true,
+            });
+            if (!details.ok) return details;
+            return ok({
+              target: resolved.value.target,
+              uid: resolved.value.uid,
+              kind: resolved.value.item.kind,
+              name: resolved.value.item.name,
+              partUri: resolved.value.item.partUri,
+              transform: resolved.value.item.transform,
+              visualTree: command.visualTree
+                ? index.elements
+                    .filter((item) => item.partUri === resolved.value.item.partUri)
+                    .map((item) => ({
+                      target: targetPathForItem(index, item),
+                      kind: item.kind,
+                      name: item.name,
+                    }))
+                : undefined,
+              properties: details.value.properties,
+              warnings: details.value.warnings,
+            });
+          }
+          if (command.ref) {
+            const item = findIndexed(index, command.ref);
+            return item ? ok(item) : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
+          }
+          return ok({
+            document: { format: 'pptx', revision: index.revision, capabilities: pptxCapabilities },
+            elements: index.elements,
+          });
+        }
+
+        if (command.type === 'query') {
+          const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+          return ok({
+            items: matched.slice(0, command.limit),
+            total: matched.length,
+            truncated: matched.length > command.limit,
+          });
+        }
+
+        if (command.type === 'getText') {
+          const item = findIndexed(index, command.ref);
+          return item
+            ? ok({
+                ref: item.ref,
+                target: targetPathForItem(index, item),
+                uid: uidForItem(item),
+                slide: item.slideId,
+                text: item.text ?? '',
+                kind: item.kind,
+                geometry: item.transform,
+                location: item.location,
+                payload:
+                  item.kind === 'chart' ||
+                  item.kind === 'picture' ||
+                  item.kind === 'video' ||
+                  item.kind === 'audio'
+                    ? item.payload
+                    : undefined,
+              })
+            : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
+        }
+
+        if (command.type === 'validate') {
+          const diagnostics = validateArchive(archive, workspace);
+          const chartData = await verifyChartData(archive);
+          const visual = auditVisuals(archive, command.slide);
+          if (command.render) diagnostics.push(...visual.diagnostics);
+          else if (command.profile === 'delivery')
+            diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
+          diagnostics.push(...chartDataDiagnostics(chartData, command.profile === 'delivery'));
+
+          return diagnostics.some((d) => d.severity === 'error')
+            ? err(
+                'VALIDATION_FAILED',
+                'PPTX validation failed',
+                diagnostics,
+                notesRepairHintExtra(workspace, diagnostics),
+              )
+            : ok(
+                {
+                  valid: true,
+                  revision: index.revision,
+                  capabilities: pptxCapabilities,
+                  chartData,
+                  visual,
+                  diagnostics,
+                },
+                diagnostics,
+              );
+        }
+
+        if (command.type === 'export') {
+          if (command.revision !== undefined && String(command.revision) !== manifest.revision)
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              'Export of historical revisions is not available in Phase 1a',
+              [],
+              { hint: 'Omit --revision to export the current workspace package.' },
+            );
+          const output = resolve(command.output);
+          const fromPackage = command.fromPackage === true;
+          let repacked = false;
+          let exportRevision = manifest.revision;
+          if (!fromPackage) {
+            const packed = await repackWorkspace(workspace);
+            exportRevision = packed.manifest.revision;
+            repacked = true;
+          }
+          const temporary = `${output}.${randomUUID()}.tmp`;
+          try {
+            await copyFile(packagePath(workspace), temporary);
+            let exported: OpcArchive;
+            try {
+              exported = await OpcArchive.openFile(temporary);
+            } catch (cause) {
+              await rm(temporary, { force: true });
+              throw cause;
+            }
+            const diagnostics = validateArchive(exported, workspace);
+            const chartData = await verifyChartData(exported);
+            const visual = auditVisuals(exported);
+            if (command.profile !== 'delivery')
+              diagnostics.push(...chartDataDiagnostics(chartData, false));
+            if (command.profile === 'delivery') {
+              diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
+              diagnostics.push(...chartDataDiagnostics(chartData, true));
+              if (diagnostics.some((d) => d.severity === 'error')) {
+                await rm(temporary, { force: true });
+                return err(
+                  'VALIDATION_FAILED',
+                  'Delivery validation failed; output was not replaced',
+                  diagnostics,
+                );
+              }
+            }
+            try {
+              await rename(temporary, output);
+            } finally {
+              await rm(temporary, { force: true });
+            }
+
+            return ok({
+              output,
+              revision: exportRevision,
+              repacked,
+              fromPackage,
+              chartData,
+              visual,
+              valid: !diagnostics.some((d) => d.severity === 'error'),
+              diagnostics,
+            });
+          } finally {
+            await rm(temporary, { force: true });
+          }
+        }
+
+        if (command.type === 'repair') {
+          const conflict = assertExpectRevision(command, manifest.revision);
+          if (conflict) return conflict;
+          return await withWriteLock(workspace, async () => {
+            const currentManifest = await readManifest(workspace);
+            const locked = assertExpectRevision(command, currentManifest.revision);
+            if (locked) return locked;
+            const working = await openWorkspaceArchive(workspace);
+            working.markClean();
+            const planned = planNotesSlideRepairs(working);
+            if (planned.ambiguous.length > 0) {
+              return err(
+                'AMBIGUOUS_REFERENCE',
+                'Notes slide relationships cannot be repaired without ambiguity',
+                planned.ambiguous,
+                { hint: repairNotesHint(workspace) },
+              );
+            }
+            if (planned.fixes.length === 0) {
+              const validation = validateArchive(working, workspace);
+              if (validation.some((d) => d.severity === 'error'))
+                return err(
+                  'VALIDATION_FAILED',
+                  'PPTX validation failed',
+                  validation,
+                  notesRepairHintExtra(workspace, validation),
+                );
+              return ok({
+                repaired: [],
+                valid: true,
+                dryRun: command.dryRun === true,
+                revision: currentManifest.revision,
+              });
+            }
+            applyNotesSlideRepairs(working, planned.fixes);
+            const validation = validateArchive(working, workspace);
+            if (validation.some((d) => d.severity === 'error'))
+              return err(
+                'VALIDATION_FAILED',
+                'PPTX validation failed after notes repair',
+                validation,
+                notesRepairHintExtra(workspace, validation),
+              );
+            const changedParts = working.getDirtyParts();
+            if (command.dryRun)
+              return ok({
+                repaired: planned.fixes,
+                valid: true,
+                dryRun: true,
+                revision: currentManifest.revision,
+                changedParts,
+              });
+            const rev = nextRevision(currentManifest.revision);
+            const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+            const saved = await persistWrite(
+              workspace,
+              working,
+              currentManifest,
+              nextIndex,
+              command,
+              [],
+            );
+            return ok({
+              repaired: planned.fixes,
+              valid: true,
+              dryRun: false,
+              revision: saved.revision,
+              changedParts,
+            });
+          });
+        }
+
+        if (!WRITE_TYPES.has(command.type))
+          return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
+
         const conflict = assertExpectRevision(command, manifest.revision);
         if (conflict) return conflict;
+
         return await withWriteLock(workspace, async () => {
           const currentManifest = await readManifest(workspace);
           const locked = assertExpectRevision(command, currentManifest.revision);
           if (locked) return locked;
+
           const working = await openWorkspaceArchive(workspace);
-          working.markClean();
-          const planned = planNotesSlideRepairs(working);
-          if (planned.ambiguous.length > 0) {
-            return err(
-              'AMBIGUOUS_REFERENCE',
-              'Notes slide relationships cannot be repaired without ambiguity',
-              planned.ambiguous,
-              { hint: repairNotesHint(workspace) },
+          let currentIndex = await loadIndex(workspace, working, currentManifest);
+          const STRUCTURAL_TYPES = new Set([
+            'set',
+            'setProperties',
+            'setText',
+            'replaceText',
+            'addShape',
+            'addSlide',
+            'setSlideLayout',
+            'remove',
+            'duplicate',
+            'add',
+            'replacePicture',
+          ]);
+
+          const runBatch = async (
+            nestedCommands: AtomicCommand[],
+            dryRun: boolean | undefined,
+            operation: unknown,
+          ) => {
+            const results: unknown[] = [];
+            const diagnostics: Diagnostic[] = [];
+            const slidePages: number[] = [];
+            const touchedParts = new Set<string>();
+            const changedTargets: string[] = [];
+            working.markClean();
+            for (const nested of nestedCommands) {
+              const result = await timed('mutation', () => mutate(nested, working, currentIndex));
+              diagnostics.push(...result.diagnostics);
+              if (!result.ok) return result;
+              results.push(result.value);
+              slidePages.push(...slidesFromOutcome(result.value));
+              const currentSlides = currentIndex.elements.filter((item) => item.kind === 'slide');
+              for (const page of nested.type === 'addSlide'
+                ? []
+                : slidesFromOutcome(result.value)) {
+                const part = currentSlides[page - 1]?.partUri;
+                if (part) touchedParts.add(part);
+              }
+              if (nested.type === 'addSlide' && result.value.partUri)
+                touchedParts.add(result.value.partUri);
+              if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
+              if (STRUCTURAL_TYPES.has(nested.type)) {
+                currentIndex = buildIndex(
+                  working,
+                  currentManifest.workspaceId,
+                  currentManifest.revision,
+                );
+              }
+            }
+            const finalSlides = currentIndex.elements.filter((item) => item.kind === 'slide');
+            slidePages.splice(
+              0,
+              slidePages.length,
+              ...finalSlides.flatMap((item, i) => (touchedParts.has(item.partUri) ? [i + 1] : [])),
             );
-          }
-          if (planned.fixes.length === 0) {
+            for (const result of results) {
+              if (result && typeof result === 'object' && 'partUri' in result) {
+                const page = finalSlides.findIndex((item) => item.partUri === result.partUri);
+                if (page >= 0)
+                  Object.assign(result, {
+                    index: page + 1,
+                    target: `slide:${String(page + 1)}`,
+                    uid: finalSlides[page] ? uidForItem(finalSlides[page]) : undefined,
+                  });
+              }
+            }
+            // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
+            syncAppSlideCounts(working);
+            const changedParts = working.getDirtyParts();
             const validation = validateArchive(working, workspace);
             if (validation.some((d) => d.severity === 'error'))
               return err(
@@ -994,31 +1173,93 @@ export const pptxAdapter: FormatAdapter = {
                 validation,
                 notesRepairHintExtra(workspace, validation),
               );
-            return ok({
-              repaired: [],
-              valid: true,
-              dryRun: command.dryRun === true,
-              revision: currentManifest.revision,
-            });
-          }
-          applyNotesSlideRepairs(working, planned.fixes);
-          const validation = validateArchive(working, workspace);
-          if (validation.some((d) => d.severity === 'error'))
-            return err(
-              'VALIDATION_FAILED',
-              'PPTX validation failed after notes repair',
-              validation,
-              notesRepairHintExtra(workspace, validation),
+            if (dryRun)
+              return ok(
+                {
+                  results,
+                  revision: currentManifest.revision,
+                  dryRun: true,
+                  changedTargets: [...new Set(changedTargets)],
+                  changedParts,
+                  affectedSlides: mergeSlides(slidePages),
+                },
+                diagnostics,
+              );
+            const rev = nextRevision(currentManifest.revision);
+            const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+            const saved = await persistWrite(
+              workspace,
+              working,
+              currentManifest,
+              nextIndex,
+              operation,
+              mergeSlides(slidePages),
             );
+            return ok(
+              {
+                results,
+                revision: saved.revision,
+                changedTargets: [...new Set(changedTargets)],
+                changedParts,
+                affectedSlides: mergeSlides(slidePages),
+              },
+              diagnostics,
+            );
+          };
+
+          if (command.type === 'applyTransaction') {
+            const mapped = transactionOpsToAtomic(
+              command.operations,
+              command.workspaceId,
+              command.transactionId,
+            );
+            if (!mapped.ok) return mapped;
+            return runBatch(mapped.value, command.dryRun, command);
+          }
+
+          if (command.type === 'batch') {
+            return runBatch(command.commands, command.dryRun, command);
+          }
+
+          working.markClean();
+          const result = await timed('mutation', () =>
+            mutate(command as AtomicCommand, working, currentIndex),
+          );
+          if (!result.ok) return result;
+          if (command.type === 'addSlide') {
+            const fresh = buildIndex(
+              working,
+              currentManifest.workspaceId,
+              currentManifest.revision,
+            );
+            const slides = fresh.elements.filter((item) => item.kind === 'slide');
+            const page = slides.findIndex((item) => item.partUri === result.value.partUri);
+            const item = slides[page];
+            if (item)
+              Object.assign(result.value, {
+                index: page + 1,
+                target: `slide:${String(page + 1)}`,
+                uid: uidForItem(item),
+                slides: [page + 1],
+              });
+          }
+          // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
+          syncAppSlideCounts(working);
           const changedParts = working.getDirtyParts();
+          const validation = validateArchive(working);
+          if (validation.some((d) => d.severity === 'error'))
+            return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
           if (command.dryRun)
-            return ok({
-              repaired: planned.fixes,
-              valid: true,
-              dryRun: true,
-              revision: currentManifest.revision,
-              changedParts,
-            });
+            return ok(
+              {
+                ...result.value,
+                revision: currentManifest.revision,
+                dryRun: true,
+                changedParts,
+                affectedSlides: slidesFromOutcome(result.value),
+              },
+              result.diagnostics,
+            );
           const rev = nextRevision(currentManifest.revision);
           const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
           const saved = await persistWrite(
@@ -1027,174 +1268,28 @@ export const pptxAdapter: FormatAdapter = {
             currentManifest,
             nextIndex,
             command,
-            [],
+            slidesFromOutcome(result.value),
           );
-          return ok({
-            repaired: planned.fixes,
-            valid: true,
-            dryRun: false,
-            revision: saved.revision,
-            changedParts,
-          });
-        });
-      }
-
-      if (!WRITE_TYPES.has(command.type))
-        return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
-
-      const conflict = assertExpectRevision(command, manifest.revision);
-      if (conflict) return conflict;
-
-      return await withWriteLock(workspace, async () => {
-        const currentManifest = await readManifest(workspace);
-        const locked = assertExpectRevision(command, currentManifest.revision);
-        if (locked) return locked;
-
-        const working = await openWorkspaceArchive(workspace);
-        let currentIndex = await loadIndex(workspace, working, currentManifest);
-        const STRUCTURAL_TYPES = new Set([
-          'set',
-          'setProperties',
-          'setText',
-          'replaceText',
-          'addShape',
-          'addSlide',
-          'setSlideLayout',
-          'remove',
-          'duplicate',
-          'add',
-          'replacePicture',
-        ]);
-
-        const runBatch = async (
-          nestedCommands: AtomicCommand[],
-          dryRun: boolean | undefined,
-          operation: unknown,
-        ) => {
-          const results: unknown[] = [];
-          const diagnostics: Diagnostic[] = [];
-          const slidePages: number[] = [];
-          const changedTargets: string[] = [];
-          working.markClean();
-          for (const nested of nestedCommands) {
-            const result = await mutate(nested, working, currentIndex);
-            diagnostics.push(...result.diagnostics);
-            if (!result.ok) return result;
-            results.push(result.value);
-            slidePages.push(...slidesFromOutcome(result.value));
-            if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
-            if (STRUCTURAL_TYPES.has(nested.type)) {
-              currentIndex = buildIndex(
-                working,
-                currentManifest.workspaceId,
-                currentManifest.revision,
-              );
-            }
-          }
-          // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
-          syncAppSlideCounts(working);
-          const changedParts = working.getDirtyParts();
-          const validation = validateArchive(working, workspace);
-          if (validation.some((d) => d.severity === 'error'))
-            return err(
-              'VALIDATION_FAILED',
-              'PPTX validation failed',
-              validation,
-              notesRepairHintExtra(workspace, validation),
-            );
-          if (dryRun)
-            return ok(
-              {
-                results,
-                revision: currentManifest.revision,
-                dryRun: true,
-                changedTargets: [...new Set(changedTargets)],
-                changedParts,
-                affectedSlides: mergeSlides(slidePages),
-              },
-              diagnostics,
-            );
-          const rev = nextRevision(currentManifest.revision);
-          const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
-          const saved = await persistWrite(
-            workspace,
-            working,
-            currentManifest,
-            nextIndex,
-            operation,
-            mergeSlides(slidePages),
-          );
-          return ok(
-            {
-              results,
-              revision: saved.revision,
-              changedTargets: [...new Set(changedTargets)],
-              changedParts,
-              affectedSlides: mergeSlides(slidePages),
-            },
-            diagnostics,
-          );
-        };
-
-        if (command.type === 'applyTransaction') {
-          const mapped = transactionOpsToAtomic(
-            command.operations,
-            command.workspaceId,
-            command.transactionId,
-          );
-          if (!mapped.ok) return mapped;
-          return runBatch(mapped.value, command.dryRun, command);
-        }
-
-        if (command.type === 'batch') {
-          return runBatch(command.commands, command.dryRun, command);
-        }
-
-        working.markClean();
-        const result = await mutate(command as AtomicCommand, working, currentIndex);
-        if (!result.ok) return result;
-        // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
-        syncAppSlideCounts(working);
-        const changedParts = working.getDirtyParts();
-        const validation = validateArchive(working);
-        if (validation.some((d) => d.severity === 'error'))
-          return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
-        if (command.dryRun)
           return ok(
             {
               ...result.value,
-              revision: currentManifest.revision,
-              dryRun: true,
+              revision: saved.revision,
               changedParts,
               affectedSlides: slidesFromOutcome(result.value),
             },
             result.diagnostics,
           );
-        const rev = nextRevision(currentManifest.revision);
-        const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
-        const saved = await persistWrite(
-          workspace,
-          working,
-          currentManifest,
-          nextIndex,
-          command,
-          slidesFromOutcome(result.value),
+        });
+      } catch (cause) {
+        return err(
+          cause instanceof RecoveryRequiredError
+            ? 'RECOVERY_REQUIRED'
+            : cause instanceof ChartDataError
+              ? 'UNSUPPORTED_CAPABILITY'
+              : 'IO_ERROR',
+          cause instanceof Error ? cause.message : 'PPTX operation failed',
         );
-        return ok(
-          {
-            ...result.value,
-            revision: saved.revision,
-            changedParts,
-            affectedSlides: slidesFromOutcome(result.value),
-          },
-          result.diagnostics,
-        );
-      });
-    } catch (cause) {
-      return err(
-        cause instanceof ChartDataError ? 'UNSUPPORTED_CAPABILITY' : 'IO_ERROR',
-        cause instanceof Error ? cause.message : 'PPTX operation failed',
-      );
-    }
+      }
+    });
   },
 };

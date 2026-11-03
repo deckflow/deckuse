@@ -85,12 +85,17 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
         path: partUri,
         revision: rev,
       };
+    const slideName = archive
+      .readXml(partUri)
+      .getElementsByTagNameNS(NS.p, 'cSld')
+      .item(0)
+      ?.getAttribute('name');
     elements.push({
       ref: slideRef,
       kind: 'slide',
       partUri,
       slideId,
-      name: `Slide ${slideId}`,
+      name: slideName?.length ? slideName : `Slide ${slideId}`,
       location: { slideId, partUri },
     });
     const walkSpTree = (

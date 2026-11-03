@@ -413,3 +413,10 @@ Large corpus scans (optional / nightly):
 pnpm test:integration-writes:corpus -- /path/to/pptx-docx-dir
 pnpm test:openability -- ./path/to/package.pptx   # LibreOffice; or --osascript on macOS
 ```
+
+### Agent reliability and batch rendering
+
+See [agent reliability](docs/agent-reliability.md) for JSON error handling,
+transaction recovery, nonempty-directory protection, and snapshot-consistent
+`render --pages 1,3-5` / `render --all` workflows. Use `schema --list --json`
+to discover batchable commands, including `addSlide`.

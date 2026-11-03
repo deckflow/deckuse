@@ -823,10 +823,24 @@ export async function mutate(
       }
     }
     const partUri = addSlide(archive, undefined, layout, command.after);
+    if (command.name) {
+      const slideDoc = archive.readXml(partUri);
+      const content = slideDoc.getElementsByTagNameNS(NS.p, 'cSld').item(0);
+      content?.setAttribute('name', command.name);
+      archive.writeXml(partUri, slideDoc);
+    }
     return ok({
       changed: true,
       partUri,
-      slides: [],
+      slides: [
+        command.after !== undefined && command.after > 0 && command.after <= slides.length
+          ? command.after + 1
+          : slides.length + 1,
+      ],
+      index:
+        command.after !== undefined && command.after > 0 && command.after <= slides.length
+          ? command.after + 1
+          : slides.length + 1,
       changedParts: [partUri, '/ppt/presentation.xml'],
     });
   }

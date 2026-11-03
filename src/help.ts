@@ -34,7 +34,7 @@ Commands:
   align         Align or distribute shapes on a slide
   z             Change z-order
   apply         Apply one or many JSON / JSONL write commands
-  schema        Print command JSON Schema (self-describing CLI)
+  schema        Print command JSON Schema (--list lists types) (self-describing CLI)
   measure       Heuristic text size estimate (for layout)
   validate      Validate package / relationships
   history       Show write history
@@ -62,7 +62,7 @@ const entries: Record<string, HelpEntry> = {
     example: 'deckuse init input.pptx ./workspace --json',
     details: `Arguments:
   <input.pptx>              Source presentation to unpack
-  <workspace/>              Destination directory for the workspace
+  <workspace/>              Destination directory (must be absent or empty)
 
 Options:
   --json                    Machine-readable envelope
@@ -78,7 +78,7 @@ Notes:
       'Create a workspace from a bundled blank template (PPTX by default, or DOCX with --format docx).',
     example: 'deckuse new ./workspace --format docx --json',
     details: `Arguments:
-  <workspace/>              Destination directory for the workspace
+  <workspace/>              Destination directory (must be absent or empty)
 
 Options:
   --format pptx|docx        Template format (default: pptx)
@@ -592,7 +592,7 @@ Accepted input shapes:
 
 Notes:
   Prefer apply for agent workflows: one revision, one audit entry, atomic rollback.
-  Only write command types are accepted (setText, setProperties, addShape,
+  Only write command types are accepted (addSlide, setText, setProperties, addShape,
   setTransform / xfrmSet, alignElements, …).
   setProperties accepts camelCase/nested keys and dotted keys (font.size, fill.color).
   Same-batch forward refs by shape name work after addShape.
@@ -600,6 +600,7 @@ Notes:
 Template (ops.json) — KPI card with inline style:
 
   [
+    { "type": "addSlide", "layout": "Blank", "name": "KPI page" },
     {
       "type": "addShape",
       "slide": 2,
@@ -619,10 +620,11 @@ Template (ops.json) — KPI card with inline style:
     {
       "type": "alignElements",
       "slide": 2,
-      "targets": ["slide:2/shape:kpi-1", "slide:2/shape:kpi-2", "slide:2/shape:kpi-3"],
-      "mode": "distribute-h",
+      "targets": ["slide:2/shape:kpi-1"],
+      "mode": "left",
       "gap": "20px"
-    }
+    },
+    { "type": "setText", "target": "slide:2/shape:kpi-1", "value": "Updated KPI" }
   ]
 
 Examples:
@@ -632,10 +634,11 @@ Examples:
   },
 
   schema: {
-    usage: 'deckuse schema [--type <commandType>] [--json]',
+    usage: 'deckuse schema [--list | --type <commandType>] [--json]',
     summary: 'Print the command JSON Schema (Draft 2020-12) with CLI/protocol version.',
     example: 'deckuse schema --type addShape --json',
     details: `Options:
+  --list                   List command types and batchable types
   --type <commandType>      Slice to one command (e.g. addShape, setProperties, batch)
   --json                    Compact JSON (default pretty-print)
 
@@ -730,7 +733,8 @@ Notes:
 
   export: {
     usage: 'deckuse export <output.pptx> [options]',
-    summary: 'Pack workspace source/ to .pptx (default) or copy package.pptx.',
+    summary:
+      'Rebuild from source/ by default; --from-package copies the snapshot. Output path is required.',
     example: 'deckuse export ./out.pptx --workspace ./workspace --json',
     details: `Arguments:
   <output.pptx>             Destination path
@@ -792,6 +796,9 @@ Examples:
   --page <n>                One-based slide index (exactly one page per call)
 
 Options:
+  --pages <1,3-5>          Render several pages from one snapshot (use --output-dir)
+  --all                    Render all pages from one snapshot
+  --output-dir <dir>       Batch PNG directory; mutually exclusive with --output
   --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)
   --scale <n>               Device scale factor (default: 1)
   --workspace <path>        Workspace root (default: nearest .deckuse)
