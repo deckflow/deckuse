@@ -56,7 +56,7 @@
     "benchmark:agent": "node scripts/benchmark-agent-workflow.mjs"
   },
   "dependencies": {
-    "@deckflow/deck2html": "^0.5.0",
+    "@deckflow/deck2html": "^0.6.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
