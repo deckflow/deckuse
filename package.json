@@ -51,7 +51,7 @@
     "uninstall:global": "node scripts/uninstall-global.mjs",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm check:no-commercial-leak && node scripts/sync-npm-readme.mjs && changeset publish && node scripts/sync-npm-readme.mjs --restore",
+    "release": "bash scripts/release.sh",
     "test:agent-package": "node scripts/check-agent-package.mjs",
     "benchmark:agent": "node scripts/benchmark-agent-workflow.mjs"
   },
