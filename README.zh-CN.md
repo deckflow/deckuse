@@ -82,6 +82,19 @@ deckuse monitor --workspace ./workspace --port 4173
 deckuse render --page 1 --workspace ./workspace --json
 ```
 
+批量截图可使用项目脚本（调用当前项目的 `bin/deckuse render`）：
+
+```bash
+# 支持多个 PPTX/DOCX 文件、Deckuse 工作区，或包含 Office 文件的目录。
+node scripts/batch-render.mjs ./presentations ./workspace --output-dir ./screenshots
+node scripts/batch-render.mjs ./presentations -j 4 --scale 2
+```
+
+默认并发数为 `max(1, CPU 核心数 - 2)`，可用 `-j` / `--concurrency` 指定正整数。
+普通目录只扫描当前层的 PPTX/DOCX 文件；每个输入的全部页面输出到独立的编号子目录。
+原始文件通过临时工作区渲染，结束后清理临时工作区。单项失败后继续处理，其余任务完成后汇总；存在失败时退出码为 1。
+优先调用项目的 `bin/deckuse`；该入口不存在或链接失效时，自动使用 `node dist/bin.js`。若构建产物也不存在，请先运行 `pnpm build`。
+
 全局选项包括 `--workspace`、`--json`、`--dry-run`、`--expect-revision`、`--reason`。完整 CLI 契约见 `deckuse --help` 或 `deckuse <command> --help`。
 
 工作区布局：
