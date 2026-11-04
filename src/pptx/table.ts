@@ -1,11 +1,5 @@
-import {
-  err,
-  ok,
-  parseLength,
-  type Diagnostic,
-  type LengthInput,
-  type Result,
-} from '../core/index.js';
+import { requireDefined } from '../required.js';
+import { err, ok, parseLength, type Diagnostic, type Result } from '../core/index.js';
 import type { Element } from '@xmldom/xmldom';
 import {
   applyShapeProperties,
@@ -92,10 +86,7 @@ const normalizeColor = (value: string): string => {
 const isNone = (value: unknown): boolean => {
   if (value === null || value === false || value === 'none') return true;
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    'type' in value &&
-    (value as { type?: unknown }).type === 'none'
+    typeof value === 'object' && 'type' in value && (value as { type?: unknown }).type === 'none'
   );
 };
 
@@ -146,7 +137,12 @@ const growFrame = (graphicFrame: Element, deltaCx: number, deltaCy: number): voi
   }
 };
 
-type FrameBox = { x: number; y: number; cx: number; cy: number };
+interface FrameBox {
+  x: number;
+  y: number;
+  cx: number;
+  cy: number;
+}
 
 const frameBoxOf = (node: Element): FrameBox | undefined => {
   const xfrm = first(node, 'xfrm');
@@ -558,7 +554,7 @@ const applyTableColumnWidths = (graphicFrame: Element, raw: unknown): void => {
   if (!Array.isArray(raw)) throw new Error('columnWidths must be an array');
   const widths: number[] = [];
   for (let i = 0; i < cols; i++) {
-    const entry = raw[i];
+    const entry: unknown = raw[i];
     if (entry === undefined) {
       widths.push(Math.floor(widthEmu / cols));
       continue;
@@ -568,7 +564,7 @@ const applyTableColumnWidths = (graphicFrame: Element, raw: unknown): void => {
       if (!Number.isFinite(pct)) throw new Error(`Invalid columnWidths[%]: ${entry}`);
       widths.push(Math.round((pct / 100) * widthEmu));
     } else if (typeof entry === 'number' || typeof entry === 'string') {
-      widths.push(parseLength(entry as LengthInput, { axis: 'x' }));
+      widths.push(parseLength(entry, { axis: 'x' }));
     } else throw new Error('columnWidths entries must be lengths or percentages');
   }
   const sum = widths.reduce((a, b) => a + b, 0);
@@ -577,7 +573,7 @@ const applyTableColumnWidths = (graphicFrame: Element, raw: unknown): void => {
     sum === widthEmu ? widths : widths.map((w) => Math.max(1, Math.round((w / sum) * widthEmu)));
   if (sum !== widthEmu) {
     const scaledSum = scaled.reduce((a, b) => a + b, 0);
-    scaled[scaled.length - 1]! += widthEmu - scaledSum;
+    scaled[scaled.length - 1] = requireDefined(scaled[scaled.length - 1]) + widthEmu - scaledSum;
   }
   for (let i = 0; i < cols; i++) {
     let col = existing[i];
@@ -678,7 +674,7 @@ export function remeasureTableAfterCellChange(graphicFrame: Element): {
   if (wasContentSized || currentCy <= 0) {
     for (let i = 0; i < rows.length; i++) {
       const h = measured.rowHeightsEmu[i] ?? estimateTableRowHeightEmu(11);
-      rows[i]!.setAttribute('h', String(h));
+      requireDefined(rows[i]).setAttribute('h', String(h));
     }
     if (ext) {
       if (measured.totalHeightEmu > currentCy) grew = true;
@@ -767,7 +763,7 @@ export function applyTableProperties(
       if (cells.length === 0) throw new Error('Table has no cells for stroke');
       for (const cell of cells) setTableCellBorders(cell, visual[key]);
       applied.push(key);
-      delete visual[key];
+      Reflect.deleteProperty(visual, key);
     }
 
     if (Object.keys(visual).length > 0) {
@@ -914,7 +910,7 @@ export function applyTableLayout(
     totalHeightEmu = layout.frameEmu;
     for (let i = 0; i < rows.length; i++) {
       const h = layout.rowHeightsEmu[i] ?? estimateTableRowHeightEmu(11);
-      rows[i]!.setAttribute('h', String(h));
+      requireDefined(rows[i]).setAttribute('h', String(h));
     }
     applied.push('redistribute:content');
   } else {
@@ -928,7 +924,7 @@ export function applyTableLayout(
     let assigned = 0;
     for (let i = 0; i < rows.length; i++) {
       const h = i === rows.length - 1 ? Math.max(1, totalHeightEmu - assigned) : rowH;
-      rows[i]!.setAttribute('h', String(h));
+      requireDefined(rows[i]).setAttribute('h', String(h));
       rowHeightsEmu.push(h);
       assigned += h;
     }
@@ -948,7 +944,7 @@ export function applyTableLayout(
   return ok({
     applied,
     totalHeightEmu,
-    ...(estimatedEmu !== undefined ? { estimatedEmu } : {}),
+    estimatedEmu,
     layout,
   });
 }

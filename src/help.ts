@@ -1,3 +1,4 @@
+import { requireDefined } from './required.js';
 import { PROTOCOL_VERSION } from './core/index.js';
 
 const GLOBAL_OPTIONS = `Global options:
@@ -48,12 +49,12 @@ Commands:
 Run 'deckuse <command> --help' for details.
 `;
 
-type HelpEntry = {
+interface HelpEntry {
   usage: string;
   summary: string;
   example: string;
   details?: string;
-};
+}
 
 const entries: Record<string, HelpEntry> = {
   init: {
@@ -903,7 +904,7 @@ export const resolveHelp = (topic: string[]): string => {
   if (entry) return formatEntry(entry);
 
   if (topic.length > 1) {
-    const parentKey = topic[0]!.toLowerCase();
+    const parentKey = requireDefined(topic[0]).toLowerCase();
     const parent = entries[parentKey];
     if (parent) {
       return (
@@ -915,7 +916,9 @@ export const resolveHelp = (topic: string[]): string => {
   }
 
   return (
-    `Unknown command: ${topic[0]}\n\n` + HELP_MAIN + `Run 'deckuse --help' for the command list.\n`
+    `Unknown command: ${String(topic[0])}\n\n` +
+    HELP_MAIN +
+    `Run 'deckuse --help' for the command list.\n`
   );
 };
 

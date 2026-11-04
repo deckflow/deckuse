@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, posix, resolve } from 'node:path';
@@ -41,8 +42,8 @@ const XML_DANGEROUS = /<!DOCTYPE|<!ENTITY/i;
  */
 export const decodeXmlBytes = (data: Uint8Array): string => {
   if (data.length >= 2) {
-    const b0 = data[0]!;
-    const b1 = data[1]!;
+    const b0 = requireDefined(data[0]);
+    const b1 = requireDefined(data[1]);
     // UTF-16 BE BOM
     if (b0 === 0xfe && b1 === 0xff) return new TextDecoder('utf-16be').decode(data);
     // UTF-16 LE BOM (UTF-32 LE also starts FF FE, but OOXML does not use it)
@@ -153,7 +154,7 @@ export const prettyPrintXml = (source: string): string => {
   const findClose = (openIdx: number): number => {
     let depth = 0;
     for (let j = openIdx; j < tokens.length; j++) {
-      const t = tokens[j]!;
+      const t = requireDefined(tokens[j]);
       if (isOpen(t)) depth += 1;
       else if (isClose(t)) {
         depth -= 1;
@@ -170,7 +171,7 @@ export const prettyPrintXml = (source: string): string => {
     let hasSignificantText = false;
     let hasWsOnlyText = false;
     for (let j = openIdx + 1; j < closeIdx; j++) {
-      const t = tokens[j]!;
+      const t = requireDefined(tokens[j]);
       if (isOpen(t)) {
         if (depth === 0) hasElement = true;
         depth += 1;
@@ -194,8 +195,8 @@ export const prettyPrintXml = (source: string): string => {
 
   const emitElement = (openIdx: number, closeIdx: number, indent: number): void => {
     const pad = '  '.repeat(indent);
-    const open = tokens[openIdx]!;
-    const close = tokens[closeIdx]!;
+    const open = requireDefined(tokens[openIdx]);
+    const close = requireDefined(tokens[closeIdx]);
     if (classify(openIdx, closeIdx) === 'preserve') {
       lines.push(`${pad}${tokens.slice(openIdx, closeIdx + 1).join('')}`);
       return;
@@ -203,7 +204,7 @@ export const prettyPrintXml = (source: string): string => {
     lines.push(`${pad}${open}`);
     let j = openIdx + 1;
     while (j < closeIdx) {
-      const t = tokens[j]!;
+      const t = requireDefined(tokens[j]);
       if (isWsText(t)) {
         j += 1;
         continue;
@@ -237,7 +238,7 @@ export const prettyPrintXml = (source: string): string => {
 
   let i = 0;
   while (i < tokens.length) {
-    const token = tokens[i]!;
+    const token = requireDefined(tokens[i]);
     if (isPiOrDecl(token) || isSelfClosing(token)) {
       lines.push(token);
       i += 1;

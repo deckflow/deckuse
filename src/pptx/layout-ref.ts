@@ -55,7 +55,7 @@ export const layoutDisplayName = (archive: OpcArchive, partUri: string): string 
 export const layoutTypeAttr = (archive: OpcArchive, partUri: string): string | undefined => {
   try {
     const type = attr(root(archive.readXml(partUri)), 'type');
-    return type || undefined;
+    return type === '' ? undefined : type;
   } catch {
     return undefined;
   }
@@ -67,7 +67,7 @@ export const slideLayoutPart = (archive: OpcArchive, slidePart: string): string 
   return rel?.resolvedTarget;
 };
 
-export type LayoutListItem = {
+export interface LayoutListItem {
   index: number;
   target: string;
   name: string;
@@ -75,7 +75,7 @@ export type LayoutListItem = {
   type?: string;
   partUri: string;
   uid: string;
-};
+}
 
 export const layoutListMeta = (
   archive: OpcArchive,
@@ -122,14 +122,14 @@ export const resolveLayoutRef = (
     const slides = index.elements.filter((item) => item.kind === 'slide');
     const slide = slides[page - 1];
     if (!slide)
-      return err('TARGET_NOT_FOUND', `slide:${page} does not exist`, [], {
-        target: `slide:${page}`,
+      return err('TARGET_NOT_FOUND', `slide:${String(page)} does not exist`, [], {
+        target: `slide:${String(page)}`,
         hint: 'Run deckuse list slides --json.',
       });
     const part = slideLayoutPart(archive, slide.partUri);
     if (!part)
-      return err('TARGET_NOT_FOUND', `slide:${page} has no slideLayout relationship`, [], {
-        target: `slide:${page}`,
+      return err('TARGET_NOT_FOUND', `slide:${String(page)} has no slideLayout relationship`, [], {
+        target: `slide:${String(page)}`,
       });
     return ok(part);
   }
@@ -145,8 +145,8 @@ export const resolveLayoutRef = (
       return err('INVALID_COMMAND', `Invalid layout index: ${raw}`, [], { target: raw });
     const hit = layouts[indexNeedle - 1];
     if (!hit)
-      return err('TARGET_NOT_FOUND', `Layout index out of range: ${indexNeedle}`, [], {
-        target: `layout:${indexNeedle}`,
+      return err('TARGET_NOT_FOUND', `Layout index out of range: ${String(indexNeedle)}`, [], {
+        target: `layout:${String(indexNeedle)}`,
         hint: 'Run deckuse list layouts --json.',
       });
     return ok(hit.partUri);

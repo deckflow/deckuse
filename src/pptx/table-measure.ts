@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { EMU_PER_PT, measureText } from '../core/index.js';
 
 /** Default DrawingML cell left/right margin (~0.1"). */
@@ -56,12 +57,13 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
   const widthEmu = Math.max(1, input.widthEmu);
   const equalCol = Math.floor(widthEmu / cols);
   const colWidthsEmu =
-    input.colWidthsEmu && input.colWidthsEmu.length === cols
+    input.colWidthsEmu?.length === cols
       ? [...input.colWidthsEmu]
       : Array.from({ length: cols }, () => equalCol);
   if (colWidthsEmu.length > 0 && !input.colWidthsEmu) {
     const sum = colWidthsEmu.reduce((a, b) => a + b, 0);
-    colWidthsEmu[colWidthsEmu.length - 1]! += widthEmu - sum;
+    colWidthsEmu[colWidthsEmu.length - 1] =
+      requireDefined(colWidthsEmu[colWidthsEmu.length - 1]) + widthEmu - sum;
   }
   const headerBold = input.headerBold !== false;
   const minRow = estimateTableRowHeightEmu(fontPt);
@@ -100,7 +102,7 @@ export function measureTableLayout(input: TableMeasureInput): TableMeasureResult
     const sum = rowHeightsEmu.reduce((a, b) => a + b, 0);
     const delta = totalHeightEmu - sum;
     if (delta !== 0) {
-      const last = rowHeightsEmu[rowHeightsEmu.length - 1]!;
+      const last = requireDefined(rowHeightsEmu[rowHeightsEmu.length - 1]);
       rowHeightsEmu[rowHeightsEmu.length - 1] = Math.max(1, last + delta);
     }
   }
@@ -162,10 +164,10 @@ export function layoutTableFrame(input: {
       const per = Math.floor(extra / count);
       let assigned = 0;
       for (let i = 0; i < count - 1; i += 1) {
-        rowHeightsEmu[i] = rowHeightsEmu[i]! + per;
+        rowHeightsEmu[i] = requireDefined(rowHeightsEmu[i]) + per;
         assigned += per;
       }
-      rowHeightsEmu[count - 1] = rowHeightsEmu[count - 1]! + (extra - assigned);
+      rowHeightsEmu[count - 1] = requireDefined(rowHeightsEmu[count - 1]) + (extra - assigned);
     }
   }
   return {

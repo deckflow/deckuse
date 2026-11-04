@@ -1,20 +1,11 @@
+import { requireDefined } from '../required.js';
 import { err, ok, type PropertyValue, type ResolveMode, type Result } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import type { ResolvedTarget } from './addressing.js';
 import { nodeFor } from './node-for.js';
 import { readBackgroundFill } from './properties.js';
-import {
-  NS,
-  REL,
-  attr,
-  children,
-  cNvPr,
-  descendants,
-  first,
-  notesBodyText,
-  textOf,
-} from './xml.js';
+import { REL, attr, children, cNvPr, descendants, first, notesBodyText, textOf } from './xml.js';
 
 const EMU_PER_PT = 12700;
 const SHAPE_LOCAL_NAMES = new Set(['sp', 'pic', 'graphicFrame', 'cxnSp', 'grpSp']);
@@ -90,7 +81,6 @@ const readFillColor = (
   const solid = directChild(container, 'solidFill');
   if (solid) {
     const color = readSrgb(solid) ?? readSchemeColor(solid, themeColors) ?? null;
-    const alpha = attr(first(solid, 'alpha') ?? first(solid, 'srgbClr'), 'val');
     // alpha on srgbClr child
     const alphaNode = descendants(solid, 'alpha')[0];
     const alphaVal = attr(alphaNode, 'val');
@@ -99,7 +89,6 @@ const readFillColor = (
       const n = Number(alphaVal);
       if (Number.isFinite(n)) transparency = Math.round((1 - n / 100000) * 100);
     }
-    void alpha;
     return { kind: 'solid', color, transparency };
   }
   return undefined;
@@ -237,7 +226,7 @@ const txStyleLevel = (
       directChild(block, 'lvl1pPr') ??
       first(block, 'lvl1pPr')
     );
-  const name = `lvl${level + 1}pPr`;
+  const name = `lvl${String(level + 1)}pPr`;
   return directChild(block, name) ?? first(block, name);
 };
 
@@ -321,9 +310,9 @@ const filterProps = (
   props: string[] | undefined,
   mode: ResolveMode,
   includeProvenance: boolean,
-): Record<string, PropertyValue | unknown> => {
+): Record<string, unknown> => {
   const keys = props?.length ? props : Object.keys(all);
-  const out: Record<string, PropertyValue | unknown> = {};
+  const out: Record<string, unknown> = {};
   for (const key of keys) {
     const value = all[key];
     if (!value) continue;
@@ -353,13 +342,13 @@ const filterProps = (
   return out;
 };
 
-type ResolvedProperties = {
+interface ResolvedProperties {
   target: string;
   uid: string;
   name?: string;
-  properties: Record<string, PropertyValue | unknown>;
+  properties: Record<string, unknown>;
   warnings: string[];
-};
+}
 
 const resolveTableCellProperties = (
   archive: OpcArchive,
@@ -432,8 +421,8 @@ const resolveTableCellProperties = (
 
   const directRPr = firstRunRPr(node);
   const directFont = readFontFromRPr(directRPr, themeFonts, themeColors);
-  const fontProp = <K extends keyof typeof directFont>(
-    key: K,
+  const fontProp = (
+    key: keyof typeof directFont,
     propName: string,
     unit?: string,
   ): PropertyValue => {
@@ -441,7 +430,7 @@ const resolveTableCellProperties = (
     return prop(
       value,
       value,
-      value !== null && value !== undefined
+      value !== null
         ? { scope: 'local', target: resolved.target, path: propName }
         : { scope: 'default', target: resolved.target, path: propName },
       unit,
@@ -759,7 +748,7 @@ export function resolveProperties(
           firstRunRPr(layoutShape) ??
           defRPrFromLevel(
             first(layoutShape, 'lstStyle')
-              ? first(first(layoutShape, 'lstStyle')!, 'defPPr')
+              ? first(requireDefined(first(layoutShape, 'lstStyle')), 'defPPr')
               : undefined,
           );
         const fromLayout = readFontFromRPr(layoutRPr, themeFonts, themeColors);
@@ -798,27 +787,22 @@ export function resolveProperties(
     }
     if (!inheritedFont.family && themeFonts.minor) {
       inheritedFont = { ...inheritedFont, family: themeFonts.minor };
-      if (!inheritedSource)
-        inheritedSource = { scope: 'theme', target: 'theme', path: 'fontScheme.minorFont' };
+      inheritedSource ??= { scope: 'theme', target: 'theme', path: 'fontScheme.minorFont' };
     }
   }
 
-  const mergeFont = <K extends keyof typeof directFont>(
-    key: K,
-    propName: string,
-    unit?: string,
-  ): void => {
+  const mergeFont = (key: keyof typeof directFont, propName: string, unit?: string): void => {
     const direct = directFont[key] ?? null;
     const effective = (directFont[key] ?? inheritedFont[key] ?? null) as unknown;
     const source: PropertyValue['source'] | undefined =
-      direct !== null && direct !== undefined
+      direct !== null
         ? { scope: 'local', target: resolved.target, path: propName }
         : inheritedFont[key] !== undefined
           ? (inheritedSource ?? { scope: 'default' })
           : { scope: 'default' };
     // Refine path for master font.size
     const refined =
-      source?.scope === 'master' && propName.startsWith('font.')
+      source.scope === 'master' && propName.startsWith('font.')
         ? {
             ...source,
             path: `${source.path?.replace(/\.font$/, '') ?? 'textStyles.body.level.0'}.${propName}`,

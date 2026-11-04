@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import fs from 'node:fs';
 import { access, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -89,7 +90,7 @@ export const resetGit = async (workspace: string, steps: number): Promise<void> 
     );
   }
 
-  const target = commits[commits.length - 1]!;
+  const target = requireDefined(commits[commits.length - 1]);
   const gitdir = join(dir, '.git');
   await writeFile(join(gitdir, 'refs', 'heads', branch), `${target.oid}\n`);
 

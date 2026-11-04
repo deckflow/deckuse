@@ -1,3 +1,4 @@
+import { requireDefined } from './required.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -9,12 +10,12 @@ import { resolve } from 'node:path';
 export function unescapeCliText(value: string): string {
   let out = '';
   for (let i = 0; i < value.length; i++) {
-    const ch = value[i]!;
+    const ch = requireDefined(value[i]);
     if (ch !== '\\' || i + 1 >= value.length) {
       out += ch;
       continue;
     }
-    const next = value[i + 1]!;
+    const next = requireDefined(value[i + 1]);
     switch (next) {
       case 'n':
         out += '\n';

@@ -132,7 +132,7 @@ export async function monitorStatusAll(): Promise<{ monitors: MonitorStatusEntry
   for (const disc of await discoverMonitorsFromProcessTable()) {
     const ws = resolve(disc.workspace);
     const existing = byWorkspace.get(ws);
-    if (existing && existing.pid === disc.pid) continue;
+    if (existing?.pid === disc.pid) continue;
     const host = disc.host ?? existing?.host ?? '127.0.0.1';
     const port = disc.port ?? existing?.port ?? 4173;
     byWorkspace.set(ws, {
@@ -247,10 +247,10 @@ export async function monitorStop(
 
 export async function monitorStopAll(): Promise<{
   stopped: number;
-  results: Array<{ workspace: string; stopped: boolean; meta: DaemonMeta | null }>;
+  results: { workspace: string; stopped: boolean; meta: DaemonMeta | null }[];
 }> {
   const { monitors } = await monitorStatusAll();
-  const results: Array<{ workspace: string; stopped: boolean; meta: DaemonMeta | null }> = [];
+  const results: { workspace: string; stopped: boolean; meta: DaemonMeta | null }[] = [];
   for (const entry of monitors) {
     const result = await monitorStop(entry.workspace);
     results.push({ workspace: entry.workspace, ...result });
@@ -292,7 +292,7 @@ export async function monitorStart(
 
   // Wait briefly for the worker to bind and write meta (worker also writes; parent seeds pid).
   const displayHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
-  const urlGuess = `http://${displayHost}:${port}/`;
+  const urlGuess = `http://${displayHost}:${String(port)}/`;
   let meta: DaemonMeta = {
     pid: child.pid,
     host,

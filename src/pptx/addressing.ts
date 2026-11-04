@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { createHash } from 'node:crypto';
 import { err, type ElementRef, type Result } from '../core/index.js';
 import type { IndexFile, IndexedElement } from './types.js';
@@ -255,7 +256,7 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
   const pages = slidePageMap(index);
   if (item.kind === 'slide') {
     const page = pages.get(item.partUri) ?? (item.slideId ? pages.get(item.slideId) : undefined);
-    return page ? `slide:${page}` : `slide:?`;
+    return page ? `slide:${String(page)}` : `slide:?`;
   }
   if (item.kind === 'layout') {
     const name =
@@ -280,7 +281,7 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
       (typeof item.location?.['slidePart'] === 'string'
         ? pages.get(item.location['slidePart'])
         : undefined);
-    return page ? `slide:${page}/notes` : (item.ref.elementId ?? 'notes');
+    return page ? `slide:${String(page)}/notes` : (item.ref.elementId ?? 'notes');
   }
   const hostKind = item.partUri.startsWith('/ppt/slideMasters/')
     ? 'master'
@@ -295,16 +296,16 @@ export function targetPathForItem(index: IndexFile, item: IndexedElement): strin
     const col = item.location?.['column'];
     if (shapeId && typeof row === 'number' && typeof col === 'number') {
       if (hostKind)
-        return `${hostTargetForPart(item.partUri, hostKind)}/shape:${shapeId}/cell:${row}:${col}`;
+        return `${hostTargetForPart(item.partUri, hostKind)}/shape:${shapeId}/cell:${String(row)}:${String(col)}`;
       const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
-      if (page) return `slide:${page}/shape:${shapeId}/cell:${row}:${col}`;
+      if (page) return `slide:${String(page)}/shape:${shapeId}/cell:${String(row)}:${String(col)}`;
     }
   }
   if (item.slideId || item.partUri) {
     const id = cNvPrIdOf(item);
     if (id && hostKind) return `${hostTargetForPart(item.partUri, hostKind)}/shape:${id}`;
     const page = (item.slideId ? pages.get(item.slideId) : undefined) ?? pages.get(item.partUri);
-    if (page && id) return `slide:${page}/shape:${id}`;
+    if (page && id) return `slide:${String(page)}/shape:${id}`;
   }
   return item.ref.elementId ?? item.ref.path ?? 'unknown';
 }
@@ -359,7 +360,7 @@ const resolveLayoutPart = (
     const layouts = orderedLayouts(index);
     const item = layouts[page - 1];
     if (!item)
-      return err('TARGET_NOT_FOUND', `Layout index out of range: ${page}`, [], {
+      return err('TARGET_NOT_FOUND', `Layout index out of range: ${String(page)}`, [], {
         target: raw,
         hint: 'Run deckuse list layouts --json.',
       });
@@ -370,7 +371,7 @@ const resolveLayoutPart = (
     return err('TARGET_NOT_FOUND', `Layout not found: ${layout}`, [], { target: raw });
   if (matches.length > 1)
     return err('AMBIGUOUS_NAME', `Layout name is ambiguous: ${layout}`, [], { target: raw });
-  return { ok: true, value: matches[0]!, diagnostics: [] };
+  return { ok: true, value: requireDefined(matches[0]), diagnostics: [] };
 };
 
 const resolveMasterPart = (
@@ -383,7 +384,7 @@ const resolveMasterPart = (
     return err('TARGET_NOT_FOUND', `Master not found: ${master}`, [], { target: raw });
   if (matches.length > 1)
     return err('AMBIGUOUS_NAME', `Master name is ambiguous: ${master}`, [], { target: raw });
-  return { ok: true, value: matches[0]!, diagnostics: [] };
+  return { ok: true, value: requireDefined(matches[0]), diagnostics: [] };
 };
 
 const resolveChildOnHost = (
@@ -443,7 +444,7 @@ const resolveChildOnHost = (
     if (!cell)
       return err(
         'TARGET_NOT_FOUND',
-        `cell:${parsed.cellRow}:${parsed.cellCol} does not exist on ${hostLabel}/shape:${cNvPrIdOf(item) ?? '?'}`,
+        `cell:${String(parsed.cellRow)}:${String(parsed.cellCol)} does not exist on ${hostLabel}/shape:${cNvPrIdOf(item) ?? '?'}`,
         [],
         { target: raw },
       );
@@ -550,7 +551,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
 
   const slide = slideByPage(index, parsed.slide);
   if (!slide)
-    return err('TARGET_NOT_FOUND', `slide:${parsed.slide} does not exist`, [], {
+    return err('TARGET_NOT_FOUND', `slide:${String(parsed.slide)} does not exist`, [], {
       target: raw,
       hint: 'Run deckuse list slides --json.',
     });
@@ -559,7 +560,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
     return {
       ok: true,
       value: {
-        target: `slide:${parsed.slide}`,
+        target: `slide:${String(parsed.slide)}`,
         uid: uidForItem(slide),
         item: slide,
         slidePage: parsed.slide,
@@ -577,7 +578,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
       return {
         ok: true,
         value: {
-          target: `slide:${parsed.slide}/notes`,
+          target: `slide:${String(parsed.slide)}/notes`,
           uid: uidForItem(notes),
           item: notes,
           slidePage: parsed.slide,
@@ -609,7 +610,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
     return {
       ok: true,
       value: {
-        target: `slide:${parsed.slide}/notes`,
+        target: `slide:${String(parsed.slide)}/notes`,
         uid: uidForItem(synthetic),
         item: synthetic,
         slidePage: parsed.slide,
@@ -628,7 +629,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
     if (matches.length > 1)
       return err(
         'AMBIGUOUS_NAME',
-        `Shape name "${parsed.shapeName}" is ambiguous on slide:${parsed.slide}`,
+        `Shape name "${parsed.shapeName}" is ambiguous on slide:${String(parsed.slide)}`,
         [],
         { target: raw },
       );
@@ -646,9 +647,9 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
       : parsed.shapeName
         ? `shape:${parsed.shapeName}`
         : `placeholder:${parsed.placeholder ?? '?'}`;
-    return err('TARGET_NOT_FOUND', `${label} does not exist on slide:${parsed.slide}`, [], {
+    return err('TARGET_NOT_FOUND', `${label} does not exist on slide:${String(parsed.slide)}`, [], {
       target: raw,
-      hint: `Run deckuse list shapes --slide ${parsed.slide} --json.`,
+      hint: `Run deckuse list shapes --slide ${String(parsed.slide)} --json.`,
     });
   }
 
@@ -667,7 +668,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
     if (!cell)
       return err(
         'TARGET_NOT_FOUND',
-        `cell:${parsed.cellRow}:${parsed.cellCol} does not exist on slide:${parsed.slide}/shape:${cNvPrIdOf(item) ?? '?'}`,
+        `cell:${String(parsed.cellRow)}:${String(parsed.cellCol)} does not exist on slide:${String(parsed.slide)}/shape:${cNvPrIdOf(item) ?? '?'}`,
         [],
         { target: raw },
       );
@@ -686,7 +687,7 @@ export function resolveTarget(index: IndexFile, raw: string): Result<ResolvedTar
   }
 
   const id = cNvPrIdOf(item) ?? '?';
-  const canonical = `slide:${parsed.slide}/shape:${id}`;
+  const canonical = `slide:${String(parsed.slide)}/shape:${id}`;
   return {
     ok: true,
     value: {

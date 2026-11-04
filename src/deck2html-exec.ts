@@ -15,6 +15,7 @@ export const ensureDeck2HtmlExecutable = async (): Promise<void> => {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
         `deck2html binary is not executable (${binary}). Tried chmod +x and failed: ${detail}`,
+        { cause: error },
       );
     }
   }

@@ -1,7 +1,8 @@
-import { parseLength, type LengthInput } from '../core/index.js';
+import { requireDefined } from '../required.js';
+import { parseLength } from '../core/index.js';
 import type { Element } from '@xmldom/xmldom';
 import { attr, first } from './xml.js';
-import type { LengthContext } from '../core/index.js';
+import type { LengthInput, LengthContext } from '../core/index.js';
 
 export interface ShapeBBox {
   readonly x: number;
@@ -47,7 +48,7 @@ export function computeAlignUpdates(
   mode: AlignMode,
   gap: LengthInput | undefined,
   lengthContext: LengthContext,
-): Array<{ node: Element; x?: number; y?: number }> {
+): { node: Element; x?: number; y?: number }[] {
   if (boxes.length === 0) return [];
   const gapEmu =
     gap !== undefined
@@ -72,7 +73,7 @@ export function computeAlignUpdates(
     const ordered = [...boxes].sort((a, b) => a.x - b.x);
     if (ordered.length === 1) return [];
     if (gapEmu !== undefined) {
-      let cursor = ordered[0]!.x;
+      let cursor = requireDefined(ordered[0]).x;
       return ordered.map((b, i) => {
         if (i === 0) {
           cursor = b.x + b.width + gapEmu;
@@ -99,7 +100,7 @@ export function computeAlignUpdates(
   const ordered = [...boxes].sort((a, b) => a.y - b.y);
   if (ordered.length === 1) return [];
   if (gapEmu !== undefined) {
-    let cursor = ordered[0]!.y;
+    let cursor = requireDefined(ordered[0]).y;
     return ordered.map((b, i) => {
       if (i === 0) {
         cursor = b.y + b.height + gapEmu;

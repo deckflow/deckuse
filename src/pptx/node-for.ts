@@ -54,7 +54,7 @@ export const focusMutationNode = (
     if (!p)
       return err(
         'TARGET_NOT_FOUND',
-        `paragraph:${parsed.paragraph} not found on ${parsed.raw}`,
+        `paragraph:${String(parsed.paragraph)} not found on ${parsed.raw}`,
         [],
         { target: parsed.raw },
       );
@@ -64,7 +64,7 @@ export const focusMutationNode = (
     const runs = descendants(shape, 'r');
     const run = runs[parsed.run];
     if (!run)
-      return err('TARGET_NOT_FOUND', `run:${parsed.run} not found on ${parsed.raw}`, [], {
+      return err('TARGET_NOT_FOUND', `run:${String(parsed.run)} not found on ${parsed.raw}`, [], {
         target: parsed.raw,
       });
     return ok(run);

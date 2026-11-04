@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import type { Document, Element, Node } from '@xmldom/xmldom';
 // Document is used by setNodeText helpers.
 export const NS = {
@@ -127,7 +128,7 @@ export const setNodeText = (node: Node, text: string): void => {
     for (const child of [...children(container)])
       if (child.localName === 'p') container.removeChild(child);
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!;
+      const line = requireDefined(lines[i]);
       const paragraph = doc.createElementNS(NS.a, 'a:p');
       const pPrSource = pPrTemplates[i] ?? pPrTemplates[pPrTemplates.length - 1] ?? pPrTemplates[0];
       if (pPrSource) paragraph.appendChild(pPrSource.cloneNode(true));
@@ -343,7 +344,7 @@ export const normalizeTextBlocksNewlines = (
           if (i > 0) flush();
           currentRuns.push({
             ...run,
-            text: lines[i]!,
+            text: requireDefined(lines[i]),
           });
         }
       }

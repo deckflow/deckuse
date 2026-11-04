@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import { NS, children, descendants, first, root } from './xml.js';
@@ -37,14 +38,13 @@ export const classifyChartDocument = (doc: Document): ChartVariant => {
     return 'basic';
   }
   if (families.length !== 1) return 'advanced';
-  const only = families[0]!;
+  const only = requireDefined(families[0]);
   if (!BASIC_CHART_LOCAL_NAMES.has(only)) return 'advanced';
 
   // Ensure the family node is in the DrawingML chart NS (or unprefixed legacy default).
   const familyNode = children(plotArea).find((c) => c.localName === only);
   if (
-    familyNode &&
-    familyNode.namespaceURI != null &&
+    familyNode?.namespaceURI != null &&
     familyNode.namespaceURI !== NS.c &&
     familyNode.namespaceURI !== ''
   ) {

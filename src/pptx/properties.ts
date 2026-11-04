@@ -14,7 +14,7 @@ import {
   setNodeText,
   spacingToSpcPts,
 } from './xml.js';
-import { parseLength, type LengthInput } from '../core/index.js';
+import { parseLength } from '../core/index.js';
 
 const STROKE_ALIASES = ['stroke', 'border', 'outline', 'line'] as const;
 const FONT_FAMILY_ALIASES = ['fontFamily', 'font', 'typeface'] as const;
@@ -242,13 +242,9 @@ const setStroke = (spPr: Element, value: unknown): void => {
     ln.appendChild(prstDash);
   }
   const headEnd =
-    typeof value === 'object' && value !== null
-      ? (value as Record<string, unknown>)['headEnd']
-      : undefined;
+    typeof value === 'object' ? (value as Record<string, unknown>)['headEnd'] : undefined;
   const tailEnd =
-    typeof value === 'object' && value !== null
-      ? (value as Record<string, unknown>)['tailEnd']
-      : undefined;
+    typeof value === 'object' ? (value as Record<string, unknown>)['tailEnd'] : undefined;
   if (typeof headEnd === 'string' && headEnd) {
     const end = doc.createElementNS(NS.a, 'a:headEnd');
     end.setAttribute('type', headEnd);
@@ -434,11 +430,11 @@ const setBullet = (node: Element, value: unknown): void => {
 const unknownKeys = (properties: Record<string, unknown>, allowed: Set<string>): string[] =>
   Object.keys(properties).filter((key) => !allowed.has(key));
 
-export type ShapePropertyContext = {
+export interface ShapePropertyContext {
   archive: OpcArchive;
   partUri: string;
   target?: string;
-};
+}
 
 export function applyShapeProperties(
   node: Element,
@@ -600,7 +596,7 @@ export function applyShapeProperties(
           if (raw[side] === undefined) continue;
           if (typeof raw[side] !== 'number' && typeof raw[side] !== 'string')
             throw new Error(`insets.${side} must be a length`);
-          insetsEmu[side] = parseLength(raw[side] as LengthInput, {
+          insetsEmu[side] = parseLength(raw[side], {
             axis: side === 'left' || side === 'right' ? 'x' : 'y',
           });
         }

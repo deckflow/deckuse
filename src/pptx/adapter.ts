@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { timed, timedSync } from '../timing.js';
 import {
   recoverTransaction,
@@ -463,12 +464,12 @@ const listResource = (
                 }`,
                 displayName: layoutDisplayName(archive, layoutPart),
                 ...(layoutIndexByPart.has(layoutPart)
-                  ? { index: layoutIndexByPart.get(layoutPart)! }
+                  ? { index: requireDefined(layoutIndexByPart.get(layoutPart)) }
                   : {}),
               }
             : undefined;
         return {
-          target: `slide:${i + 1}`,
+          target: `slide:${String(i + 1)}`,
           uid: uidForItem(item),
           index: i + 1,
           slideId: item.slideId,
@@ -497,8 +498,8 @@ const listResource = (
       const slides = index.elements.filter((item) => item.kind === 'slide');
       const slideItem = slides[slide - 1];
       if (!slideItem)
-        return err('TARGET_NOT_FOUND', `slide:${slide} does not exist`, [], {
-          target: `slide:${slide}`,
+        return err('TARGET_NOT_FOUND', `slide:${String(slide)} does not exist`, [], {
+          target: `slide:${String(slide)}`,
         });
       return listShapeItems(index, slideItem.partUri);
     }
@@ -507,7 +508,7 @@ const listResource = (
       if (!resolved.ok) return resolved;
       return listShapeItems(index, resolved.value.item.partUri);
     }
-    const resolved = resolveTarget(index, `layout:${layout!}`);
+    const resolved = resolveTarget(index, `layout:${requireDefined(layout)}`);
     if (!resolved.ok) return resolved;
     return listShapeItems(index, resolved.value.item.partUri);
   }
@@ -548,14 +549,20 @@ const transactionOpsToAtomic = (
 ): Result<AtomicCommand[]> => {
   const commands: AtomicCommand[] = [];
   for (const op of ops) {
-    const kind = String(op['op'] ?? op['type'] ?? '');
+    const kind =
+      typeof op['op'] === 'string' ? op['op'] : typeof op['type'] === 'string' ? op['type'] : '';
     const base = {
       version: '2.0' as const,
       workspaceId,
       transactionId,
     };
     if (kind === 'add-shape' || kind === 'addShape') {
-      const shapeType = String(op['shapeType'] ?? op['type'] ?? 'text');
+      const shapeType =
+        typeof op['shapeType'] === 'string'
+          ? op['shapeType']
+          : typeof op['type'] === 'string'
+            ? op['type']
+            : 'text';
       const allowed = new Set([
         'text',
         'rect',
@@ -622,12 +629,19 @@ const transactionOpsToAtomic = (
         ...base,
         type: 'setText',
         target: String(op['target']),
-        value: String(op['value'] ?? op['text'] ?? ''),
+        value:
+          typeof op['value'] === 'string'
+            ? op['value']
+            : typeof op['text'] === 'string'
+              ? op['text']
+              : '',
       });
       continue;
     }
     if (kind === 'set') {
-      const { op: _op, type: _type, target, ...rest } = op;
+      const { target, ...rest } = op;
+      delete rest['op'];
+      delete rest['type'];
       const properties = (op['properties'] as Record<string, unknown> | undefined) ?? rest;
       const cleaned = { ...properties };
       delete cleaned['target'];
@@ -733,7 +747,7 @@ export const pptxAdapter: FormatAdapter = {
           const { records, total } = await readHistory(workspace, command.limit, command.offset);
           const filtered =
             command.slide !== undefined
-              ? records.filter((record) => record.slides.includes(command.slide!))
+              ? records.filter((record) => record.slides.includes(requireDefined(command.slide)))
               : records;
           return ok({
             records: filtered,
@@ -742,7 +756,7 @@ export const pptxAdapter: FormatAdapter = {
         }
 
         const manifest = await readManifest(workspace);
-        if (manifest.schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
+        if ((manifest.schemaVersion as string) !== '2.0' || !isIntegerRevision(manifest.revision)) {
           if (command.type === 'status') {
             return ok({
               workspaceId: workspace,
@@ -787,8 +801,7 @@ export const pptxAdapter: FormatAdapter = {
             ...(command.master !== undefined ? { master: command.master } : {}),
             ...(command.layout !== undefined ? { layout: command.layout } : {}),
           });
-          if (listed && typeof listed === 'object' && 'ok' in listed && listed.ok === false)
-            return listed;
+          if (typeof listed === 'object' && 'ok' in listed && !listed.ok) return listed;
           return ok({ resource: command.resource, items: listed });
         }
 
@@ -1222,9 +1235,7 @@ export const pptxAdapter: FormatAdapter = {
           }
 
           working.markClean();
-          const result = await timed('mutation', () =>
-            mutate(command as AtomicCommand, working, currentIndex),
-          );
+          const result = await timed('mutation', () => mutate(command, working, currentIndex));
           if (!result.ok) return result;
           if (command.type === 'addSlide') {
             const fresh = buildIndex(

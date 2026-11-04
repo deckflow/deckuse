@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { posix } from 'node:path';
 import type { OpcArchive, OpcRelationship } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
@@ -112,7 +113,7 @@ const seriesXml = (
       const tx = `<c:tx><c:v>${esc(ser.name)}</c:v></c:tx>`;
       const color = ser.color
         ? normalizeHexColor(ser.color)
-        : DEFAULT_SERIES_COLORS[index % DEFAULT_SERIES_COLORS.length]!;
+        : requireDefined(DEFAULT_SERIES_COLORS[index % DEFAULT_SERIES_COLORS.length]);
       return `<c:ser><c:idx val="${String(index)}"/><c:order val="${String(index)}"/>${tx}${options.pie && !ser.color ? '' : seriesSpPrXml(color, options.line === true || ser.chart === 'line')}${cats}${vals}</c:ser>`;
     })
     .join('');
@@ -386,7 +387,7 @@ export function applyChartGapWidth(chartDoc: Document, gapWidth: number): void {
       if (name === 'ser' || name === 'dLbls') lastSerOrDlbls = i;
     }
     if (lastSerOrDlbls >= 0 && gapIndex >= 0 && gapIndex < lastSerOrDlbls) {
-      const anchor = kids[lastSerOrDlbls]!;
+      const anchor = requireDefined(kids[lastSerOrDlbls]);
       plot.removeChild(gap);
       if (anchor.nextSibling) plot.insertBefore(gap, anchor.nextSibling);
       else plot.appendChild(gap);
@@ -707,7 +708,7 @@ export function applyChartLegend(chartDoc: Document, legend: unknown): void {
 const setAxisDelete = (ax: Element, visible: boolean): void => {
   let del = directChild(ax, 'delete');
   if (!del) {
-    del = ax.ownerDocument!.createElementNS(NS.c, 'c:delete');
+    del = requireDefined(ax.ownerDocument).createElementNS(NS.c, 'c:delete');
     const after = directChild(ax, 'scaling') ?? directChild(ax, 'axId');
     if (after?.nextSibling) ax.insertBefore(del, after.nextSibling);
     else if (after) ax.appendChild(del);
@@ -719,13 +720,13 @@ const setAxisDelete = (ax: Element, visible: boolean): void => {
 const setAxisScaling = (ax: Element, min?: number, max?: number): void => {
   let scaling = directChild(ax, 'scaling');
   if (!scaling) {
-    scaling = ax.ownerDocument!.createElementNS(NS.c, 'c:scaling');
+    scaling = requireDefined(ax.ownerDocument).createElementNS(NS.c, 'c:scaling');
     const after = directChild(ax, 'axId');
     if (after?.nextSibling) ax.insertBefore(scaling, after.nextSibling);
     else if (after) ax.appendChild(scaling);
     else ax.appendChild(scaling);
   }
-  const doc = ax.ownerDocument!;
+  const doc = requireDefined(ax.ownerDocument);
   if (typeof min === 'number') {
     let node = directChild(scaling, 'min');
     if (!node) {
@@ -802,10 +803,10 @@ export function applyChartDataLabels(chartDoc: Document, show: boolean): void {
       else plot.appendChild(dLbls);
     }
     const setFlag = (name: string, val: string) => {
-      let node = directChild(dLbls!, name);
+      let node = directChild(dLbls, name);
       if (!node) {
         node = chartDoc.createElementNS(NS.c, `c:${name}`);
-        dLbls!.appendChild(node);
+        dLbls.appendChild(node);
       }
       node.setAttribute('val', val);
     };

@@ -36,7 +36,7 @@ const nextRelId = (rels: readonly OpcRelationship[]): string => {
 const presentationSlideIds = (node: Node): Element[] => {
   const el = node as Element;
   const list =
-    el.nodeType === 1 && el.localName === 'sldIdLst' && el.namespaceURI === NS.p
+    node.nodeType === 1 && el.localName === 'sldIdLst' && el.namespaceURI === NS.p
       ? el
       : descendants(node, 'sldIdLst').find((item) => item.namespaceURI === NS.p);
   if (!list) return [];

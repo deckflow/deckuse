@@ -126,7 +126,7 @@ const summarizeRecord = (record: OperationRecord | undefined, page: number): str
     ? ` on slide${record.slides.length === 1 ? '' : 's'} ${record.slides.join(', ')}`
     : ` (previewing slide ${String(page)})`;
   if (type === 'replaceText' && typeof operation?.['find'] === 'string') {
-    return `Replaced “${operation['find']}” with “${String(operation['replace'] ?? '')}”${slides}`;
+    return `Replaced “${operation['find']}” with “${typeof operation['replace'] === 'string' ? operation['replace'] : ''}”${slides}`;
   }
   if (type === 'setText') return `Updated text${slides}`;
   if (record.revision) return `${type} · revision ${record.revision}${slides}`;
@@ -753,7 +753,7 @@ export const startMonitor = async (
     revision: string,
   ): Promise<PreviewEnsureResult | undefined> => {
     const existing = await readPreviewMeta(fullPreviewRoot);
-    if (!existing || existing.fingerprint !== fingerprint) return undefined;
+    if (existing?.fingerprint !== fingerprint) return undefined;
     const entry = resolve(fullPreviewRoot, existing.indexHtml);
     try {
       const info = await stat(entry);
@@ -872,7 +872,7 @@ export const startMonitor = async (
       const result = await ensureFullPreview();
       if (result.status === 'ready') publishFullPreviewReady(result);
       else if (result.status === 'converting') broadcastPreview('converting', result);
-      else broadcastPreview('error-message', { message: result.message || '预览失败' });
+      else broadcastPreview('error-message', { message: result.message ?? '预览失败' });
     } catch (error) {
       broadcastPreview('error-message', {
         message: error instanceof Error ? error.message : 'Full preview update failed',

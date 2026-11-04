@@ -1,7 +1,8 @@
+import { requireDefined } from '../required.js';
 import { prepareChartData, refreshCaches, commitChart, type ChartOwner } from './chart-data.js';
 import { OpcArchive, parseXml } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
-import { parseLength, type LengthInput } from '../core/index.js';
+import { parseLength } from '../core/index.js';
 import {
   applyChartProperties,
   chartGraphicFrameXml,
@@ -31,8 +32,6 @@ const esc = (value: string) =>
   value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;');
 const value = (obj: Record<string, unknown>, key: string, fallback: string): string =>
   typeof obj[key] === 'string' ? obj[key] : fallback;
-const num = (obj: Record<string, unknown>, key: string, fallback: number): number =>
-  typeof obj[key] === 'number' ? obj[key] : fallback;
 
 const resolveEmu = (
   raw: unknown,
@@ -43,7 +42,7 @@ const resolveEmu = (
   if (raw === undefined || raw === null) return fallback;
   if (typeof raw === 'number' || typeof raw === 'string') {
     try {
-      return parseLength(raw as LengthInput, {
+      return parseLength(raw, {
         ...(archive ? lengthContextFor(archive, axis) : {}),
         axis,
       });
@@ -213,13 +212,13 @@ export function resolveColumnWidthsEmu(
     // Fix rounding so sum equals table width.
     if (widths.length > 0) {
       const sum = widths.reduce((a, b) => a + b, 0);
-      widths[widths.length - 1]! += tableWidthEmu - sum;
+      widths[widths.length - 1] = requireDefined(widths[widths.length - 1]) + tableWidthEmu - sum;
     }
     return { widths, normalized: false };
   }
   const widths: number[] = [];
   for (let i = 0; i < cols; i++) {
-    const entry = raw[i];
+    const entry: unknown = raw[i];
     if (entry === undefined) {
       widths.push(equal);
       continue;
@@ -229,7 +228,7 @@ export function resolveColumnWidthsEmu(
       if (!Number.isFinite(pct)) throw new Error(`Invalid columnWidths[%]: ${entry}`);
       widths.push(Math.round((pct / 100) * tableWidthEmu));
     } else if (typeof entry === 'number' || typeof entry === 'string') {
-      widths.push(parseLength(entry as LengthInput, { axis: 'x' }));
+      widths.push(parseLength(entry, { axis: 'x' }));
     } else {
       throw new Error('columnWidths entries must be lengths or percentages');
     }
@@ -239,7 +238,8 @@ export function resolveColumnWidthsEmu(
   if (sum !== tableWidthEmu) {
     const scaled = widths.map((w) => Math.max(1, Math.round((w / sum) * tableWidthEmu)));
     const scaledSum = scaled.reduce((a, b) => a + b, 0);
-    scaled[scaled.length - 1]! += tableWidthEmu - scaledSum;
+    scaled[scaled.length - 1] =
+      requireDefined(scaled[scaled.length - 1]) + tableWidthEmu - scaledSum;
     return { widths: scaled, normalized: true };
   }
   return { widths, normalized: false };
@@ -252,7 +252,12 @@ export const parseMergeCoord = (value: string): { row: number; col: number } => 
   return { row: Number(match[1]), col: Number(match[2]) };
 };
 
-type MergeSpan = { gridSpan?: number; rowSpan?: number; hMerge?: boolean; vMerge?: boolean };
+interface MergeSpan {
+  gridSpan?: number;
+  rowSpan?: number;
+  hMerge?: boolean;
+  vMerge?: boolean;
+}
 
 /** Build per-cell merge attributes from merges:[{from,to}]. */
 export function buildMergeMap(merges: unknown, rows: number, cols: number): Map<string, MergeSpan> {
@@ -272,7 +277,7 @@ export function buildMergeMap(merges: unknown, rows: number, cols: number): Map<
     const rowSpan = to.row - from.row + 1;
     for (let r = from.row; r <= to.row; r++) {
       for (let c = from.col; c <= to.col; c++) {
-        const key = `${r}:${c}`;
+        const key = `${String(r)}:${String(c)}`;
         if (r === from.row && c === from.col) {
           map.set(key, {
             ...(gridSpan > 1 ? { gridSpan } : {}),
@@ -332,7 +337,7 @@ const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
   const sized = { ...e, width, height };
   const hasCjk = (text: string) => /[\u3400-\u9FFF\uF900-\uFAFF]/.test(text);
   const cellXml = (text: string, header: boolean, colIndex: number, rowIndex: number) => {
-    const mergeKey = `${rowIndex}:${colIndex}`;
+    const mergeKey = `${String(rowIndex)}:${String(colIndex)}`;
     const merge = mergeMap.get(mergeKey);
     if (merge?.hMerge || merge?.vMerge) {
       const attrs = [merge.hMerge ? 'hMerge="1"' : '', merge.vMerge ? 'vMerge="1"' : '']
@@ -377,7 +382,7 @@ const tableXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
     .map((row, rowIndex) => {
       const rowH = frame.rowHeightsEmu[rowIndex] ?? estimateTableRowHeightEmu(fontPt);
       return `<a:tr h="${String(rowH)}">${Array.from({ length: cols }, (_, i) =>
-        cellXml(typeof row[i] === 'string' ? row[i]! : '', rowIndex === 0, i, rowIndex),
+        cellXml(typeof row[i] === 'string' ? row[i] : '', rowIndex === 0, i, rowIndex),
       ).join('')}</a:tr>`;
     })
     .join('');

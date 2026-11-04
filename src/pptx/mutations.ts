@@ -511,7 +511,7 @@ const resolveCommandRef = (
     const target =
       command.target ??
       (command.slide !== undefined && command.shape !== undefined
-        ? `slide:${command.slide}/shape:${command.shape}`
+        ? `slide:${String(command.slide)}/shape:${String(command.shape)}`
         : undefined);
     if (!target) return err('INVALID_COMMAND', 'xfrmSet requires target or slide+shape');
     const resolved = resolveTarget(index, target);
@@ -849,8 +849,8 @@ export async function mutate(
     const slides = index.elements.filter((item) => item.kind === 'slide');
     const slide = slides[command.slide - 1];
     if (!slide)
-      return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
-        target: `slide:${command.slide}`,
+      return err('TARGET_NOT_FOUND', `slide:${String(command.slide)} does not exist`, [], {
+        target: `slide:${String(command.slide)}`,
         hint: 'Run deckuse list slides --json.',
       });
     const resolved = resolveLayoutRef(archive, index, command.layout);
@@ -864,7 +864,7 @@ export async function mutate(
     return ok({
       changed,
       slides: [command.slide],
-      changedTargets: [`slide:${command.slide}`],
+      changedTargets: [`slide:${String(command.slide)}`],
       changedParts: changed ? [slide.partUri] : [],
     });
   }
@@ -886,8 +886,8 @@ export async function mutate(
     const slides = index.elements.filter((item) => item.kind === 'slide');
     const slide = slides[command.slide - 1];
     if (!slide)
-      return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
-        target: `slide:${command.slide}`,
+      return err('TARGET_NOT_FOUND', `slide:${String(command.slide)} does not exist`, [], {
+        target: `slide:${String(command.slide)}`,
       });
     let role: string | undefined;
     if (command.role !== undefined) {
@@ -952,14 +952,14 @@ export async function mutate(
           tableHeightMayClipDiagnostic({
             estimatedEmu: tableLayout.contentEmu,
             givenEmu: tableLayout.frameEmu,
-            target: `slide:${command.slide}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
+            target: `slide:${String(command.slide)}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
           }),
         );
       }
       if (command.columnWidths) {
         const cols = Math.max(1, ...command.rows.map((r) => r.length));
         const width = typeof element['width'] === 'number' ? element['width'] : 914400 * cols;
-        const resolved = resolveColumnWidthsEmu(command.columnWidths, cols, width as number);
+        const resolved = resolveColumnWidthsEmu(command.columnWidths, cols, width);
         if (resolved.normalized) {
           diagnostics.push({
             severity: 'warning',
@@ -1022,7 +1022,7 @@ export async function mutate(
       {
         changed: true,
         slides: [command.slide],
-        changedTargets: [`slide:${command.slide}/shape:${id}`],
+        changedTargets: [`slide:${String(command.slide)}/shape:${id}`],
         changedParts: [slide.partUri],
         diagnostics,
         ...(tableLayout ? { layout: tableLayout } : {}),
@@ -1035,8 +1035,8 @@ export async function mutate(
     const slides = index.elements.filter((item) => item.kind === 'slide');
     const slide = slides[command.slide - 1];
     if (!slide)
-      return err('TARGET_NOT_FOUND', `slide:${command.slide} does not exist`, [], {
-        target: `slide:${command.slide}`,
+      return err('TARGET_NOT_FOUND', `slide:${String(command.slide)} does not exist`, [], {
+        target: `slide:${String(command.slide)}`,
       });
     const doc = archive.readXml(slide.partUri);
     const boxes = [];
@@ -1197,14 +1197,10 @@ export async function mutate(
       } else setNodeText(node, text);
     }
   } else if (command.type === 'setTransform') {
-    transform(
-      shapeNode,
-      normalizeTransformFields(archive, command.transform as Record<string, unknown>),
-      {
-        archive,
-        partUri: liveItem.partUri,
-      },
-    );
+    transform(shapeNode, normalizeTransformFields(archive, command.transform), {
+      archive,
+      partUri: liveItem.partUri,
+    });
   } else if (command.type === 'xfrmSet') {
     const geom = normalizeTransformFields(archive, {
       ...(command.x !== undefined ? { x: command.x } : {}),
@@ -1232,7 +1228,7 @@ export async function mutate(
         ? undefined
         : command.height === 'auto'
           ? ('auto' as const)
-          : resolveLengthField(archive, command.height as LengthInput, 'y');
+          : resolveLengthField(archive, command.height, 'y');
     const laid = applyTableLayout(shapeNode, {
       ...(heightOpt !== undefined ? { height: heightOpt } : {}),
       ...(command.redistribute !== undefined ? { redistribute: command.redistribute } : {}),
@@ -1256,7 +1252,7 @@ export async function mutate(
       }),
     );
   } else if (command.type === 'set' || command.type === 'setProperties') {
-    if (command.type === 'set' && command.scope && command.scope !== 'local')
+    if (command.type === 'set' && ((command as { scope?: string }).scope ?? 'local') !== 'local')
       return err(
         'UNSUPPORTED_CAPABILITY',
         `Write scope "${command.scope}" is not enabled in Phase 1a; use --scope local`,

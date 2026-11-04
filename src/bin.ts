@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { requireDefined } from './required.js';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
@@ -140,8 +141,8 @@ const toEnvelope = (
       ...result.diagnostics.map((d) => d.message),
       ...(Array.isArray(value['warnings']) ? (value['warnings'] as string[]) : []),
       ...(Array.isArray(value['diagnostics'])
-        ? (value['diagnostics'] as { message?: unknown }[])
-            .map((item) => (item && typeof item.message === 'string' ? item.message : ''))
+        ? (value['diagnostics'] as ({ message?: unknown } | null)[])
+            .map((item) => (typeof item?.message === 'string' ? item.message : ''))
             .filter(Boolean)
         : []),
     ].filter((message, index, all) => all.indexOf(message) === index),
@@ -175,7 +176,7 @@ const outputEnvelope = (envelope: CommandEnvelope): void => {
 };
 
 const execute = async (commandLabel: string, command: unknown): Promise<boolean> => {
-  if (revisionOpt && command && typeof command === 'object' && command !== null) {
+  if (revisionOpt && typeof command === 'object' && command !== null) {
     const type = (command as { type?: string }).type;
     if (
       type &&
@@ -212,7 +213,7 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
 const parseProps = (list: string[]): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
   for (let i = 0; i < list.length;) {
-    const token = list[i]!;
+    const token = requireDefined(list[i]);
     if (!token.startsWith('--')) {
       i += 1;
       continue;
@@ -378,7 +379,7 @@ const main = async (): Promise<void> => {
         return;
       }
 
-      const action = clean[0]!;
+      const action = requireDefined(clean[0]);
       let ok = true;
 
       if (action === 'schema') {
@@ -605,7 +606,7 @@ const main = async (): Promise<void> => {
           depth: Number(optionFrom(clean, '--depth') ?? 2),
         });
       } else if (action === 'search') {
-        const kind = clean[1] as 'text' | 'shape';
+        const kind = clean[1];
         if (kind !== 'text' && kind !== 'shape')
           throw new Error('Usage: deckuse search <text|shape> ...');
         const workspace = await findWorkspace(workspaceOpt);
@@ -678,7 +679,7 @@ const main = async (): Promise<void> => {
               ) {
                 throw new Error('expected string[][]');
               }
-              rows = parsed as string[][];
+              rows = parsed;
             } catch {
               throw new Error(
                 `--rows must be JSON string[][] (example: --rows '[["A","B"],["1","2"]]')`,
@@ -713,7 +714,7 @@ const main = async (): Promise<void> => {
           });
           const theme = optionFrom(clean, '--theme');
           const alignColumnsRaw = optionFrom(clean, '--align-columns');
-          let alignColumns: Array<'l' | 'ctr' | 'r' | 'left' | 'center' | 'right'> | undefined;
+          let alignColumns: ('l' | 'ctr' | 'r' | 'left' | 'center' | 'right')[] | undefined;
           if (alignColumnsRaw) {
             try {
               alignColumns = JSON.parse(alignColumnsRaw) as typeof alignColumns;
@@ -795,7 +796,7 @@ const main = async (): Promise<void> => {
             ) {
               throw new Error('expected string[][]');
             }
-            rows = parsed as string[][];
+            rows = parsed;
           } catch {
             throw new Error(
               `--rows must be JSON string[][] (example: --rows '[["A","B"],["1","2"]]')`,
@@ -895,7 +896,7 @@ const main = async (): Promise<void> => {
             if (
               ['expect-revision', 'reason', 'dry-run', 'workspace', 'json', 'quiet'].includes(key)
             )
-              delete props[key];
+              Reflect.deleteProperty(props, key);
           }
           ok = await execute('deckuse set', {
             ...base,
@@ -1035,7 +1036,7 @@ const main = async (): Promise<void> => {
                   atomic: true,
                   commands: commands.flatMap((command) =>
                     command['type'] === 'batch'
-                      ? ((command as { commands: unknown[] }).commands ?? [])
+                      ? (command as { commands: unknown[] }).commands
                       : [command],
                   ),
                 };

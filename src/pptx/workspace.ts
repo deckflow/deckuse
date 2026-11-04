@@ -11,11 +11,9 @@ import {
   deckuseDir,
   indexPath,
   initGitRepo,
-  readHistory,
   readManifest,
   readOperations,
   resetGit,
-  revision,
   sourceDir,
   withWriteLock,
   writeMetadata,
@@ -27,11 +25,11 @@ import type { IndexFile } from './types.js';
 const PPTX_MEDIA_TYPE = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 export {
+  readHistory,
   revision,
   nextRevision,
   sourceDir,
   readManifest,
-  readHistory,
   withWriteLock,
 } from '../workspace/index.js';
 export type { OperationRecord } from '../workspace/index.js';

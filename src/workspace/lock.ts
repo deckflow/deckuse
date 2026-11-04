@@ -1,3 +1,4 @@
+import { requireDefined } from '../required.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolve } from 'node:path';
 import { mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -6,10 +7,10 @@ import { deckuseDir, lockPath } from './paths.js';
 const LOCK_WAIT_MS = 30_000;
 const LOCK_POLL_MS = 50;
 
-type LockPayload = {
+interface LockPayload {
   pid: number;
   acquiredAt: number;
-};
+}
 
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -26,9 +27,9 @@ const parseLockPayload = (raw: string): LockPayload | undefined => {
   if (!trimmed) return undefined;
   try {
     const value = JSON.parse(trimmed) as Partial<LockPayload>;
-    if (!Number.isInteger(value.pid) || (value.pid as number) <= 0) return undefined;
+    if (!Number.isInteger(value.pid) || requireDefined(value.pid) <= 0) return undefined;
     if (!Number.isFinite(value.acquiredAt)) return undefined;
-    return { pid: value.pid as number, acquiredAt: value.acquiredAt as number };
+    return { pid: requireDefined(value.pid), acquiredAt: requireDefined(value.acquiredAt) };
   } catch {
     return undefined;
   }

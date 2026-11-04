@@ -146,7 +146,7 @@ export async function processLooksLikeMonitorDaemon(
     if (!cmdline.includes(abs) && !cmdline.includes(workspace)) {
       // Still accept if --workspace flag present but path differs only by trailing slash noise;
       // otherwise treat as not our monitor (PID reuse / wrong process).
-      const wsMatch = cmdline.match(/--workspace\s+(\S+)/);
+      const wsMatch = /--workspace\s+(\S+)/.exec(cmdline);
       if (!wsMatch?.[1]) return false;
       if (resolve(wsMatch[1]) !== abs) return false;
     }
@@ -183,18 +183,18 @@ export async function discoverMonitorsFromProcessTable(): Promise<DiscoveredMoni
     if (!line.includes('--daemon-worker')) continue;
     if (!/\bmonitor\b/.test(line)) continue;
 
-    const pidMatch = line.match(/^(\d+)\s+(.*)$/);
+    const pidMatch = /^(\d+)\s+(.*)$/.exec(line);
     if (!pidMatch) continue;
     const pid = Number(pidMatch[1]);
     const cmd = pidMatch[2] ?? '';
     if (!Number.isInteger(pid) || pid <= 0) continue;
 
-    const wsMatch = cmd.match(/--workspace(?:\s+|=)(\S+)/);
+    const wsMatch = /--workspace(?:\s+|=)(\S+)/.exec(cmd);
     if (!wsMatch?.[1]) continue;
     const workspace = resolve(wsMatch[1]);
 
-    const hostMatch = cmd.match(/--host(?:\s+|=)(\S+)/);
-    const portMatch = cmd.match(/--port(?:\s+|=)(\d+)/);
+    const hostMatch = /--host(?:\s+|=)(\S+)/.exec(cmd);
+    const portMatch = /--port(?:\s+|=)(\d+)/.exec(cmd);
     found.push({
       pid,
       workspace,
