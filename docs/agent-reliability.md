@@ -131,3 +131,34 @@ and string input. Preserve the raw workspace revision for write guards:
 `expectRevision` is also string typed. A stale guard fails rather than overwriting
 newer content. Existing clients depending on string SDK/manifest/history values
 remain compatible; a future unified wire type would require a versioned migration.
+
+## Browser provider and host execution contract
+
+`deckuse render --preflight --json` is static: it checks configuration, explicit
+executable permissions and temporary profile writability, without opening a GUI
+or downloading anything. Managed browser installation and system-channel
+availability remain unprobed until launch. Default provider is Playwright's matched
+headless shell; run this installation's `node_modules/playwright-core/cli.js
+install chromium --only-shell` if absent. Do not substitute a different Playwright
+version's installer. System compatibility remains unverified.
+
+Set `DECKUSE_BROWSER_PROVIDER` to headless-shell, chrome, msedge, chromium or
+executable. The latter requires PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH (legacy
+CHROME_PATH/CHROMIUM_PATH also accepted). There is no automatic provider fallback.
+A host that cannot permit browser execution sets DECKUSE_BROWSER_EXECUTION=denied
+before invoking Deckuse: BROWSER_HOST_DENIED occurs before process launch. The
+host can instead dispatch the same command through its approved worker; Deckuse
+does not attach to daily browser profiles or grant itself permissions.
+
+BROWSER_NOT_FOUND, BROWSER_LAUNCH_FAILED and BROWSER_HOST_REGISTRATION_FAILED
+distinguish missing binaries, general launch failure and recognized registration
+failure signatures (the latter does not prove a permission root cause). Launch
+logs are private temporary files named in error.details, with provider/stage and
+reported exit status. RENDER_CONVERSION_FAILED, RENDER_PAGE_LOAD_FAILED and
+RENDER_SCREENSHOT_FAILED identify later stages. In-process failures are cached by
+configuration/context; set DECKUSE_BROWSER_CONTEXT when host context changes or
+DECKUSE_BROWSER_RETRY=1 for an explicit retry after remediation. Separate CLI
+processes cannot share this memory; hosts should retain failed provider outcomes
+for the task rather than relaunching unchanged commands. Batch keeps one browser
+and isolated contexts; it does not relaunch per page. No --no-sandbox workaround
+or LibreOffice fallback is used. Catching an error cannot undo an OS crash dialog.

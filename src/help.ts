@@ -812,6 +812,7 @@ Examples:
 
 Options:
   --pages <1,3-5>          Render several pages from one snapshot (use --output-dir)
+  --preflight              Static browser/host checks; no workspace or launch required
   --all                    Render all pages from one snapshot
   --output-dir <dir>       Batch PNG directory; mutually exclusive with --output
   --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)
@@ -820,6 +821,11 @@ Options:
   --json                    Machine-readable envelope
 
 Notes:
+  Default browser: matched Playwright headless shell. DECKUSE_BROWSER_PROVIDER
+  selects headless-shell|chrome|chromium|msedge|executable; explicit paths use
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH. No provider fallback after launch failure.
+  DECKUSE_BROWSER_EXECUTION=denied lets hosts reject before launch; an approved
+  host worker must be selected by the host. See docs/agent-reliability.md.
   Intended for AI agents to visually review whether an edit looks correct.
   Combo/advanced charts emit COMBO_CHART_RENDER_LIMITED; explicit series colors emit
   CHART_SERIES_COLOR_UNVERIFIED. Pages without those charts omit the generic warning.

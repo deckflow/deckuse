@@ -1,0 +1,152 @@
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium, type Browser } from 'playwright-core';
+
+export class RenderFailure extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(message);
+    this.name = 'RenderFailure';
+  }
+}
+const failed = new Map<string, RenderFailure>();
+export function browserConfiguration() {
+  const executablePath =
+    process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] ??
+    process.env['CHROME_PATH'] ??
+    process.env['CHROMIUM_PATH'];
+  const provider =
+    process.env['DECKUSE_BROWSER_PROVIDER'] ?? (executablePath ? 'executable' : 'headless-shell');
+  return {
+    provider,
+    executablePath,
+    execution: process.env['DECKUSE_BROWSER_EXECUTION'] ?? 'unknown',
+    context: process.env['DECKUSE_BROWSER_CONTEXT'] ?? 'default',
+  };
+}
+/** Static only: never starts a browser or downloads dependencies. */
+export async function browserPreflight() {
+  const config = browserConfiguration();
+  if (!['headless-shell', 'chrome', 'msedge', 'chromium', 'executable'].includes(config.provider))
+    throw new RenderFailure('BROWSER_CONFIGURATION_INVALID', 'Unknown DECKUSE_BROWSER_PROVIDER', {
+      provider: config.provider,
+    });
+  if (config.execution === 'denied')
+    throw new RenderFailure(
+      'BROWSER_HOST_DENIED',
+      'Host declares browser execution unavailable. Use a host-approved worker or execution context; Deckuse will not bypass this restriction.',
+      { provider: config.provider, stage: 'preflight' },
+    );
+  const executable =
+    config.provider === 'executable'
+      ? config.executablePath
+      : config.provider === 'headless-shell'
+        ? chromium.executablePath().replace(/chromium-(\d+)(\/.*)?$/, 'chromium_headless_shell-$1')
+        : undefined;
+  // Playwright resolves its own exact shell revision at launch. Its public executablePath
+  // points at full Chromium, so shell availability is checked through the corresponding
+  // installation directory instead of claiming an arbitrary system binary is matched.
+  let executableStatus = 'unknown';
+  if (config.provider === 'executable') {
+    if (!executable)
+      throw new RenderFailure(
+        'BROWSER_CONFIGURATION_INVALID',
+        'Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH for executable provider.',
+      );
+    try {
+      await access(executable, constants.X_OK);
+      executableStatus = 'available';
+    } catch {
+      throw new RenderFailure(
+        'BROWSER_NOT_FOUND',
+        'Configured browser executable is missing or not executable. Correct its path.',
+        { provider: config.provider, stage: 'preflight', executable },
+      );
+    }
+  }
+  let cacheWritable: boolean;
+  try {
+    const probe = await mkdtemp(join(tmpdir(), 'deckuse-browser-preflight-'));
+    await rm(probe, { recursive: true });
+    cacheWritable = true;
+  } catch {
+    throw new RenderFailure(
+      'BROWSER_CACHE_UNWRITABLE',
+      'Temporary profile directory is not writable.',
+      { stage: 'preflight' },
+    );
+  }
+  return {
+    ...config,
+    executableStatus,
+    cacheWritable,
+    dependencyCompatibility:
+      config.provider === 'headless-shell' ? 'playwright-managed' : 'unverified',
+    launch: 'not-probed',
+    installation:
+      'Run the playwright-core CLI from this Deckuse installation with install chromium --only-shell; no download is performed by preflight.',
+  };
+}
+export async function launchRenderBrowser(
+  launch: typeof chromium.launch = chromium.launch.bind(chromium),
+): Promise<Browser> {
+  const config = await browserPreflight();
+  const key = JSON.stringify(config);
+  const previous = failed.get(key);
+  if (previous && process.env['DECKUSE_BROWSER_RETRY'] !== '1') throw previous;
+  try {
+    return await launch({
+      headless: true,
+      ...(config.provider === 'executable'
+        ? { executablePath: config.executablePath ?? '' }
+        : config.provider === 'headless-shell'
+          ? {}
+          : { channel: config.provider }),
+    });
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const missing =
+      /Executable doesn't exist|executable.*does not exist|distribution.*not found/i.test(message);
+    const registration =
+      /bootstrap_check_in|MachPortRendezvous|mach_port|application.*registration/i.test(message);
+    const code = missing
+      ? 'BROWSER_NOT_FOUND'
+      : registration
+        ? 'BROWSER_HOST_REGISTRATION_FAILED'
+        : 'BROWSER_LAUNCH_FAILED';
+    const logDir = join(tmpdir(), 'deckuse-browser-logs');
+    await mkdir(logDir, { recursive: true });
+    const log = join(logDir, `launch-${String(Date.now())}.log`);
+    await writeFile(log, message, { mode: 0o600 });
+    const failure = new RenderFailure(
+      code,
+      missing
+        ? 'Browser is not installed. Install the browser revision matching this Deckuse playwright-core dependency.'
+        : registration
+          ? 'Browser application registration failed. Ask the host for an approved browser execution context; no provider fallback was attempted.'
+          : 'Browser was found but failed to launch. Inspect the launch log and host execution context before explicitly retrying; reinstalling is not assumed to fix this.',
+      {
+        provider: config.provider,
+        stage: 'launch',
+        log,
+        ...(message.match(/(?:exitCode|signal)=[^\s]+/g)
+          ? { processStatus: message.match(/(?:exitCode|signal)=[^\s]+/g) }
+          : {}),
+      },
+    );
+    failed.set(key, failure);
+    throw failure;
+  }
+}
+export function renderFailurePayload(cause: unknown) {
+  return {
+    code: cause instanceof RenderFailure ? cause.code : 'RENDER_FAILED',
+    message: cause instanceof Error ? cause.message : String(cause),
+    ...(cause instanceof RenderFailure ? { details: cause.details } : {}),
+  };
+}

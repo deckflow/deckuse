@@ -9,7 +9,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import deck2html from '@deckflow/deck2html';
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { type Browser, type Page } from 'playwright-core';
+import { launchRenderBrowser, RenderFailure } from './render-browser.js';
 import type { Diagnostic } from './core/index.js';
 import { OpcArchive } from './opc/index.js';
 import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
@@ -83,34 +84,6 @@ const parseDeckSize = async (
   return page.evaluate(PARSE_DECK_SIZE_SCRIPT);
 };
 
-const launchChromium = async (): Promise<Browser> => {
-  const executablePath =
-    process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] ??
-    process.env['CHROME_PATH'] ??
-    process.env['CHROMIUM_PATH'];
-  if (executablePath) {
-    return chromium.launch({ executablePath, headless: true });
-  }
-
-  const channels = ['chrome', 'chromium', 'msedge'] as const;
-  const errors: string[] = [];
-  for (const channel of channels) {
-    try {
-      return await chromium.launch({ channel, headless: true });
-    } catch (error) {
-      errors.push(`${channel}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  throw new Error(
-    [
-      'Unable to launch a Chromium browser for render.',
-      'Install Google Chrome / Chromium / Microsoft Edge, or set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.',
-      ...errors.map((line) => `  - ${line}`),
-    ].join('\n'),
-  );
-};
-
 const DOCUMENT_PAGE_SELECTOR = 'section.doc-section, section.footnotes, section.endnotes';
 const prepareDocumentPage = async (page: Page): Promise<void> => {
   await page.waitForSelector('main.doc', { timeout: 30_000 });
@@ -137,6 +110,7 @@ const screenshotWithBrowser = async (
     viewport: DEFAULT_VIEWPORT,
     deviceScaleFactor: scale && scale > 0 ? scale : 1,
   });
+  let stage = 'page-load';
   try {
     const page = await context.newPage();
     const url = pathToFileURL(indexHtmlPath).href;
@@ -146,6 +120,7 @@ const screenshotWithBrowser = async (
       const pages = page.locator(DOCUMENT_PAGE_SELECTOR);
       if (documentPage > (await pages.count())) throw new Error('Requested page does not exist');
       await mkdir(dirname(outputPath), { recursive: true });
+      stage = 'screenshot';
       await pages.nth(documentPage - 1).screenshot({ path: outputPath, type: 'png' });
       return;
     }
@@ -161,13 +136,20 @@ const screenshotWithBrowser = async (
     }
 
     await mkdir(dirname(outputPath), { recursive: true });
+    stage = 'screenshot';
     await page.locator('#deck').screenshot({ path: outputPath, type: 'png' });
+  } catch (cause) {
+    throw new RenderFailure(
+      stage === 'screenshot' ? 'RENDER_SCREENSHOT_FAILED' : 'RENDER_PAGE_LOAD_FAILED',
+      cause instanceof Error ? cause.message : String(cause),
+      { stage },
+    );
   } finally {
     await context.close();
   }
 };
 const defaultScreenshot: ScreenshotFn = async (options) => {
-  const browser = await launchChromium();
+  const browser = await launchRenderBrowser();
   try {
     await screenshotWithBrowser(browser, options);
   } finally {
@@ -218,7 +200,11 @@ const renderPageSnapshot = async (
       }),
     );
     if (result.exitCode !== 0) {
-      throw new Error(result.stderr || 'deck2html conversion failed');
+      throw new RenderFailure(
+        'RENDER_CONVERSION_FAILED',
+        result.stderr || 'deck2html conversion failed',
+        { stage: 'convert' },
+      );
     }
 
     const indexHtmlPath = resolve(result.indexHtmlPath);
@@ -342,6 +328,7 @@ export interface RenderPageOutcome {
   readonly ok: boolean;
   readonly result?: RenderResult;
   readonly error?: string;
+  readonly errorCode?: string;
 }
 export interface RenderPagesResult {
   readonly ok: boolean;
@@ -417,7 +404,7 @@ export async function renderPages(
         const entryRelative = relative(htmlDir, entry);
         if (entryRelative === '..' || entryRelative.startsWith(`..${sep}`))
           throw new Error('deck2html returned an output outside the staging directory');
-        browser = await launchChromium();
+        browser = await launchRenderBrowser();
         const page = await browser.newPage({ viewport: DEFAULT_VIEWPORT });
         try {
           await page.goto(pathToFileURL(entry).href, { waitUntil: 'networkidle', timeout: 60_000 });
@@ -442,7 +429,7 @@ export async function renderPages(
       : [...new Set(options.pages)];
     if (pages.some((p) => !Number.isInteger(p) || p < 1 || p > count))
       throw new Error('Requested page does not exist');
-    if (!options.dependencies?.screenshot && !browser) browser = await launchChromium();
+    if (!options.dependencies?.screenshot && !browser) browser = await launchRenderBrowser();
     const shared = browser;
     const results: RenderPageOutcome[] = [];
     for (const page of pages) {
@@ -471,6 +458,7 @@ export async function renderPages(
           page,
           ok: false,
           error: cause instanceof Error ? cause.message : String(cause),
+          errorCode: cause instanceof RenderFailure ? cause.code : 'RENDER_FAILED',
         });
       }
     }

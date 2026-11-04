@@ -26,6 +26,7 @@ import {
   runMonitorForeground,
 } from './monitor-daemon.js';
 import { renderPage, renderPages, parsePageSelection } from './render.js';
+import { browserPreflight, renderFailurePayload } from './render-browser.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
 
@@ -1319,6 +1320,19 @@ const main = async (): Promise<void> => {
         process.once('SIGTERM', () => void shutdown('SIGTERM'));
         return;
       } else if (action === 'render') {
+        if (clean.includes('--preflight')) {
+          try {
+            outputEnvelope({ ok: true, command: 'deckuse render', data: await browserPreflight() });
+          } catch (cause) {
+            outputEnvelope({
+              ok: false,
+              command: 'deckuse render',
+              error: renderFailurePayload(cause),
+            });
+            process.exitCode = 1;
+          }
+          return;
+        }
         if (clean.some((arg) => arg === '--engine' || arg.startsWith('--engine=')))
           throw new Error('--engine is no longer supported; render uses deck2html and Playwright.');
         const pageRaw = optionFrom(clean, '--page');
@@ -1346,10 +1360,7 @@ const main = async (): Promise<void> => {
             outputEnvelope({
               ok: false,
               command: 'deckuse render',
-              error: {
-                code: 'RENDER_FAILED',
-                message: cause instanceof Error ? cause.message : String(cause),
-              },
+              error: renderFailurePayload(cause),
             });
             process.exitCode = 1;
           }
@@ -1392,10 +1403,7 @@ const main = async (): Promise<void> => {
           outputEnvelope({
             ok: false,
             command: 'deckuse render',
-            error: {
-              code: 'RENDER_FAILED',
-              message: error instanceof Error ? error.message : 'Render failed',
-            },
+            error: renderFailurePayload(error),
           });
           ok = false;
         }
