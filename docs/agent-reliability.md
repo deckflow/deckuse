@@ -105,3 +105,29 @@ phase traces, computes interval unions, and compares single/batch HTML PNG bytes
 Matching previews establish renderer consistency, not native Office fidelity.
 
 See [verification results](verification-agent-reliability.md) for checks, measured samples and their limits.
+
+## Revision compatibility contract (protocol 2.0)
+
+The top-level CLI envelope `revision`, when present, is a nonnegative safe integer
+projection. `data.revision`, workspace manifest revisions, SDK results and
+`history.data.records[].revision` retain their existing decimal string type.
+These fields describe the same workspace counter but are deliberately different
+serialization contracts; do not compare them directly with `===`. History has no
+single current envelope revision. No manifest/history migration is required.
+
+Use the exported `revisionAsNumber` from `@deckflow/deckuse` for numeric comparison:
+
+```js
+import { revisionAsNumber } from '@deckflow/deckuse';
+const sameRevision =
+  revisionAsNumber(response.revision) === revisionAsNumber(response.data.revision);
+```
+
+Only compare defined normalized values; unknown/legacy opaque revisions normalize
+to undefined, not zero. Noncanonical strings, fractions and unsafe integers are
+rejected. The normalization helper now consistently enforces this on both number
+and string input. Preserve the raw workspace revision for write guards:
+`--expect-revision 2` passes the decimal CLI argument as a string. JSON
+`expectRevision` is also string typed. A stale guard fails rather than overwriting
+newer content. Existing clients depending on string SDK/manifest/history values
+remain compatible; a future unified wire type would require a versioned migration.

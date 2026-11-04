@@ -955,7 +955,14 @@ export const commandEnvelopeSchema = z
   .object({
     ok: z.boolean(),
     command: z.string().min(1),
-    revision: z.number().int().nonnegative().optional(),
+    revision: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe(
+        'Protocol numeric projection of data.revision; workspace and history revisions retain their string type. Compare using revisionAsNumber; pass the original string to expectRevision.',
+      )
+      .optional(),
     commit: z.string().min(1).optional(),
     branch: z.string().min(1).optional(),
     affectedSlides: z.array(z.number().int().positive()).optional(),
@@ -1047,7 +1054,7 @@ export const err = <T = never>(
 
 export const revisionAsNumber = (revision: string | number | undefined): number | undefined => {
   if (revision === undefined) return undefined;
-  if (typeof revision === 'number') return Number.isFinite(revision) ? revision : undefined;
+  if (typeof revision === 'string' && !/^(0|[1-9]\d*)$/.test(revision)) return undefined;
   const n = Number(revision);
-  return Number.isInteger(n) && n >= 0 ? n : undefined;
+  return Number.isSafeInteger(n) && n >= 0 ? n : undefined;
 };

@@ -73,3 +73,6 @@ export type {
   CommentAnchor,
   ProposalOperation,
 } from './review/schema.js';
+
+/** Compare protocol numeric projections with raw workspace/history counters. */
+export { revisionAsNumber } from './core/schema.js';
