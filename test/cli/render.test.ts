@@ -55,8 +55,10 @@ describe('renderPage', () => {
     );
     expect(result.page).toBe(2);
     expect(result.output).toBe(join(workspace, '.deckuse', 'render', 'page-2.png'));
-    expect(result.warnings).toEqual([]);
-    expect(result.diagnostics).toEqual([]);
+    expect(result.warnings).toEqual([expect.stringContaining('FONT_INVENTORY_UNAVAILABLE')]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'FONT_INVENTORY_UNAVAILABLE' }),
+    ]);
     await expect(readFile(result.output, 'utf8')).resolves.toBe('png');
     expect(screenshots).toHaveLength(1);
     expect(stagingDuringConvert).toBeDefined();
@@ -132,7 +134,9 @@ describe('renderPage', () => {
     });
     const result = await renderPage(workspace, { page: 2, dependencies: { convert, screenshot } });
     expect(result.engine).toBe('html');
-    expect(result.diagnostics).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'FONT_INVENTORY_UNAVAILABLE' }),
+    ]);
     expect(convert).toHaveBeenCalledOnce();
     expect(screenshot).toHaveBeenCalledOnce();
   });

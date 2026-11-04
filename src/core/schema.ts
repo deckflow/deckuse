@@ -976,6 +976,7 @@ export const commandEnvelopeSchema = z
         message: z.string().min(1),
         target: z.string().min(1).optional(),
         hint: z.string().min(1).optional(),
+        details: z.record(z.string(), z.unknown()).optional(),
       })
       .strict()
       .optional(),

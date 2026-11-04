@@ -192,3 +192,26 @@ render smoke is reported separately. This establishes legal commands, not model
 first-write accuracy or a measured task-time improvement. Older CLIs without
 agent-context use the same-version installed skill and targeted schema; do not
 retry unknown commands indefinitely.
+
+## Font and text risk reports
+
+Render results include fontReport with per-object explicit font names, package
+theme candidates, unresolved inheritance, CJK flags, converter resolver warnings
+and text-content evidence. FONT_UNRESOLVED means deck2html could not resolve a
+family in that conversion scope (possibly an unused theme candidate), not proof
+that the operating system lacks it. Matched explicit families carry object targets;
+theme inheritance/actual substitution and per-glyph coverage remain unknown.
+CJK_FONT_INHERITANCE_UNVERIFIED and CJK_GLYPH_COVERAGE_UNVERIFIED identify review
+work without changing font choices. FONT_INVENTORY_UNAVAILABLE keeps failures
+honest. No fonts are installed automatically.
+
+For PPTX, input paragraph text is compared with browser innerText before the
+screenshot. RENDER_TEXT_CONTENT_UNVERIFIED is a heuristic review item, not proof
+of missing pixels: bullet formatting, hidden content or conversion may differ.
+text-found means input text is present in DOM, not that glyphs are correct,
+visible or unclipped. DOCX inventory covers the whole document; correspondence to
+HTML pages is unknown and text comparison is not claimed. fontVerification stays
+unknown and nativeVerification unverified even when PNG generation succeeds.
+Check chosen/fallback fonts on the renderer and Office hosts, inspect affected
+pages and perform native review when required. Font availability, glyph coverage,
+DOM completeness, screenshot success and visual approval are separate states.

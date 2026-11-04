@@ -1,3 +1,4 @@
+import { fontRiskReport, renderFontInventory } from './render-fonts.js';
 import { createRequire } from 'node:module';
 import { timed } from './timing.js';
 import { createHash } from 'node:crypto';
@@ -28,7 +29,9 @@ export type ScreenshotFn = (options: {
   readonly scale?: number | undefined;
   /** DOCX page in the paginated HTML (1-based). */
   readonly documentPage?: number;
-}) => Promise<void>;
+  // Optional metadata preserves existing screenshot callbacks returning no value.
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
+}) => Promise<void | { browserText: string }>;
 
 export interface RenderDependencies {
   readonly convert?: ConvertFn;
@@ -52,6 +55,7 @@ export interface RenderResult {
   readonly revision?: string;
   readonly inputSha256?: string;
   readonly fontVerification?: string;
+  readonly fontReport?: ReturnType<typeof fontRiskReport>['report'];
   readonly nativeVerification?: string;
   readonly page: number;
   readonly output: string;
@@ -122,7 +126,7 @@ const screenshotWithBrowser = async (
       await mkdir(dirname(outputPath), { recursive: true });
       stage = 'screenshot';
       await pages.nth(documentPage - 1).screenshot({ path: outputPath, type: 'png' });
-      return;
+      return { browserText: await page.locator('body').innerText() };
     }
     await page.waitForSelector('#deck', { timeout: 30_000 });
 
@@ -138,6 +142,7 @@ const screenshotWithBrowser = async (
     await mkdir(dirname(outputPath), { recursive: true });
     stage = 'screenshot';
     await page.locator('#deck').screenshot({ path: outputPath, type: 'png' });
+    return { browserText: await page.locator('#deck').innerText() };
   } catch (cause) {
     throw new RenderFailure(
       stage === 'screenshot' ? 'RENDER_SCREENSHOT_FAILED' : 'RENDER_PAGE_LOAD_FAILED',
@@ -151,7 +156,7 @@ const screenshotWithBrowser = async (
 const defaultScreenshot: ScreenshotFn = async (options) => {
   const browser = await launchRenderBrowser();
   try {
-    await screenshotWithBrowser(browser, options);
+    return await screenshotWithBrowser(browser, options);
   } finally {
     await browser.close();
   }
@@ -218,7 +223,7 @@ const renderPageSnapshot = async (
     }
 
     await mkdir(dirname(output), { recursive: true });
-    await timed('screenshot', () =>
+    const screenshotResult = await timed('screenshot', () =>
       screenshot({
         indexHtmlPath,
         outputPath: output,
@@ -226,11 +231,38 @@ const renderPageSnapshot = async (
         ...(options.scale !== undefined ? { scale: options.scale } : {}),
       }),
     );
+    let fontReport: ReturnType<typeof fontRiskReport>['report'] | undefined;
+    try {
+      const inventory = await renderFontInventory(
+        packagePath,
+        snapshot === PACKAGE_PPTX ? 'pptx' : 'docx',
+        page,
+      );
+      const fontResult = fontRiskReport(
+        inventory,
+        `${result.stdout}\n${result.stderr}`,
+        page,
+        screenshotResult?.browserText,
+      );
+      diagnostics.push(...fontResult.diagnostics);
+      warnings.push(...fontResult.diagnostics.map((d) => `${d.code}: ${d.message}`));
+      fontReport = fontResult.report;
+    } catch {
+      warnings.push('FONT_INVENTORY_UNAVAILABLE: Font and text completeness remain unknown.');
+      diagnostics.push({
+        severity: 'warning',
+        code: 'FONT_INVENTORY_UNAVAILABLE',
+        message:
+          'Input font inventory could not be read; font and text completeness remain unknown.',
+        details: { page },
+      });
+    }
     return {
       page,
       output,
       warnings,
       diagnostics,
+      ...(fontReport ? { fontReport } : {}),
       engine: 'html',
       ...(renderedRevision ? { revision: renderedRevision } : {}),
       engineVersion: (
@@ -444,7 +476,7 @@ export async function renderPages(
               options.dependencies?.screenshot ??
               (async (opts) => {
                 if (!shared) throw new Error('Browser unavailable');
-                await screenshotWithBrowser(shared, opts);
+                return await screenshotWithBrowser(shared, opts);
               }),
           },
         });

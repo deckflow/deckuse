@@ -808,7 +808,8 @@ describe('deckuse CLI', () => {
       for (const engine of ['html', 'libreoffice']) {
         const result = await run(['render', ...selection, '--engine', engine]);
         expect(result.code).toBe(2);
-        expect(result.stderr).toContain('--engine is no longer supported');
+        expect(result.stderr).toContain('RENDER_ENGINE_REMOVED');
+        expect(result.stderr).toContain('Remove --engine');
       }
     }
   });
