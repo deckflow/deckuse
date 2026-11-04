@@ -1,3 +1,5 @@
+> Historical validation record. LibreOffice render references below describe a removed implementation, not current instructions or evidence for the HTML pipeline. Current rendering uses deck2html/Playwright only; see agent-reliability.md.
+
 # Agent reliability verification
 
 ## Implementation coverage

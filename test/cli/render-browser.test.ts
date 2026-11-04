@@ -30,3 +30,16 @@ it('does not fallback or relaunch a failed provider in the same execution contex
   });
   expect(launch).toHaveBeenCalledTimes(2);
 });
+it('returns a migration contract for removed render engines before workspace discovery', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const result = spawnSync(
+    process.execPath,
+    ['dist/bin.js', 'render', '--engine', 'libreoffice', '--json'],
+    { encoding: 'utf8' },
+  );
+  expect(result.status).toBe(2);
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    ok: false,
+    error: { code: 'RENDER_ENGINE_REMOVED' },
+  });
+});

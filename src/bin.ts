@@ -1333,8 +1333,19 @@ const main = async (): Promise<void> => {
           }
           return;
         }
-        if (clean.some((arg) => arg === '--engine' || arg.startsWith('--engine=')))
-          throw new Error('--engine is no longer supported; render uses deck2html and Playwright.');
+        if (clean.some((arg) => arg === '--engine' || arg.startsWith('--engine='))) {
+          outputEnvelope({
+            ok: false,
+            command: 'deckuse render',
+            error: {
+              code: 'RENDER_ENGINE_REMOVED',
+              message:
+                'Remove --engine: render uses deck2html and Playwright only. LibreOffice rendering and automatic engine fallback have been removed. Use render --preflight to diagnose browser availability.',
+            },
+          });
+          process.exitCode = 2;
+          return;
+        }
         const pageRaw = optionFrom(clean, '--page');
         const pagesRaw = optionFrom(clean, '--pages');
         const all = clean.includes('--all');

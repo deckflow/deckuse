@@ -1,3 +1,5 @@
+> Historical validation record. LibreOffice render references below describe a removed implementation, not current instructions or evidence for the HTML pipeline. Current rendering uses deck2html/Playwright only; see agent-reliability.md.
+
 # v1.6 safety improvement verification
 
 Verified on 2026-11-02 (UTC), macOS 26.6.2 arm64, PowerPoint/Word 16.78. Specimens are synthetic, not the external reviewer's private documents. Committed native input files, PDF output, page PNGs and SHA-256 inventory are under `test/fixtures/visual/native/`.

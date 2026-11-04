@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 /** Bounded process group: timeout/output overflow also kills renderer descendants. */
 export function runOfficeProcess(
   file: string,
@@ -47,22 +46,4 @@ export function runOfficeProcess(
       else resolve({ stdout, stderr });
     });
   });
-}
-export async function convertOfficeToPdf(
-  input: string,
-  outputDirectory: string,
-  profileDirectory: string,
-) {
-  const executable = process.env['DECKUSE_SOFFICE_PATH'] ?? 'soffice';
-  const version = (await runOfficeProcess(executable, ['--version'])).stdout.trim();
-  await runOfficeProcess(executable, [
-    `-env:UserInstallation=${pathToFileURL(profileDirectory).href}`,
-    '--headless',
-    '--convert-to',
-    'pdf',
-    '--outdir',
-    outputDirectory,
-    input,
-  ]);
-  return { engine: 'libreoffice', version };
 }

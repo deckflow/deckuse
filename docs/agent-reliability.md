@@ -43,13 +43,15 @@ new-page results include their final page index, target, UID and part URI.
 
 `render --pages 1,3-5 --output-dir ./review --json` and `render --all` capture one
 package snapshot. HTML rendering reuses a browser while converting each page.
-LibreOffice converts once to PDF before rasterizing selected pages. Successful
+The only pipeline is Office → deck2html → HTML/Chrome screenshot. Successful
 pages survive failures of other pages; the aggregate result is unsuccessful if
 any page fails. Retry only failed pages. Single-page `--page/--output` remains
 supported. Batch selectors cannot be combined with those options.
 
-HTML needs Chrome/Chromium/Edge. LibreOffice needs soffice, pdfinfo and pdftoppm.
-Dependencies are not installed automatically and engines are not silently changed.
+HTML defaults to the matched Playwright headless shell; system Chrome/Edge are explicit providers.
+The former --engine option is removed and returns RENDER_ENGINE_REMOVED with migration guidance.
+Remove that option and use render --preflight; there is no LibreOffice render or fallback.
+Dependencies are not installed automatically.
 Render results report engine, input digest, revision and pending native/font
 verification. Structure validation, approximate rendering and native Office review
 are separate delivery states; screenshot generation alone is not visual approval.
