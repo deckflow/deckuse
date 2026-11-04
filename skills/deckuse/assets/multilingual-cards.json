@@ -1,0 +1,471 @@
+[
+  {
+    "type": "addSlide",
+    "layout": "Blank",
+    "name": "MultilingualCards"
+  },
+  {
+    "type": "remove",
+    "target": "slide:1"
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "rect",
+    "name": "FullBleed",
+    "x": "0px",
+    "y": "0px",
+    "width": "100%",
+    "height": "100%",
+    "fill": "E8EEF5"
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "group",
+    "name": "Card2",
+    "x": "40px",
+    "y": "30px",
+    "width": "580px",
+    "height": "315px"
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card2",
+    "element": {
+      "kind": "shape",
+      "preset": "roundRect",
+      "name": "Card2Background",
+      "x": "0px",
+      "y": "0px",
+      "width": "580px",
+      "height": "315px"
+    }
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card2Background",
+    "properties": {
+      "fill": "FFFFFF"
+    }
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card2",
+    "element": {
+      "kind": "textbox",
+      "name": "Card2Heading",
+      "x": "24px",
+      "y": "15px",
+      "width": "532px",
+      "height": "40px"
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card2Heading",
+    "blocks": [
+      {
+        "text": "2 条行动建议 / Actions",
+        "fontFamily": "sans-serif",
+        "fontSize": 20,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card2",
+    "element": {
+      "kind": "textbox",
+      "name": "Card2List",
+      "x": "24px",
+      "y": "62px",
+      "width": "532px",
+      "height": "236px",
+      "insets": {
+        "left": "4px",
+        "right": "4px",
+        "top": "4px",
+        "bottom": "4px"
+      }
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card2List",
+    "blocks": [
+      {
+        "text": "行动 1：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 2：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      }
+    ]
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card2List",
+    "properties": {
+      "bullet": true,
+      "paragraph.level": 0
+    }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "group",
+    "name": "Card3",
+    "x": "660px",
+    "y": "30px",
+    "width": "580px",
+    "height": "315px"
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card3",
+    "element": {
+      "kind": "shape",
+      "preset": "roundRect",
+      "name": "Card3Background",
+      "x": "0px",
+      "y": "0px",
+      "width": "580px",
+      "height": "315px"
+    }
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card3Background",
+    "properties": {
+      "fill": "FFFFFF"
+    }
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card3",
+    "element": {
+      "kind": "textbox",
+      "name": "Card3Heading",
+      "x": "24px",
+      "y": "15px",
+      "width": "532px",
+      "height": "40px"
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card3Heading",
+    "blocks": [
+      {
+        "text": "3 条行动建议 / Actions",
+        "fontFamily": "sans-serif",
+        "fontSize": 20,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card3",
+    "element": {
+      "kind": "textbox",
+      "name": "Card3List",
+      "x": "24px",
+      "y": "62px",
+      "width": "532px",
+      "height": "236px",
+      "insets": {
+        "left": "4px",
+        "right": "4px",
+        "top": "4px",
+        "bottom": "4px"
+      }
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card3List",
+    "blocks": [
+      {
+        "text": "行动 1：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 2：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 3：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      }
+    ]
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card3List",
+    "properties": {
+      "bullet": true,
+      "paragraph.level": 0
+    }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "group",
+    "name": "Card4",
+    "x": "40px",
+    "y": "375px",
+    "width": "580px",
+    "height": "315px"
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card4",
+    "element": {
+      "kind": "shape",
+      "preset": "roundRect",
+      "name": "Card4Background",
+      "x": "0px",
+      "y": "0px",
+      "width": "580px",
+      "height": "315px"
+    }
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card4Background",
+    "properties": {
+      "fill": "FFFFFF"
+    }
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card4",
+    "element": {
+      "kind": "textbox",
+      "name": "Card4Heading",
+      "x": "24px",
+      "y": "15px",
+      "width": "532px",
+      "height": "40px"
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card4Heading",
+    "blocks": [
+      {
+        "text": "4 条行动建议 / Actions",
+        "fontFamily": "sans-serif",
+        "fontSize": 20,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card4",
+    "element": {
+      "kind": "textbox",
+      "name": "Card4List",
+      "x": "24px",
+      "y": "62px",
+      "width": "532px",
+      "height": "236px",
+      "insets": {
+        "left": "4px",
+        "right": "4px",
+        "top": "4px",
+        "bottom": "4px"
+      }
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card4List",
+    "blocks": [
+      {
+        "text": "行动 1：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 2：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 3：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 4：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      }
+    ]
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card4List",
+    "properties": {
+      "bullet": true,
+      "paragraph.level": 0
+    }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "group",
+    "name": "Card6",
+    "x": "660px",
+    "y": "375px",
+    "width": "580px",
+    "height": "315px"
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card6",
+    "element": {
+      "kind": "shape",
+      "preset": "roundRect",
+      "name": "Card6Background",
+      "x": "0px",
+      "y": "0px",
+      "width": "580px",
+      "height": "315px"
+    }
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card6Background",
+    "properties": {
+      "fill": "FFFFFF"
+    }
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card6",
+    "element": {
+      "kind": "textbox",
+      "name": "Card6Heading",
+      "x": "24px",
+      "y": "15px",
+      "width": "532px",
+      "height": "40px"
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card6Heading",
+    "blocks": [
+      {
+        "text": "6 条行动建议 / Actions",
+        "fontFamily": "sans-serif",
+        "fontSize": 20,
+        "bold": true
+      }
+    ]
+  },
+  {
+    "type": "add",
+    "target": "slide:1/shape:Card6",
+    "element": {
+      "kind": "textbox",
+      "name": "Card6List",
+      "x": "24px",
+      "y": "62px",
+      "width": "532px",
+      "height": "236px",
+      "insets": {
+        "left": "4px",
+        "right": "4px",
+        "top": "4px",
+        "bottom": "4px"
+      }
+    }
+  },
+  {
+    "type": "setText",
+    "target": "slide:1/shape:Card6List",
+    "blocks": [
+      {
+        "text": "行动 1：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 2：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 3：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 4：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 5：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      },
+      {
+        "text": "行动 6：检查中文与 English、数字 2026 和标点。",
+        "fontFamily": "sans-serif",
+        "fontSize": 16,
+        "lineSpacing": 1.1,
+        "spaceAfter": "4pt"
+      }
+    ]
+  },
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Card6List",
+    "properties": {
+      "bullet": true,
+      "paragraph.level": 0
+    }
+  }
+]

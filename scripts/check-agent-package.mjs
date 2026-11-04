@@ -112,6 +112,24 @@ const helpWs = join(staging, 'help-example');
 cli(['new', helpWs]);
 cli(['apply', '--workspace', helpWs, '--input', helpOps]);
 if (!cli(['status', '--workspace', helpWs]).data.valid) throw new Error('Invalid help example');
+const cards = join(staging, 'cards');
+cli(['new', cards]);
+cli(['apply', '--workspace', cards, '--input', join(skillRoot, 'assets/multilingual-cards.json')]);
+if (!cli(['validate', '--workspace', cards]).data.valid) throw new Error('Invalid card recipe');
+const slideDir = join(cards, 'source/ppt/slides');
+const cardXml = (
+  await Promise.all(
+    (await readdir(slideDir))
+      .filter((f) => f.endsWith('.xml'))
+      .map((f) => readFile(join(slideDir, f), 'utf8')),
+  )
+).join('');
+if (
+  (cardXml.match(/<p:grpSp[ >]/g) ?? []).length !== 4 ||
+  (cardXml.match(/<a:buChar /g) ?? []).length !== 15 ||
+  !cardXml.includes('行动 6')
+)
+  throw new Error('Card grouping/native bullet/text contract failed');
 const doc = join(staging, 'word');
 cli(['new', doc, '--format', 'docx']);
 cli(['add', 'paragraph', '--workspace', doc, '--text', 'Package smoke']);
