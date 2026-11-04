@@ -42,3 +42,5 @@ For older installed CLIs, inspect help before using new discovery or batch-rende
 options. If `--list`/`--pages`/`--all` are absent, use targeted `schema --type` and
 single-page render calls. Always choose an absent or empty destination, including
 on older versions that do not enforce this protection.
+
+Input: topic/outline/material; output: new PPTX and verification report. Use supplied content before asking for missing facts; read [operations](operations.md) only for needed objects. Read [verification-recovery](verification-recovery.md) before delivery. On failed apply reconcile history before retrying; correct schema/target errors without recreating successful pages. Accept only when planned content and page inventory match, structure validates and all delivered pages have recorded visual review or explicit limitations.

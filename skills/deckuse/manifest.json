@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "minimumCliVersion": "1.7.0",
+  "entry": "SKILL.md",
+  "scenarios": {
+    "create": {
+      "formats": ["pptx", "docx"],
+      "resource": "references/create-deck.md"
+    },
+    "replicate": {
+      "formats": ["pptx"],
+      "resource": "references/replicate.md"
+    },
+    "edit": {
+      "formats": ["pptx", "docx"],
+      "resource": "references/edit-deck.md"
+    },
+    "populate-template": {
+      "formats": ["pptx"],
+      "resource": "references/populate-template.md"
+    },
+    "audit": {
+      "formats": ["pptx", "docx"],
+      "resource": "references/audit-deck.md"
+    },
+    "preview-export": {
+      "formats": ["pptx", "docx"],
+      "resource": "references/preview-export.md"
+    }
+  },
+  "formatOverrides": {
+    "docx": {
+      "create": "references/create-doc.md",
+      "edit": "references/edit-doc.md",
+      "audit": "references/audit-doc.md"
+    }
+  },
+  "modules": ["references/operations.md", "references/verification-recovery.md"],
+  "evaluation": ["routing-cases.json", "references/evaluation.md"]
+}

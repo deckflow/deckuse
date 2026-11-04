@@ -35,6 +35,48 @@ async function references(dir) {
   }
 }
 await references(join(root, 'skills'));
+const skillRoot = join(root, 'skills/deckuse');
+const manifest = JSON.parse(await readFile(join(skillRoot, 'manifest.json'), 'utf8'));
+const packageInfo = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+if (manifest.minimumCliVersion !== packageInfo.version)
+  throw new Error('Skill capability baseline must match this package version');
+const expectedScenarios = [
+  'create',
+  'replicate',
+  'edit',
+  'populate-template',
+  'audit',
+  'preview-export',
+];
+if (
+  JSON.stringify(Object.keys(manifest.scenarios).sort()) !==
+  JSON.stringify(expectedScenarios.sort())
+)
+  throw new Error('Missing scenario contract');
+const resources = [
+  manifest.entry,
+  ...manifest.modules,
+  ...manifest.evaluation,
+  ...Object.values(manifest.scenarios).map((s) => s.resource),
+  ...Object.values(manifest.formatOverrides).flatMap((s) => Object.values(s)),
+];
+for (const resource of resources) {
+  const path = resolve(skillRoot, resource);
+  if (!path.startsWith(skillRoot + '/')) throw new Error('Resource escapes skill package');
+  await access(path);
+}
+const entry = await readFile(join(skillRoot, manifest.entry), 'utf8');
+if (Buffer.byteLength(entry) > 8500) throw new Error('Skill entry exceeds lightweight budget');
+const cases = JSON.parse(await readFile(join(skillRoot, 'routing-cases.json'), 'utf8'));
+for (const scenario of expectedScenarios) {
+  const selected = cases.filter((c) => c.expected === scenario);
+  if (
+    !selected.some((c) => /[\u3400-\u9fff]/u.test(c.prompt)) ||
+    !selected.some((c) => /^[\x00-\x7f]+$/.test(c.prompt))
+  )
+    throw new Error('Missing bilingual evaluation cases for ' + scenario);
+}
+
 function cli(args) {
   return JSON.parse(
     execFileSync(process.execPath, [join(root, 'dist/bin.js'), ...args, '--json'], {
