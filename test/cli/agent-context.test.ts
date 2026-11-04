@@ -6,7 +6,13 @@ import { expect, it, vi } from 'vitest';
 import { agentContext, taskSchemas } from '../../src/agent-context.js';
 it('returns format/scenario/version-specific contracts without document creation or launch', async () => {
   const first = await agentContext({ format: 'pptx', scenario: 'create', includeSchema: true });
-  expect(first.cliVersion).toBe('1.7.0');
+  expect(first.cliVersion).toBe(
+    JSON.parse(
+      await (
+        await import('node:fs/promises')
+      ).readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    ).version,
+  );
   expect(first.edition).toBe('community');
   expect(first.contracts?.anyOf.length).toBe(first.operationTypes.length);
   expect(first.recipe.cli.join('\n')).toContain('--input ./ops.json');

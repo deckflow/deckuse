@@ -1,5 +1,11 @@
 # @deckflow/deckuse
 
+## Unreleased
+
+- Add native grouping/ungrouping, attached connector endpoints, custom path geometry, linear gradients, physical table row heights and region merge/unmerge commands.
+- Add blank canvas dimensions, opt-in embedded chart workbooks, and read-only chart-data dependency preflight with safe independent-formula preservation.
+- Detect chart initialization failures and number-format degradation during single/batch rendering. Companion deck2html fixes trimmed number-format/color serialization and renders limited bar/line combos in Community. Use `DECKUSE_DECK2HTML_BINARY` to test the companion build before its upstream release.
+
 ## 1.5.0
 
 ### Minor Changes

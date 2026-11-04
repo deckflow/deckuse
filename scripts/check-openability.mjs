@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
-import { convertOfficeToPdf } from '../dist/office-backend.js';
+import { pathToFileURL } from 'node:url';
 
 const PACKAGE_EXTS = new Set(['.pptx', '.docx']);
 
@@ -94,7 +94,18 @@ const probeLibreOffice = async (soffice, file, outDir) => {
   process.env.DECKUSE_SOFFICE_PATH = soffice;
   const profile = await mkdtemp(join(tmpdir(), 'deckuse-office-profile-'));
   try {
-    await convertOfficeToPdf(file, outDir, profile);
+    const result = await run(soffice, [
+      `-env:UserInstallation=${pathToFileURL(profile).href}`,
+      '--headless',
+      '--convert-to',
+      'pdf',
+      '--outdir',
+      outDir,
+      file,
+    ]);
+    if (result.code !== 0)
+      throw new Error(result.stderr || result.stdout || 'Office conversion failed');
+    await stat(join(outDir, basename(file, extname(file)) + '.pdf'));
     return { ok: true, backend: 'libreoffice' };
   } catch (cause) {
     return { ok: false, backend: 'libreoffice', error: cause.message };
@@ -111,12 +122,15 @@ const probeMacOpen = async (file) => {
   // Open then immediately close without saving. Does not assert absence of repair UI.
   const script = `
 set theFile to POSIX file ${JSON.stringify(file)}
+with timeout of 20 seconds
 tell application ${JSON.stringify(app)}
   activate
   open theFile
   delay 2
-  close every window saving no
+  set checkedPresentation to ${ext === '.docx' ? 'active document' : 'active presentation'}
+  if name of checkedPresentation is ${JSON.stringify(basename(file))} then close checkedPresentation saving no
 end tell
+end timeout
 `;
   const result = await run('osascript', ['-e', script]);
   if (result.code !== 0) {

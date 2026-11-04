@@ -1,3 +1,6 @@
+import { bindConnector, refreshConnectors, affectedShapeIds } from './connectors.js';
+import { structuralMutation } from './structure.js';
+import { requireDefined } from '../required.js';
 import { guardCommentMutation, deleteTargetComments } from './comments.js';
 import {
   err,
@@ -27,7 +30,7 @@ import { harveyBallPieAdj, isStShapeType } from './shape-presets.js';
 import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
-import { applyShapeProperties, assertChartProperties } from './properties.js';
+import { applyShapeProperties, assertChartProperties, setSlideBackground } from './properties.js';
 import { mapDottedProperties } from './resolve-properties.js';
 import { addSlide, duplicateSlide, ensureNotes, removeSlide, setSlideLayout } from './slides.js';
 import { resolveLayoutRef } from './layout-ref.js';
@@ -603,6 +606,8 @@ const shapeTypeToElement = (
         preset: 'rect',
         text: typeof fields['text'] === 'string' ? fields['text'] : '',
       };
+    case 'path':
+      return { ...base, kind: 'shape', type: 'shape', geometry: fields['geometry'] };
     case 'rect':
       return { ...base, kind: 'shape', type: 'shape', preset: 'rect' };
     case 'rounded-rect':
@@ -618,8 +623,9 @@ const shapeTypeToElement = (
     case 'ellipse':
       return { ...base, kind: 'shape', type: 'shape', preset: 'ellipse' };
     case 'line':
-    case 'connector':
       return { ...base, kind: 'connector', type: 'connector', preset: 'line' };
+    case 'connector':
+      return { ...base, kind: 'connector', type: 'connector', preset: 'straightConnector1' };
     case 'elbow':
     case 'elbow-connector':
       return { ...base, kind: 'connector', type: 'connector', preset: 'bentConnector3' };
@@ -805,6 +811,13 @@ export async function mutate(
     }
   >
 > {
+  if (
+    command.type === 'groupShapes' ||
+    command.type === 'ungroupShapes' ||
+    command.type === 'mergeTableCells' ||
+    command.type === 'unmergeTableCells'
+  )
+    return structuralMutation(command, archive, index);
   let tableLayout: TableFrameLayout | undefined;
   if (command.type === 'replaceText' && command.formatPolicy !== undefined)
     return err('UNSUPPORTED_CAPABILITY', 'formatPolicy is DOCX-only');
@@ -923,6 +936,7 @@ export async function mutate(
           ? { text: command.text }
           : {}),
         ...(command.cornerRadius !== undefined ? { cornerRadius: command.cornerRadius } : {}),
+        ...(command.geometry !== undefined ? { geometry: command.geometry } : {}),
         ...(command.preset !== undefined ? { preset: command.preset } : {}),
         ...(command.adjust !== undefined ? { adjust: command.adjust } : {}),
         ...(command.value !== undefined ? { value: command.value } : {}),
@@ -930,10 +944,14 @@ export async function mutate(
         ...(command.theme !== undefined ? { theme: command.theme } : {}),
         ...(command.alignColumns !== undefined ? { alignColumns: command.alignColumns } : {}),
         ...(command.columnWidths !== undefined ? { columnWidths: command.columnWidths } : {}),
+        ...(command.rowHeights !== undefined ? { rowHeights: command.rowHeights } : {}),
         ...(command.merges !== undefined ? { merges: command.merges } : {}),
         ...(command.fontSize !== undefined ? { fontSize: command.fontSize } : {}),
         ...(command.fontFamily !== undefined ? { fontFamily: command.fontFamily } : {}),
         ...(command.chartType !== undefined ? { chartType: command.chartType } : {}),
+        ...(command.embeddedWorkbook !== undefined
+          ? { embeddedWorkbook: command.embeddedWorkbook }
+          : {}),
         ...(command.data !== undefined ? { data: command.data } : {}),
         ...(command.showDataLabels !== undefined ? { showDataLabels: command.showDataLabels } : {}),
         ...(command.legend !== undefined ? { legend: command.legend } : {}),
@@ -1025,6 +1043,18 @@ export async function mutate(
         command.blocks.map((block) => mapTextBlock(block as Record<string, unknown>)),
       );
     }
+    bindConnector(
+      doc,
+      created,
+      {
+        ...(command.start ? { start: command.start } : {}),
+        ...(command.end ? { end: command.end } : {}),
+        ...(command.routing ? { routing: command.routing } : {}),
+      },
+      index,
+      slide.partUri,
+    );
+    refreshConnectors(doc, 'detach', affectedShapeIds(created));
     archive.writeXml(slide.partUri, doc);
     const id = attr(cNvPr(created), 'id') ?? '?';
     return ok(
@@ -1069,6 +1099,11 @@ export async function mutate(
       lengthContextFor(archive, command.mode.includes('v') ? 'y' : 'x'),
     );
     for (const update of updates) writeBBox(update.node, update);
+    refreshConnectors(
+      doc,
+      'detach',
+      new Set(updates.flatMap((update) => [...affectedShapeIds(update.node)])),
+    );
     archive.writeXml(slide.partUri, doc);
     return ok({
       changed: true,
@@ -1151,6 +1186,16 @@ export async function mutate(
       }
     }
     if (command.type === 'set' || command.type === 'setProperties') {
+      if (Object.keys(command.properties).length === 1 && 'fill' in command.properties) {
+        const slideDoc = archive.readXml(item.partUri);
+        setSlideBackground(requireDefined(slideDoc.documentElement), command.properties['fill']);
+        archive.writeXml(item.partUri, slideDoc);
+        return ok({
+          changed: true,
+          slides: slidesForItem(index, item),
+          changedParts: [item.partUri],
+        });
+      }
       // slide-level name/hidden not fully modeled; treat as unsupported for now except no-op properties
       return err(
         'UNSUPPORTED_CAPABILITY',
@@ -1250,6 +1295,13 @@ export async function mutate(
           ? ('auto' as const)
           : resolveLengthField(archive, command.height, 'y');
     const laid = applyTableLayout(shapeNode, {
+      ...(command.rowHeights
+        ? {
+            rowHeights: command.rowHeights.map((h) =>
+              requireDefined(resolveLengthField(archive, h, 'y')),
+            ),
+          }
+        : {}),
       ...(heightOpt !== undefined ? { height: heightOpt } : {}),
       ...(command.redistribute !== undefined ? { redistribute: command.redistribute } : {}),
     });
@@ -1280,6 +1332,11 @@ export async function mutate(
         target !== undefined ? { target } : {},
       );
     const properties = mapDottedProperties(command.properties);
+    const bindingChanged = ['start', 'end', 'routing'].some((k) => k in properties);
+    bindConnector(doc, shapeNode, properties, index, liveItem.partUri);
+    delete properties['start'];
+    delete properties['end'];
+    delete properties['routing'];
     if (chartPart) {
       const checked = assertChartProperties(properties);
       if (!checked.ok) return checked;
@@ -1311,13 +1368,13 @@ export async function mutate(
         ...(target !== undefined ? { target } : {}),
       });
       if (!applied.ok) return applied;
-      if (applied.value.applied.length === 0)
+      if (applied.value.applied.length === 0 && !bindingChanged)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
       diagnostics.push(...applied.value.diagnostics);
     } else if (liveItem.kind === 'tableCell') {
       const applied = applyTableCellProperties(node, properties);
       if (!applied.ok) return applied;
-      if (applied.value.applied.length === 0)
+      if (applied.value.applied.length === 0 && !bindingChanged)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
       diagnostics.push(...applied.value.diagnostics);
     } else {
@@ -1326,7 +1383,7 @@ export async function mutate(
         partUri: liveItem.partUri,
       });
       if (!applied.ok) return applied;
-      if (applied.value.applied.length === 0)
+      if (applied.value.applied.length === 0 && !bindingChanged)
         return err('INVALID_COMMAND', 'set requires at least one supported property');
     }
   } else if (command.type === 'zMove') {
@@ -1362,6 +1419,18 @@ export async function mutate(
     return err('INVALID_COMMAND', `Unhandled mutation type`);
   }
 
+  const detached = refreshConnectors(
+    doc,
+    command.type === 'remove' ? command.connections : undefined,
+    affectedShapeIds(shapeNode),
+  );
+  if (detached.length)
+    diagnostics.push({
+      severity: 'warning',
+      code: 'CONNECTOR_DETACHED',
+      message: 'Deleted nodes detached connector endpoints',
+      details: { connectors: detached },
+    });
   archive.writeXml(liveItem.partUri, doc);
   const changedParts = [liveItem.partUri];
   if (chartMutated && chartPart) changedParts.push(chartPart);

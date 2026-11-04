@@ -299,3 +299,11 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
 `deckuse render` converts PPTX and DOCX to HTML with deck2html and captures pages with Playwright. DOCX page numbers follow the HTML pagination and may differ from Word. Use Word for native layout checks.
 
 Schema: `deckuse schema --type addParagraph --json`.
+
+## Native structure and fidelity additions
+
+Use `schema --type` for `groupShapes`, `ungroupShapes`, `mergeTableCells`, `unmergeTableCells`, and `preflightChartData`. They are first-class commands; write commands are accepted by `apply` with atomic rollback. Group targets must be same-slide siblings; default z-order preservation refuses nonconsecutive shapes. Connectors accept `start/end: {target, site}` and persist native endpoint bindings. `addShape` supports `shapeType: "path"` with `geometry`, linear-gradient `fill`, table `rowHeights`, and opt-in chart `embeddedWorkbook: true`.
+
+Run `preflight-chart-data <target> --properties <json>` before uncertain embedded-data edits. It is read-only; actual writes recheck dependencies. Formula recalculation and range resizing remain unsupported. Do not remove protections or change only chart caches when the workbook cannot be updated safely.
+
+See [native capability contracts and examples](../../../docs/native-capabilities.md). Native PowerPoint checks and HTML previews are different evidence; retain the manual Edit Data check for delivery acceptance.

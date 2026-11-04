@@ -1,13 +1,24 @@
+import { assertIndependentFormulas, WorkbookDependencyError } from './formula-dependencies.js';
 import type { Document, Element } from '@xmldom/xmldom';
 import { posix } from 'node:path';
 import { OpcArchive } from '../opc/index.js';
 import { NS, REL, children, descendants, first } from './xml.js';
 
 const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-export class ChartDataError extends Error {}
-const fail = (message: string): never => {
-  throw new ChartDataError(message);
+export class ChartDataError extends Error {
+  readonly details: Record<string, unknown>;
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.details = details ?? {
+      reasonCode: /^WORKBOOK_[A-Z_]+/.exec(message)?.[0] ?? 'CHART_DATA_UNSAFE',
+      reason: message,
+    };
+  }
+}
+const fail = (message: string, details?: Record<string, unknown>): never => {
+  throw new ChartDataError(message, details);
 };
+
 export interface CellBinding {
   sheet: string;
   part: string;
@@ -136,7 +147,10 @@ function bindings(book: OpcArchive, chart: Document, documents: Map<string, Docu
           (n) => n.namespaceURI === S && n.getAttribute('r') === address,
         );
         if (!cell || direct(cell, 'f'))
-          return fail(`Missing or formula cell: ${parsed.sheet}!${address}`);
+          return fail(`Missing or formula cell: ${parsed.sheet}!${address}`, {
+            reasonCode: cell ? 'WORKBOOK_FORMULA_TARGET' : 'WORKBOOK_CELL_MISSING',
+            cell: { sheet: parsed.sheet, address },
+          });
         const type = cell.getAttribute('t');
         let value = direct(cell, 'v')?.textContent ?? '';
         if (type === 's') {
@@ -233,6 +247,21 @@ export async function prepareChartData(
       ref = title && first(title, 'strRef');
     if (ref) edits.push({ ref, values: [properties['title']] });
   }
+  if (properties['categories'] !== undefined) {
+    const categories = properties['categories'];
+    if (
+      !Array.isArray(categories) ||
+      !categories.length ||
+      !categories.every((v) => typeof v === 'string')
+    )
+      return fail('Categories must be nonempty text array');
+    for (const s of series) {
+      const cat = direct(s, 'cat'),
+        ref = cat && direct(cat, 'strRef');
+      if (ref) edits.push({ ref, values: categories });
+      else return fail('Category updates require workbook references');
+    }
+  }
   if (!edits.length) return undefined;
   const embedded = workbookPart(archive, part, chart);
   const bytes = archive.getPart(embedded)?.data;
@@ -244,9 +273,7 @@ export async function prepareChartData(
     [...book.parts.keys()].some((p) => /vbaProject|externalLinks|pivot|calcChain/i.test(p))
   )
     return fail('Workbook has unsupported external, macro, pivot or calculation dependencies');
-  for (const p of book.parts.keys())
-    if (/^\/xl\/worksheets\/.*\.xml$/.test(p) && descendants(book.readXml(p), 'f').length)
-      return fail('Workbook formula dependencies are not supported');
+
   const documents = new Map<string, Document>();
   const all = bindings(book, chart, documents);
   const changes = new Map<string, ChartChange>();
@@ -270,6 +297,14 @@ export async function prepareChartData(
       if (!binding.numeric && cell.numeric)
         return fail('Cannot write a string into a numeric chart dependency');
     }
+  }
+  try {
+    assertIndependentFormulas(book, [...changes.values()]);
+  } catch (cause) {
+    return fail(
+      cause instanceof Error ? cause.message : String(cause),
+      cause instanceof WorkbookDependencyError ? cause.details : undefined,
+    );
   }
   // Reject incompatible overlapping string/numeric dependencies before changing cells.
   for (const b of all)

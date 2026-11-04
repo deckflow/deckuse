@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "minimumCliVersion": "1.7.0",
+  "minimumCliVersion": "1.8.0",
   "entry": "SKILL.md",
   "scenarios": {
     "create": {

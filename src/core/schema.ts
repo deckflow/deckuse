@@ -148,6 +148,7 @@ const initCommandSchema = z
     workspaceId: z.string().min(1),
     format: z.string().min(1),
     source: z.string().min(1),
+    pageSize: z.object({ width: lengthValueSchema, height: lengthValueSchema }).strict().optional(),
     options: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
@@ -383,10 +384,21 @@ const setTableLayoutCommandSchema = z
     height: z.union([z.literal('auto'), lengthValueSchema]).optional(),
     /** `content` = measure cells; `equal` = split frame height evenly across rows. */
     redistribute: z.enum(['equal', 'content']).optional(),
+    rowHeights: z.array(lengthValueSchema).min(1).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.height === undefined && value.redistribute === undefined) {
+    if (value.rowHeights && (value.height !== undefined || value.redistribute !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'rowHeights cannot be combined with height or redistribute',
+        path: ['rowHeights'],
+      });
+    if (
+      value.height === undefined &&
+      value.redistribute === undefined &&
+      value.rowHeights === undefined
+    ) {
       ctx.addIssue({
         code: 'custom',
         message: 'setTableLayout requires height and/or redistribute',
@@ -509,6 +521,86 @@ const insetsSchema = z
   })
   .strict();
 
+export const pathGeometrySchema = z
+  .object({
+    viewBox: z.object({ width: z.number().positive(), height: z.number().positive() }).strict(),
+    paths: z
+      .array(
+        z
+          .array(
+            z.discriminatedUnion('type', [
+              z.object({ type: z.literal('move'), x: z.number(), y: z.number() }).strict(),
+              z.object({ type: z.literal('line'), x: z.number(), y: z.number() }).strict(),
+              z
+                .object({
+                  type: z.literal('cubic'),
+                  x1: z.number(),
+                  y1: z.number(),
+                  x2: z.number(),
+                  y2: z.number(),
+                  x: z.number(),
+                  y: z.number(),
+                })
+                .strict(),
+              z.object({ type: z.literal('close') }).strict(),
+            ]),
+          )
+          .min(1),
+      )
+      .min(1),
+    connectionPoints: z
+      .array(
+        z
+          .object({
+            x: z.number(),
+            y: z.number(),
+            angle: z.number().default(0),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    v.paths.forEach((p, i) => {
+      if (p[0]?.type !== 'move')
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Path must start with move',
+          path: ['paths', i, 0],
+        });
+    });
+  });
+export const gradientFillSchema = z
+  .object({
+    type: z.literal('linearGradient'),
+    angle: z.number(),
+    stops: z
+      .array(
+        z
+          .object({
+            position: z.number().min(0).max(1),
+            color: z.string().regex(/^#?[0-9a-fA-F]{6}$/),
+            transparency: z.number().min(0).max(100).optional(),
+          })
+          .strict(),
+      )
+      .min(2),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    v.stops.forEach((s, i) => {
+      if (i && s.position < (v.stops[i - 1]?.position ?? 0))
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Stops must be in nondecreasing order',
+          path: ['stops', i],
+        });
+    });
+  });
+const connectorEndpointSchema = z
+  .object({ target: targetPathSchema, site: z.number().int().nonnegative() })
+  .strict();
 const addShapeCommandSchema = z
   .object({
     ...commandBase,
@@ -540,6 +632,7 @@ const addShapeCommandSchema = z
       'curved-left-arrow',
       'image',
       'group',
+      'path',
       'table',
       'chart',
       'video',
@@ -577,8 +670,13 @@ const addShapeCommandSchema = z
     insets: insetsSchema.optional(),
     /** Text autofit: none | shrink | resize. */
     autofit: z.enum(['none', 'shrink', 'resize']).optional(),
+    start: connectorEndpointSchema.optional(),
+    end: connectorEndpointSchema.optional(),
+    routing: z.enum(['auto', 'preserve']).optional(),
+    geometry: pathGeometrySchema.optional(),
     fill: z
       .union([
+        gradientFillSchema,
         z.string().min(1),
         z
           .object({
@@ -612,12 +710,14 @@ const addShapeCommandSchema = z
     columnWidths: z.array(lengthValueSchema).optional(),
     /** Cell merges as { from: "r:c", to: "r:c" }. */
     merges: z.array(tableMergeSchema).optional(),
+    rowHeights: z.array(lengthValueSchema).min(1).optional(),
     /** Table default font size (pt). */
     fontSize: z.number().positive().optional(),
     /** Table default font family. */
     fontFamily: z.string().min(1).optional(),
     chartType: z.enum(['bar', 'column', 'line', 'pie', 'combo']).optional(),
     data: chartDataSchema.optional(),
+    embeddedWorkbook: z.boolean().optional(),
     showDataLabels: z.boolean().optional(),
     /** Chart legend: false hides; string sets position. */
     legend: z.union([z.boolean(), z.enum(['b', 't', 'r', 'l'])]).optional(),
@@ -660,6 +760,18 @@ const addShapeCommandSchema = z
         path: ['value'],
       });
     }
+    if (value.rowHeights && (value.shapeType !== 'table' || value.height !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'rowHeights requires a table without explicit height',
+        path: ['rowHeights'],
+      });
+    if ((value.shapeType === 'path') !== (value.geometry !== undefined))
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Path requires geometry; geometry requires path',
+        path: ['geometry'],
+      });
     if (value.shapeType === 'chart') {
       if (!value.chartType) {
         ctx.addIssue({
@@ -736,6 +848,7 @@ const removeCommandSchema = z
     ...commandBase,
     ...mutationBase,
     type: z.literal('remove'),
+    connections: z.enum(['detach', 'reject']).optional(),
     commentsPolicy: z.literal('delete').optional(),
     ref: elementRefSchema.optional(),
     target: z.string().min(1).optional(),
@@ -832,6 +945,46 @@ const validateCommandSchema = z
   })
   .strict();
 
+const groupShapesSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('groupShapes'),
+    slide: z.number().int().positive(),
+    targets: z.array(targetPathSchema).min(2),
+    name: z.string().optional(),
+    zOrder: z.enum(['preserve', 'front', 'back']).default('preserve'),
+  })
+  .strict();
+const ungroupShapesSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('ungroupShapes'),
+    target: targetPathSchema,
+  })
+  .strict();
+const mergeTableCellsSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('mergeTableCells'),
+    target: targetPathSchema,
+    from: z.string(),
+    to: z.string(),
+    content: z.enum(['requireEmpty', 'append']).default('requireEmpty'),
+  })
+  .strict();
+const unmergeTableCellsSchema = z
+  .object({
+    ...commandBase,
+    ...mutationBase,
+    type: z.literal('unmergeTableCells'),
+    target: targetPathSchema,
+    from: z.string(),
+    to: z.string(),
+  })
+  .strict();
 export const atomicCommandSchema = z.discriminatedUnion('type', [
   ...commentWrites,
   ...revisionWrites,
@@ -842,6 +995,10 @@ export const atomicCommandSchema = z.discriminatedUnion('type', [
   setCommandSchema,
   xfrmSetCommandSchema,
   setTableLayoutCommandSchema,
+  groupShapesSchema,
+  ungroupShapesSchema,
+  mergeTableCellsSchema,
+  unmergeTableCellsSchema,
   zMoveCommandSchema,
   alignElementsCommandSchema,
   addCommandSchema,
@@ -884,11 +1041,21 @@ const getRevisionCommandSchema = z
   })
   .strict();
 
+const preflightChartDataSchema = z
+  .object({
+    ...commandBase,
+    type: z.literal('preflightChartData'),
+    workspaceId: z.string().min(1),
+    target: targetPathSchema,
+    properties: z.record(z.string(), z.unknown()),
+  })
+  .strict();
 export const commandSchema = z.discriminatedUnion('type', [
   ...commentWrites,
   ...revisionWrites,
   ...reviewReads,
   initCommandSchema,
+  preflightChartDataSchema,
   listRevisionsCommandSchema,
   getRevisionCommandSchema,
   statusCommandSchema,
@@ -906,6 +1073,10 @@ export const commandSchema = z.discriminatedUnion('type', [
   setCommandSchema,
   xfrmSetCommandSchema,
   setTableLayoutCommandSchema,
+  groupShapesSchema,
+  ungroupShapesSchema,
+  mergeTableCellsSchema,
+  unmergeTableCellsSchema,
   zMoveCommandSchema,
   alignElementsCommandSchema,
   addCommandSchema,

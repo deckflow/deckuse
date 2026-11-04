@@ -284,11 +284,28 @@ describe('table columnWidths / merges / default font', () => {
     const updated = await pptxAdapter.execute(
       {
         version: '2.0',
-        type: 'setProperties',
+        type: 'batch',
+        atomic: true,
         workspaceId: workspace,
         transactionId: rev2,
-        target: 'slide:1/shape:T/cell:0:0',
-        properties: { merge: { rowSpan: 2 } },
+        commands: [
+          {
+            version: '2.0',
+            type: 'setProperties',
+            workspaceId: workspace,
+            transactionId: rev2,
+            target: 'slide:1/shape:T/cell:0:0',
+            properties: { merge: { rowSpan: 2 } },
+          },
+          {
+            version: '2.0',
+            type: 'setProperties',
+            workspaceId: workspace,
+            transactionId: rev2,
+            target: 'slide:1/shape:T/cell:1:0',
+            properties: { merge: { vMerge: true } },
+          },
+        ],
       },
       {},
     );

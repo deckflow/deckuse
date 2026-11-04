@@ -1,3 +1,5 @@
+import { readCustomGeometry } from './geometry.js';
+import { connectionSites } from './connectors.js';
 import { requireDefined } from '../required.js';
 import { err, ok, type PropertyValue, type ResolveMode, type Result } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
@@ -853,6 +855,64 @@ export function resolveProperties(
       : { scope: 'default' },
   );
 
+  if (item.kind === 'table') {
+    const table = first(node, 'tbl');
+    if (table) {
+      const heights = children(table)
+        .filter((n) => n.localName === 'tr')
+        .map((row) => Number(row.getAttribute('h')));
+      all['rowHeights'] = prop(
+        heights,
+        heights,
+        { scope: 'local', target: resolved.target },
+        'emu',
+      );
+    }
+  }
+  const geometry = readCustomGeometry(node);
+  if (geometry)
+    all['geometry'] = prop(geometry, geometry, { scope: 'local', target: resolved.target });
+  if (item.kind === 'connector') {
+    const routing =
+      descendants(node, 'routing')
+        .find((n) => n.namespaceURI === 'https://deckuse.dev/connector/1')
+        ?.getAttribute('val') ?? 'preserve';
+    all['routing'] = prop(routing, routing, { scope: 'local', target: resolved.target });
+  }
+  if (item.kind === 'connector')
+    for (const [key, tag] of [
+      ['start', 'stCxn'],
+      ['end', 'endCxn'],
+    ] as const) {
+      const ref = first(node, tag);
+      const value = ref
+        ? {
+            target: `slide:${String(resolved.slidePage)}/shape:${ref.getAttribute('id') ?? ''}`,
+            site: Number(ref.getAttribute('idx')),
+          }
+        : null;
+      all[key] = prop(value, value, { scope: 'local', target: resolved.target });
+    }
+  if (node.localName === 'sp')
+    try {
+      const sites = connectionSites(node);
+      all['connectionPoints'] = prop(sites, sites, { scope: 'local', target: resolved.target });
+    } catch {
+      /* Unsupported geometry has no validated sites. */
+    }
+  const grad = first(node, 'gradFill');
+  if (grad) {
+    const value = {
+      type: 'linearGradient',
+      angle: Number(first(grad, 'lin')?.getAttribute('ang') ?? 0) / 60000,
+      stops: descendants(grad, 'gs').map((gs) => ({
+        position: Number(gs.getAttribute('pos')) / 100000,
+        color: first(gs, 'srgbClr')?.getAttribute('val') ?? null,
+        transparency: 100 - Number(first(gs, 'alpha')?.getAttribute('val') ?? 100000) / 1000,
+      })),
+    };
+    all['fill'] = prop(value, value, { scope: 'local', target: resolved.target });
+  }
   return ok({
     target: resolved.target,
     uid: resolved.uid,

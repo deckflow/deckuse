@@ -35,6 +35,7 @@ Commands:
   align         Align or distribute shapes on a slide
   z             Change z-order
   apply         Apply one or many JSON / JSONL write commands
+  preflight-chart-data  Check chart workbook dependencies without writing
   schema        Print command JSON Schema (--list lists types) (self-describing CLI)
   measure       Heuristic text size estimate (for layout)
   validate      Validate package / relationships
@@ -88,8 +89,17 @@ Notes:
   Does not normalize or rewrite slide content.`,
   },
 
+  'preflight-chart-data': {
+    usage: 'deckuse preflight-chart-data <target> --properties <json>',
+    summary: 'Read-only chart workbook dependency and write-range preflight.',
+    example:
+      'deckuse preflight-chart-data slide:1/shape:Chart --properties \'{"series":[{"values":[1,2]}]}\' --json',
+    details:
+      'Returns supported, revision, changes, isolation requirements, or structured blockers. Actual writes recheck the current workbook under the workspace lock.',
+  },
   new: {
-    usage: 'deckuse new <workspace/> [--format pptx|docx]',
+    usage:
+      'deckuse new <workspace/> [--format pptx|docx] [--width <length> --height <length> [--unit in|cm|mm|pt|px|emu]]',
     summary:
       'Create a workspace from a bundled blank template (PPTX by default, or DOCX with --format docx).',
     example: 'deckuse new ./workspace --format docx --json',
@@ -98,6 +108,8 @@ Notes:
 
 Options:
   --format pptx|docx        Template format (default: pptx)
+  --width / --height        PPTX canvas lengths; supply both, 1–56 inches
+  --unit                   Unit for bare numeric dimensions; no percentages
   --workspace <path>        Same as the positional workspace argument
   --json                    Machine-readable envelope
 
@@ -609,7 +621,8 @@ Accepted input shapes:
 Notes:
   Prefer apply for agent workflows: one revision, one audit entry, atomic rollback.
   Only write command types are accepted (addSlide, setText, setProperties, addShape,
-  setTransform / xfrmSet, alignElements, …).
+  setTransform / xfrmSet, alignElements, groupShapes, ungroupShapes,
+  mergeTableCells, unmergeTableCells, setTableLayout, …).
   setProperties accepts camelCase/nested keys and dotted keys (font.size, fill.color).
   Same-batch forward refs by shape name work after addShape.
 

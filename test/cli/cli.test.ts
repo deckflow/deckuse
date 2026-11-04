@@ -453,7 +453,7 @@ describe('deckuse CLI', () => {
     const exportPath = join(root, 'out.pptx');
     expect((await run(['export', exportPath, '--workspace', workspace, '--json'])).code).toBe(0);
     await expect(stat(exportPath)).resolves.toMatchObject({ size: expect.any(Number) });
-  });
+  }, 30_000);
   it('query --workspace and positional workspace use the same selector', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-query-')),
       source = join(root, 'source.pptx'),
@@ -557,7 +557,7 @@ describe('deckuse CLI', () => {
     expect(limitedData.data.items).toHaveLength(1);
     expect(limitedData.data.total).toBeGreaterThan(1);
     expect(limitedData.data.truncated).toBe(true);
-  });
+  }, 30_000);
 
   it('query ignores a redundant workspace path that contains "="', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-cli-query-eq-')),

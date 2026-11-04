@@ -1,3 +1,6 @@
+import { attachChartWorkbook } from './chart-workbook.js';
+import { customGeometry } from './geometry.js';
+import { pathGeometrySchema } from '../core/schema.js';
 import { requireDefined } from '../required.js';
 import { prepareChartData, refreshCaches, commitChart, type ChartOwner } from './chart-data.js';
 import { OpcArchive, parseXml } from '../opc/index.js';
@@ -19,7 +22,16 @@ import {
   measureTableLayout,
   type TableFrameLayout,
 } from './table-measure.js';
-import { NS, REL, allocateShapeIds, attr, descendants, nextShapeId } from './xml.js';
+import {
+  NS,
+  REL,
+  first,
+  children,
+  allocateShapeIds,
+  attr,
+  descendants,
+  nextShapeId,
+} from './xml.js';
 
 export {
   estimateTableHeightEmu,
@@ -170,7 +182,7 @@ const shapeXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) 
   )}</p:sp>`;
 };
 const connectorXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
-  const preset = value(e, 'preset', 'line');
+  const preset = value(e, 'preset', 'straightConnector1');
   return `<p:cxnSp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvCxnSpPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Connector ${String(id)}`))}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="${esc(preset)}"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
 };
 const groupXml = (id: number, e: Record<string, unknown>, archive?: OpcArchive) => {
@@ -278,6 +290,7 @@ export function buildMergeMap(merges: unknown, rows: number, cols: number): Map<
     for (let r = from.row; r <= to.row; r++) {
       for (let c = from.col; c <= to.col; c++) {
         const key = `${String(r)}:${String(c)}`;
+        if (map.has(key)) throw new Error('TABLE_MERGE_OVERLAP');
         if (r === from.row && c === from.col) {
           map.set(key, {
             ...(gridSpan > 1 ? { gridSpan } : {}),
@@ -312,6 +325,23 @@ export function resolveTableFrame(
     fontPt,
     colWidthsEmu: widths,
   });
+  if (Array.isArray(e['rowHeights'])) {
+    if (e['height'] !== undefined) throw new Error('rowHeights cannot be combined with height');
+    const heights = e['rowHeights'].map((h) => resolveEmu(h, 0, 'y', archive));
+    if (heights.length !== rows.length || heights.some((h) => !Number.isSafeInteger(h) || h <= 0))
+      throw new Error('rowHeights must contain one positive length per physical row');
+    const total = heights.reduce((a, b) => a + b, 0);
+    if (!Number.isSafeInteger(total)) throw new Error('Table height exceeds safe integer range');
+    return {
+      mode: 'fixed',
+      status: heights.some((h, i) => h < (measured.rowHeightsEmu[i] ?? 0))
+        ? 'overflow'
+        : 'complete',
+      frameEmu: total,
+      contentEmu: measured.totalHeightEmu,
+      rowHeightsEmu: heights,
+    };
+  }
   const heightRaw = e['height'];
   return layoutTableFrame({
     contentRowHeightsEmu: measured.rowHeightsEmu,
@@ -404,12 +434,12 @@ async function pictureXml(
   return `<p:pic xmlns:p="${NS.p}" xmlns:a="${NS.a}" xmlns:r="${NS.r}"><p:nvPicPr><p:cNvPr id="${String(id)}" name="${esc(value(e, 'name', `Picture ${String(id)}`))}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(e, archive)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
 }
 
-function chartXml(
+async function chartXml(
   archive: OpcArchive,
   slidePart: string,
   id: number,
   e: Record<string, unknown>,
-): string {
+): Promise<string> {
   const chartType = value(e, 'chartType', 'column') as ChartType;
   const data = (e['data'] ?? {}) as {
     title?: string;
@@ -448,6 +478,11 @@ function chartXml(
     ...(categoryAxis !== undefined ? { categoryAxis } : {}),
     ...(fontSize !== undefined ? { fontSize } : {}),
   });
+  if (e['embeddedWorkbook'] === true)
+    await attachChartWorkbook(archive, created.chartPart, {
+      categories: data.categories ?? [],
+      series,
+    });
   const width = resolveEmu(e['width'], 914400 * 4, 'x', archive);
   const height = resolveEmu(e['height'], 914400 * 3, 'y', archive);
   return chartGraphicFrameXml(id, created.rid, { ...e, width, height });
@@ -494,12 +529,19 @@ export async function addElement(
   else if (kind === 'group') xml = groupXml(id, e, archive);
   else if (kind === 'table') xml = tableXml(id, e, archive);
   else if (kind === 'picture') xml = await pictureXml(archive, slidePart, id, e);
-  else if (kind === 'chart') xml = chartXml(archive, slidePart, id, e);
+  else if (kind === 'chart') xml = await chartXml(archive, slidePart, id, e);
   else if (kind === 'video') xml = await avMediaXml(archive, slidePart, id, e, 'video');
   else if (kind === 'audio') xml = await avMediaXml(archive, slidePart, id, e, 'audio');
   else xml = shapeXml(id, e, archive);
   const node = parseXml(xml).documentElement,
     imported = doc.importNode(node, true);
+  if (e['geometry'] !== undefined) {
+    const spPr = first(imported, 'spPr');
+    if (!spPr) throw new Error('Path shape requires spPr');
+    for (const child of children(spPr))
+      if (child.localName === 'prstGeom' || child.localName === 'custGeom') spPr.removeChild(child);
+    spPr.appendChild(customGeometry(doc, pathGeometrySchema.parse(e['geometry'])));
+  }
   parent.appendChild(imported);
   return imported;
 }

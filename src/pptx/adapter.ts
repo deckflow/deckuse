@@ -1,3 +1,7 @@
+import { tableMergeDiagnostics } from './table.js';
+import { assertChartProperties } from './properties.js';
+import { assertDefaultPptxExists } from '../default-template.js';
+import { describeSlideSize, setBlankPageSize } from './slide-size.js';
 import { validateReviewParts } from '../review/validation.js';
 import { REVIEW_WRITES, reviewWriteSchema } from '../review/schema.js';
 import { slideComments, mutateSlideComments } from './comments.js';
@@ -10,7 +14,7 @@ import {
 } from '../workspace/transaction.js';
 import { WorkspaceNotEmptyError } from '../workspace/initialize.js';
 import { auditVisuals } from './visual-audit.js';
-import { ChartDataError, verifyChartData } from './chart-data.js';
+import { ChartDataError, verifyChartData, prepareChartData } from './chart-data.js';
 import { randomUUID } from 'node:crypto';
 import { access, copyFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -78,6 +82,10 @@ const WRITE_TYPES = new Set([
   'set',
   'xfrmSet',
   'setTableLayout',
+  'groupShapes',
+  'ungroupShapes',
+  'mergeTableCells',
+  'unmergeTableCells',
   'zMove',
   'alignElements',
   'add',
@@ -119,6 +127,13 @@ export const pptxCapabilities = {
     'table',
     'chart',
   ],
+  groups: { group: true, ungroup: true, preserveZOrder: true, rejectShear: true },
+  connectors: {
+    bindEndpoints: true,
+    routing: ['auto', 'preserve'],
+    nodeDeletion: ['detach', 'reject'],
+  },
+  fills: { linearGradient: true, pathGradient: false },
   pictureInput: ['base64', 'path'],
   picture: { replacePicture: true, cleanupUnreferencedMedia: true },
   media: { video: true, audio: true, autoPoster: true },
@@ -136,14 +151,16 @@ export const pptxCapabilities = {
     valueFormatCode: true,
     comboDualAxis: true,
     fill: true,
-    embeddedWorkbook: false,
-    createEmbeddedWorkbook: false,
+    embeddedWorkbook: true,
+    createEmbeddedWorkbook: true,
     updateEmbeddedWorkbook: {
       supported: true,
       fixedLengthA1: true,
       constantCellsOnly: true,
       sharedWorkbookIsolation: true,
       formulas: false,
+      dependencyPreflight: true,
+      independentFormulaPreservation: true,
       resizeRanges: false,
     },
     grouping: ['clustered'],
@@ -153,6 +170,9 @@ export const pptxCapabilities = {
     editExistingAdvanced: !editionCapabilities.chartBasicOnly,
   },
   table: {
+    rowHeights: true,
+    mergeRegion: true,
+    unmergeRegion: true,
     insertRow: true,
     deleteRow: true,
     insertColumn: true,
@@ -222,6 +242,8 @@ export const pptxCapabilities = {
     paragraphBlocks: true,
   },
   geometry: {
+    customPath: true,
+    commands: ['move', 'line', 'cubic', 'close'],
     units: ['emu', 'px', 'pt', 'cm', 'mm', 'in', '%'],
     alignElements: true,
     cornerRadius: true,
@@ -280,6 +302,14 @@ const chartDataDiagnostics = (
 
 const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
   const diagnostics: Diagnostic[] = validateReviewParts(archive, 'pptx');
+  for (const part of archive.parts.keys())
+    if (/^\/ppt\/slides\/[^/]+\.xml$/.test(part))
+      diagnostics.push(
+        ...tableMergeDiagnostics(archive.readXml(part)).map((d) => ({
+          ...d,
+          details: { ...d.details, partUri: part },
+        })),
+      );
   for (const [source, rels] of archive.relationships)
     for (const rel of rels)
       if (!rel.external && rel.resolvedTarget && !archive.getPart(rel.resolvedTarget))
@@ -698,6 +728,18 @@ export const pptxAdapter: FormatAdapter = {
         return err('VALIDATION_FAILED', 'Not a PPTX presentation');
       // Real-world decks (templates, iSlide, etc.) often ship stale app.xml <Slides>.
       // Normalize on import so validate / first writes are not blocked by pre-existing drift.
+      if (command.pageSize) {
+        try {
+          if (resolve(command.source) !== resolve(await assertDefaultPptxExists()))
+            return err(
+              'INVALID_COMMAND',
+              'pageSize is only supported with the bundled blank template',
+            );
+          setBlankPageSize(archive, command.pageSize);
+        } catch (cause) {
+          return err('INVALID_COMMAND', cause instanceof Error ? cause.message : String(cause));
+        }
+      }
       syncAppSlideCounts(archive);
       const created = new Date().toISOString(),
         rev = revision();
@@ -720,6 +762,7 @@ export const pptxAdapter: FormatAdapter = {
         format: saved.format,
         source: saved.source,
         revision: saved.revision,
+        pageSize: describeSlideSize(archive),
         elementCount: index.elements.length,
       });
     } catch (cause) {
@@ -767,6 +810,51 @@ export const pptxAdapter: FormatAdapter = {
           });
         }
 
+        if (command.type === 'preflightChartData') {
+          const archive = await openWorkspaceArchive(workspace),
+            manifest = await readManifest(workspace);
+          const index = await loadIndex(workspace, archive, manifest),
+            resolved = resolveTarget(index, command.target);
+          if (!resolved.ok) return resolved;
+          const part = resolved.value.item.payload?.['chartPart'];
+          if (typeof part !== 'string') return err('INVALID_COMMAND', 'Target must be a chart');
+          try {
+            const checked = assertChartProperties(command.properties);
+            if (!checked.ok) return checked;
+            const data = await prepareChartData(
+              archive,
+              part,
+              archive.readXml(part),
+              command.properties,
+            );
+            const refCount = (target: string) =>
+              [...archive.relationships.values()]
+                .flat()
+                .filter((r) => !r.external && r.resolvedTarget === target).length;
+            return ok({
+              supported: true,
+              revision: manifest.revision,
+              changes: data?.changes ?? [],
+              requiresIsolation: refCount(part) > 1 || (data ? refCount(data.embedded) > 1 : false),
+            });
+          } catch (cause) {
+            return ok({
+              supported: false,
+              revision: manifest.revision,
+              blockers: [
+                {
+                  code:
+                    cause instanceof ChartDataError
+                      ? String(cause.details['reasonCode'])
+                      : 'CHART_DATA_UNSAFE',
+                  ...(cause instanceof ChartDataError ? { details: cause.details } : {}),
+                  target: command.target,
+                  reason: cause instanceof Error ? cause.message : String(cause),
+                },
+              ],
+            });
+          }
+        }
         const manifest = await readManifest(workspace);
         if ((manifest.schemaVersion as string) !== '2.0' || !isIntegerRevision(manifest.revision)) {
           if (command.type === 'status') {
@@ -799,6 +887,7 @@ export const pptxAdapter: FormatAdapter = {
             health: await historyHealth(workspace),
             packageStale: await isPackageStale(workspace, manifest),
             elementCount: index.elements.length,
+            pageSize: describeSlideSize(archive),
             capabilities: pptxCapabilities,
             ...editionMetadata,
             branch: 'main',
@@ -905,7 +994,12 @@ export const pptxAdapter: FormatAdapter = {
             return item ? ok(item) : err('ELEMENT_NOT_FOUND', 'Element reference was not found');
           }
           return ok({
-            document: { format: 'pptx', revision: index.revision, capabilities: pptxCapabilities },
+            document: {
+              format: 'pptx',
+              revision: index.revision,
+              capabilities: pptxCapabilities,
+              pageSize: describeSlideSize(archive),
+            },
             elements: index.elements,
           });
         }
@@ -1139,7 +1233,10 @@ export const pptxAdapter: FormatAdapter = {
           const working = await openWorkspaceArchive(workspace);
           let currentIndex = await loadIndex(workspace, working, currentManifest);
           const applyMutation = async (input: AtomicCommand) => {
-            if (!REVIEW_WRITES.has(input.type)) return mutate(input, working, currentIndex);
+            if (!REVIEW_WRITES.has(input.type)) {
+              const result = await mutate(input, working, currentIndex);
+              return result;
+            }
             try {
               const value = mutateSlideComments(
                 working,
@@ -1160,6 +1257,10 @@ export const pptxAdapter: FormatAdapter = {
             'setProperties',
             'setText',
             'replaceText',
+            'groupShapes',
+            'ungroupShapes',
+            'mergeTableCells',
+            'unmergeTableCells',
             'addShape',
             'addSlide',
             'setSlideLayout',
@@ -1342,6 +1443,14 @@ export const pptxAdapter: FormatAdapter = {
           );
         });
       } catch (cause) {
+        if (cause instanceof Error && cause.message.startsWith('CONNECTOR_'))
+          return err('INVALID_COMMAND', cause.message, [
+            {
+              severity: 'error',
+              code: cause.message.split(':')[0] ?? 'CONNECTOR_INVALID',
+              message: cause.message,
+            },
+          ]);
         return err(
           cause instanceof RecoveryRequiredError
             ? 'RECOVERY_REQUIRED'
@@ -1349,6 +1458,16 @@ export const pptxAdapter: FormatAdapter = {
               ? 'UNSUPPORTED_CAPABILITY'
               : 'IO_ERROR',
           cause instanceof Error ? cause.message : 'PPTX operation failed',
+          cause instanceof ChartDataError
+            ? [
+                {
+                  severity: 'error',
+                  code: String(cause.details['reasonCode']),
+                  message: cause.message,
+                  details: cause.details,
+                },
+              ]
+            : [],
         );
       }
     });

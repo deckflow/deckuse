@@ -238,6 +238,7 @@ export const docxAdapter: FormatAdapter = {
   format: 'docx',
   version: VERSION,
   async init(command) {
+    if (command.pageSize) return err('INVALID_COMMAND', 'pageSize currently requires PPTX');
     try {
       const workspace = resolve(command.workspaceId);
       const archive = await OpcArchive.openFile(resolve(command.source));
@@ -277,6 +278,8 @@ export const docxAdapter: FormatAdapter = {
     }
   },
   async execute(command, context = {}) {
+    if (command.type === 'preflightChartData')
+      return err('UNSUPPORTED_CAPABILITY', 'Chart preflight requires PPTX');
     const workspace = resolve(command.workspaceId);
     try {
       await access(resolve(workspace, '.deckuse'));

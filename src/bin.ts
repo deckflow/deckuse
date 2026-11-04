@@ -556,6 +556,20 @@ const main = async (): Promise<void> => {
         if (!workspace) throw new Error('Usage: deckuse new <workspace/> [--format pptx|docx]');
         if (format !== 'pptx' && format !== 'docx')
           throw new Error('Usage: deckuse new <workspace/> [--format pptx|docx]');
+        const width = optionFrom(clean, '--width'),
+          height = optionFrom(clean, '--height');
+        const unit = optionFrom(clean, '--unit');
+        if ((width === undefined) !== (height === undefined) || (unit && !width))
+          throw new Error('--width and --height must be supplied together');
+        if (width && format !== 'pptx')
+          throw new Error('Page dimensions currently require --format pptx');
+        if (unit && !['in', 'cm', 'mm', 'pt', 'px', 'emu'].includes(unit))
+          throw new Error('Invalid --unit');
+        const dimension = (value: string) => {
+          if (unit && !/^\d+(?:\.\d+)?$/.test(value))
+            throw new Error('--unit requires bare numeric dimensions');
+          return unit ? value + unit : value;
+        };
         const source =
           format === 'docx' ? await assertDefaultDocxExists() : await assertDefaultPptxExists();
         ok = await execute('deckuse new', {
@@ -564,6 +578,22 @@ const main = async (): Promise<void> => {
           workspaceId: resolve(workspace),
           format,
           source,
+          ...(width && height
+            ? { pageSize: { width: dimension(width), height: dimension(height) } }
+            : {}),
+        });
+      } else if (action === 'preflight-chart-data') {
+        const workspace = await findWorkspace(workspaceOpt);
+        const target = positionalArg(clean),
+          properties = optionFrom(clean, '--properties');
+        if (!target || !properties)
+          throw new Error('Usage: deckuse preflight-chart-data <target> --properties <json>');
+        ok = await execute('deckuse preflight-chart-data', {
+          version: PROTOCOL_VERSION,
+          type: 'preflightChartData',
+          workspaceId: workspace,
+          target,
+          properties: JSON.parse(properties) as unknown,
         });
       } else if (action === 'comments' || action === 'revisions') {
         const sub = clean[1] ?? '';

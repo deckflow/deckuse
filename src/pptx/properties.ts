@@ -1,3 +1,6 @@
+import { requireDefined } from '../required.js';
+import { gradientFillSchema, pathGeometrySchema } from '../core/schema.js';
+import { customGeometry } from './geometry.js';
 import { err, ok, type Result } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Element } from '@xmldom/xmldom';
@@ -28,6 +31,7 @@ const SHAPE_KEYS = new Set([
   'name',
   'color',
   'from',
+  'geometry',
   'fill',
   'hidden',
   'bold',
@@ -64,6 +68,7 @@ const CHART_KEYS = new Set([
   'showMajorGridlines',
   'showDataLabels',
   'valueFormatCode',
+  'categories',
   'axisFormatCode',
   'fill',
   'background',
@@ -170,6 +175,30 @@ const FILL_LOCAL_NAMES = [
 const setFill = (spPr: Element, value: unknown): void => {
   const doc = spPr.ownerDocument;
   if (!doc) throw new Error('Element has no document');
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as Record<string, unknown>)['type'] === 'linearGradient'
+  ) {
+    const gradient = gradientFillSchema.parse(value),
+      fill = doc.createElementNS(NS.a, 'a:gradFill'),
+      list = doc.createElementNS(NS.a, 'a:gsLst');
+    for (const stop of gradient.stops) {
+      const gs = doc.createElementNS(NS.a, 'a:gs');
+      gs.setAttribute('pos', String(Math.round(stop.position * 100000)));
+      const solid = solidFillXml(doc, stop.color.replace('#', '').toUpperCase(), stop.transparency);
+      gs.appendChild(requireDefined(solid.firstChild));
+      list.appendChild(gs);
+    }
+    fill.appendChild(list);
+    const lin = doc.createElementNS(NS.a, 'a:lin');
+    lin.setAttribute('ang', String(Math.round((((gradient.angle % 360) + 360) % 360) * 60000)));
+    lin.setAttribute('scaled', '1');
+    fill.appendChild(lin);
+    removeDirectChildren(spPr, FILL_LOCAL_NAMES);
+    insertAfter(spPr, fill, ['xfrm', 'prstGeom', 'custGeom']);
+    return;
+  }
   removeDirectChildren(spPr, FILL_LOCAL_NAMES);
   if (isNone(value)) {
     insertAfter(spPr, doc.createElementNS(NS.a, 'a:noFill'), ['xfrm', 'prstGeom', 'custGeom']);
@@ -469,6 +498,17 @@ export function applyShapeProperties(
     } else if (properties['color'] !== undefined) throw new Error('color must be a hex string');
     else if (properties['from'] !== undefined) throw new Error('from requires color');
 
+    if ('geometry' in properties) {
+      if (node.localName !== 'sp') throw new Error('Custom geometry requires a regular shape');
+      const geometry = customGeometry(
+        requireDefined(node.ownerDocument),
+        pathGeometrySchema.parse(properties['geometry']),
+      );
+      const spPr = ensureSpPr(node);
+      removeDirectChildren(spPr, ['prstGeom', 'custGeom']);
+      insertAfter(spPr, geometry, ['xfrm']);
+      applied.push('geometry');
+    }
     if ('fill' in properties) {
       setFill(ensureSpPr(node), properties['fill']);
       applied.push('fill');
@@ -708,3 +748,20 @@ export function assertChartProperties(properties: Record<string, unknown>): Resu
 }
 
 export const shapePropertyKeys = [...SHAPE_KEYS].sort();
+
+export function setSlideBackground(slide: Element, fill: unknown): void {
+  const doc = slide.ownerDocument;
+  if (!doc) throw new Error('Slide document missing');
+  const content = first(slide, 'cSld');
+  if (!content) throw new Error('Slide content missing');
+  let bg = children(content).find((n) => n.localName === 'bg');
+  if (!bg) {
+    bg = doc.createElementNS(NS.p, 'p:bg');
+    content.insertBefore(bg, content.firstChild);
+  }
+  for (const child of children(bg)) bg.removeChild(child);
+  const props = doc.createElementNS(NS.p, 'p:bgPr');
+  setFill(props, fill);
+  props.appendChild(doc.createElementNS(NS.a, 'a:effectLst'));
+  bg.appendChild(props);
+}

@@ -97,6 +97,16 @@ export async function agentContext(options: {
         : scenario === 'edit' || scenario === 'populate-template'
           ? ['setText', 'setProperties', 'replacePicture', 'duplicate', 'validate', 'export']
           : ['addSlide', 'addShape', 'remove', 'setText', 'setProperties', 'validate', 'export'];
+  if (format === 'pptx' && scenario !== 'audit' && scenario !== 'preview-export')
+    types.push(
+      'groupShapes',
+      'ungroupShapes',
+      'mergeTableCells',
+      'unmergeTableCells',
+      'preflightChartData',
+      'setTableLayout',
+      'xfrmSet',
+    );
   const contracts = taskSchemas(types);
   const capabilities = format === 'pptx' ? pptxCapabilities : docxCapabilities;
   const identity = {

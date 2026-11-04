@@ -92,3 +92,5 @@ review text completeness, overflow, corner coverage and layout in HTML/Chrome.
 Native PowerPoint open, group drag/edit, list editing and accessibility remain
 unverified unless actually checked there. Do not rasterize the slide to hide
 font/semantic failures.
+
+For non-default canvases, use `new --width --height` (unit strings) or bare dimensions with `--unit`; all PPTX slides have one shared size. Choose proportional fit for mixed PDF page sizes. Create chart workbooks with `embeddedWorkbook: true` when the recipient needs PowerPoint Edit Data. Use native `groupShapes` after creating siblings, and connector endpoint targets for diagrams that must stay attached during edits. Custom paths and linear gradients remain native editable objects; inspect the exact command schema before constructing their JSON.

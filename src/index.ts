@@ -76,3 +76,19 @@ export type {
 
 /** Compare protocol numeric projections with raw workspace/history counters. */
 export { revisionAsNumber } from './core/schema.js';
+
+/** Initialize a new PPTX from the bundled blank template. Length numbers are EMU. */
+export async function createPresentation(
+  workspace: string,
+  options: { pageSize?: { width: number | string; height: number | string } } = {},
+): Promise<Result<unknown>> {
+  const { assertDefaultPptxExists } = await import('./default-template.js');
+  return createDefaultExecutor().execute({
+    version: '2.0',
+    type: 'init',
+    workspaceId: resolve(workspace),
+    format: 'pptx',
+    source: await assertDefaultPptxExists(),
+    ...options,
+  });
+}

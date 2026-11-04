@@ -15,7 +15,7 @@ import { launchRenderBrowser, RenderFailure } from './render-browser.js';
 import type { Diagnostic } from './core/index.js';
 import { OpcArchive } from './opc/index.js';
 import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
-import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
+import { convertWithConfiguredBinary, ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
@@ -31,7 +31,7 @@ export type ScreenshotFn = (options: {
   readonly documentPage?: number;
   // Optional metadata preserves existing screenshot callbacks returning no value.
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
-}) => Promise<void | { browserText: string }>;
+}) => Promise<void | { browserText: string; chartWarnings?: { id: string; message: string }[] }>;
 
 export interface RenderDependencies {
   readonly convert?: ConvertFn;
@@ -117,6 +117,8 @@ const screenshotWithBrowser = async (
   let stage = 'page-load';
   try {
     const page = await context.newPage();
+    const runtimeErrors: string[] = [];
+    page.on('pageerror', (error) => runtimeErrors.push(error.message));
     const url = pathToFileURL(indexHtmlPath).href;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
     if (documentPage !== undefined) {
@@ -133,6 +135,36 @@ const screenshotWithBrowser = async (
     await page.evaluate(WAIT_FONTS_SCRIPT);
     await sleep(AUTOFIT_SETTLE_MS);
 
+    stage = 'chart-initialization';
+    try {
+      await page.waitForFunction(
+        `() => [...document.querySelectorAll('#deck [data-echarts]')].every(el =>
+        el.getAttribute('data-echarts-ready') === '1' || el.getAttribute('data-echarts-state') === 'error')`,
+        undefined,
+        { timeout: 15_000 },
+      );
+    } catch {
+      const pending = await page
+        .locator('#deck [data-echarts]:not([data-echarts-ready="1"])')
+        .count();
+      throw new RenderFailure('RENDER_CHART_FAILED', 'Chart initialization did not complete', {
+        pending,
+        runtimeErrors,
+      });
+    }
+    const chartErrors = await page
+      .locator('#deck [data-echarts-state="error"]')
+      .evaluateAll((elements) =>
+        elements.map((el) => ({
+          id: el.getAttribute('data-chart-id') ?? el.id,
+          message: el.getAttribute('data-echarts-error'),
+        })),
+      );
+    if (chartErrors.length || runtimeErrors.length)
+      throw new RenderFailure('RENDER_CHART_FAILED', 'Chart or page runtime failed', {
+        chartErrors,
+        runtimeErrors,
+      });
     const size = await parseDeckSize(page);
     if (size) {
       await page.setViewportSize(size);
@@ -142,8 +174,15 @@ const screenshotWithBrowser = async (
     await mkdir(dirname(outputPath), { recursive: true });
     stage = 'screenshot';
     await page.locator('#deck').screenshot({ path: outputPath, type: 'png' });
-    return { browserText: await page.locator('#deck').innerText() };
+    const chartWarnings = await page.locator('#deck [data-chart-warning]').evaluateAll((elements) =>
+      elements.map((el) => ({
+        id: el.getAttribute('data-chart-id') ?? el.id,
+        message: el.getAttribute('data-chart-warning') ?? '',
+      })),
+    );
+    return { browserText: await page.locator('#deck').innerText(), chartWarnings };
   } catch (cause) {
+    if (cause instanceof RenderFailure) throw cause;
     throw new RenderFailure(
       stage === 'screenshot' ? 'RENDER_SCREENSHOT_FAILED' : 'RENDER_PAGE_LOAD_FAILED',
       cause instanceof Error ? cause.message : String(cause),
@@ -188,7 +227,7 @@ const renderPageSnapshot = async (
   }
   const output = resolve(options.output ?? joinRenderDefault(absoluteWorkspace, page));
   const packagePath = resolve(absoluteWorkspace, snapshot);
-  const converter = options.dependencies?.convert ?? deck2html.convert;
+  const converter = options.dependencies?.convert ?? convertWithConfiguredBinary;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
   const diagnostics =
     snapshot === PACKAGE_PPTX ? await inspectChartRenderFidelity(absoluteWorkspace, page) : [];
@@ -231,6 +270,29 @@ const renderPageSnapshot = async (
         ...(options.scale !== undefined ? { scale: options.scale } : {}),
       }),
     );
+    const htmlContract = await readFile(indexHtmlPath, 'utf8');
+    if (htmlContract.includes('data-echarts-state=') && !htmlContract.includes('ppt-degraded')) {
+      for (let i = diagnostics.length - 1; i >= 0; i--) {
+        const code = diagnostics[i]?.code;
+        if (code === 'CHART_SERIES_COLOR_UNVERIFIED' || code === 'COMBO_CHART_RENDER_LIMITED')
+          diagnostics.splice(i, 1);
+      }
+      for (let i = warnings.length - 1; i >= 0; i--)
+        if (
+          warnings[i]?.startsWith('CHART_SERIES_COLOR_UNVERIFIED:') ||
+          warnings[i]?.startsWith('COMBO_CHART_RENDER_LIMITED:')
+        )
+          warnings.splice(i, 1);
+    }
+    for (const warning of screenshotResult?.chartWarnings ?? []) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'CHART_NUMBER_FORMAT_UNSUPPORTED',
+        message: warning.message,
+        details: { page, chart: warning.id },
+      });
+      warnings.push(`CHART_NUMBER_FORMAT_UNSUPPORTED: ${warning.message}`);
+    }
     let fontReport: ReturnType<typeof fontRiskReport>['report'] | undefined;
     try {
       const inventory = await renderFontInventory(
@@ -426,7 +488,7 @@ export async function renderPages(
         const htmlDir = join(staging, 'document-html');
         await mkdir(htmlDir);
         if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
-        const converted = await (options.dependencies?.convert ?? deck2html.convert)(
+        const converted = await (options.dependencies?.convert ?? convertWithConfiguredBinary)(
           join(staging, 'package.docx'),
           { output: htmlDir },
         );

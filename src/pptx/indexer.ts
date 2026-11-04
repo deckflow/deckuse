@@ -113,7 +113,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
             continue;
           }
           const own = attr(cNvPr(child), 'id') ?? child.nodeName,
-            id = `${ownerId}:${[...ancestors, own].join('.')}`,
+            id = `${ownerId}:${own}`,
             transform = transformOf(child),
             name = attr(cNvPr(child), 'name'),
             text = textOf(child);
@@ -352,7 +352,15 @@ export const slidesForRef = (index: IndexFile, ref: ElementRef): number[] => {
 export const mergeSlides = (...groups: number[][]): number[] =>
   [...new Set(groups.flat())].sort((a, b) => a - b);
 export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement | undefined =>
-  index.elements.find((e) => e.ref.elementId === ref.elementId || e.ref.path === ref.path);
+  index.elements.find((e) => e.ref.elementId === ref.elementId || e.ref.path === ref.path) ??
+  (ref.path?.includes('#')
+    ? index.elements.find(
+        (e) =>
+          e.partUri === ref.path?.split('#')[0] &&
+          e.location?.['cNvPrId'] ===
+            ref.path.split('#').at(-1)?.split(':').at(-1)?.split('.').at(-1),
+      )
+    : undefined);
 export function matchesSelector(
   item: IndexedElement,
   selector:

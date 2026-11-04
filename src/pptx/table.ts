@@ -870,6 +870,7 @@ export function applyTableLayout(
   options: {
     height?: 'auto' | number;
     redistribute?: 'equal' | 'content';
+    rowHeights?: number[];
   },
 ): Result<{
   applied: string[];
@@ -899,7 +900,30 @@ export function applyTableLayout(
   let estimatedEmu: number | undefined;
 
   let layout: TableFrameLayout;
-  if (redistribute === 'content' || options.height === 'auto') {
+  if (options.rowHeights) {
+    if (options.height !== undefined || options.redistribute !== undefined)
+      return err('INVALID_COMMAND', 'rowHeights cannot be combined with height or redistribute');
+    const heights = options.rowHeights;
+    if (heights.length !== rows.length || heights.some((h) => !Number.isSafeInteger(h) || h <= 0))
+      return err('INVALID_COMMAND', 'rowHeights must contain one positive length per physical row');
+    totalHeightEmu = heights.reduce((a, b) => a + b, 0);
+    if (!Number.isSafeInteger(totalHeightEmu))
+      return err('INVALID_COMMAND', 'Table height exceeds safe integer range');
+    const measured = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
+    layout = {
+      mode: 'fixed',
+      status: heights.some((h, i) => h < (measured.rowHeightsEmu[i] ?? 0))
+        ? 'overflow'
+        : 'complete',
+      frameEmu: totalHeightEmu,
+      contentEmu: measured.totalHeightEmu,
+      rowHeightsEmu: heights,
+    };
+    rows.forEach((row, i) => {
+      row.setAttribute('h', String(heights[i]));
+    });
+    applied.push('rowHeights');
+  } else if (redistribute === 'content' || options.height === 'auto') {
     const measured = measureTableLayout({ rows: textRows, widthEmu, fontPt: 11 });
     layout = layoutTableFrame({
       contentRowHeightsEmu: measured.rowHeightsEmu,
@@ -944,7 +968,68 @@ export function applyTableLayout(
   return ok({
     applied,
     totalHeightEmu,
-    estimatedEmu,
+    ...(estimatedEmu !== undefined ? { estimatedEmu } : {}),
     layout,
   });
+}
+
+/** Validate complete merge rectangles at transaction commit, allowing batched low-level edits. */
+export function tableMergeDiagnostics(
+  doc: import('@xmldom/xmldom').Document,
+): import('../core/index.js').Diagnostic[] {
+  const diagnostics: import('../core/index.js').Diagnostic[] = [];
+  for (const table of descendants(doc, 'tbl')) {
+    const rows = children(table)
+      .filter((n) => n.localName === 'tr')
+      .map((row) => children(row).filter((n) => n.localName === 'tc'));
+    const covered = new Map<string, string>();
+    const report = (row: number, column: number, reason: string) =>
+      diagnostics.push({
+        severity: 'error',
+        code: 'TABLE_MERGE_INVALID',
+        message: reason,
+        details: { row, column },
+      });
+    for (const [r, row] of rows.entries())
+      for (const [c, cell] of row.entries()) {
+        const width = Number(cell.getAttribute('gridSpan') ?? 1),
+          height = Number(cell.getAttribute('rowSpan') ?? 1);
+        if (
+          !Number.isInteger(width) ||
+          !Number.isInteger(height) ||
+          width < 1 ||
+          height < 1 ||
+          r + height > rows.length ||
+          rows.slice(r, r + height).some((line) => c + width > line.length)
+        ) {
+          report(r, c, 'Merged cell span is outside the physical table grid');
+          continue;
+        }
+        if (
+          cell.getAttribute('hMerge') === '1' ||
+          cell.getAttribute('vMerge') === '1' ||
+          (width === 1 && height === 1)
+        )
+          continue;
+        for (let y = r; y < r + height; y++)
+          for (let x = c; x < c + width; x++) {
+            const key = `${String(y)}:${String(x)}`;
+            if (covered.has(key)) report(y, x, 'Merged cell regions overlap');
+            covered.set(key, `${String(r)}:${String(c)}`);
+            if (y !== r || x !== c) {
+              const other = rows[y]?.[x];
+              if (other?.getAttribute('hMerge') !== '1' && other?.getAttribute('vMerge') !== '1')
+                report(y, x, 'Merged region has an unmarked continuation cell');
+            }
+          }
+      }
+    for (const [r, row] of rows.entries())
+      for (const [c, cell] of row.entries())
+        if (
+          (cell.getAttribute('hMerge') === '1' || cell.getAttribute('vMerge') === '1') &&
+          !covered.has(`${String(r)}:${String(c)}`)
+        )
+          report(r, c, 'Merge continuation has no anchor');
+  }
+  return diagnostics;
 }
