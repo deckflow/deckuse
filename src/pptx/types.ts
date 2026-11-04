@@ -32,6 +32,8 @@ export interface IndexFile {
   elements: IndexedElement[];
 }
 export interface MutationOutcome {
+  changedTargets?: string[];
+  changedParts?: string[];
   changed: boolean;
   matched?: number;
   refs?: ElementRef[];

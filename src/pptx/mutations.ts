@@ -1,3 +1,4 @@
+import { guardCommentMutation, deleteTargetComments } from './comments.js';
 import {
   err,
   ok,
@@ -379,6 +380,14 @@ const writeText = async (
   text: string,
   diagnostics: Diagnostic[],
 ): Promise<Result<void>> => {
+  try {
+    guardCommentMutation(archive, item, 'setText');
+  } catch (cause) {
+    return err(
+      'UNSUPPORTED_CAPABILITY',
+      cause instanceof Error ? cause.message : 'Comment anchor conflict',
+    );
+  }
   const gatedKind = editionGatedWriteKind(item, archive);
   if (gatedKind) {
     const ext = getPptxEditionExtension();
@@ -1072,6 +1081,17 @@ export async function mutate(
   const resolved = resolveCommandRef(command, index);
   if (!resolved.ok) return resolved;
   const { item, target, parsed } = resolved.value;
+  try {
+    if (command.type === 'remove' && command.commentsPolicy === 'delete')
+      deleteTargetComments(archive, index, item);
+    else if (!(command.type === 'duplicate' && command.commentsPolicy === 'omit'))
+      guardCommentMutation(archive, item, command.type);
+  } catch (cause) {
+    return err(
+      'UNSUPPORTED_CAPABILITY',
+      cause instanceof Error ? cause.message : 'Comment anchor conflict',
+    );
+  }
   if (item.ref.revision && item.ref.revision !== index.revision)
     return err(
       'TRANSACTION_CONFLICT',
@@ -1112,7 +1132,7 @@ export async function mutate(
     if (command.type === 'duplicate') {
       return ok({
         changed: true,
-        partUri: duplicateSlide(archive, item.partUri),
+        partUri: duplicateSlide(archive, item.partUri, command.commentsPolicy !== 'omit'),
         slides: slidesForItem(index, item),
       });
     }

@@ -15,6 +15,7 @@ export interface IndexedElement {
 }
 
 export interface IndexFile {
+  indexVersion?: number;
   revision: string;
   elements: IndexedElement[];
 }

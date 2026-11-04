@@ -52,23 +52,24 @@ const NOTES_NON_BODY_PH = new Set(['hdr', 'ftr', 'dt', 'sldNum', 'sldImg']);
 
 /**
  * Locate the speaker-notes body shape under a notes slide root.
- * Prefers `p:ph type="body"`; otherwise the first shape that is not a
- * header/footer/date/slide-number placeholder. Never returns hdr/sldNum/etc.
+ * Requires a unique `p:ph type="body"`, or a unique eligible fallback.
+ * Ambiguous notes and decorative header/footer placeholders are never rewritten.
  */
 export const notesBodyShape = (notesRoot: Node): Element | undefined => {
-  const shapes = descendants(notesRoot, 'sp');
-  let fallback: Element | undefined;
-  for (const sp of shapes) {
-    const ph = first(sp, 'ph');
-    if (!ph) {
-      fallback ??= sp;
-      continue;
-    }
-    const type = attr(ph, 'type') ?? 'body';
-    if (type === 'body') return sp;
-    if (!NOTES_NON_BODY_PH.has(type)) fallback ??= sp;
-  }
-  return fallback;
+  const shapes = descendants(notesRoot, 'sp').filter((sp) => sp.namespaceURI === NS.p);
+  const bodies = shapes.filter((sp) => {
+    const ph = descendants(sp, 'ph').find((node) => node.namespaceURI === NS.p);
+    return ph && attr(ph, 'type') === 'body';
+  });
+  if (bodies.length) return bodies.length === 1 ? bodies[0] : undefined;
+  const fallback = shapes.filter((sp) => {
+    const ph = descendants(sp, 'ph').find((node) => node.namespaceURI === NS.p);
+    return (
+      (!ph || !NOTES_NON_BODY_PH.has(attr(ph, 'type') ?? '')) &&
+      descendants(sp, 'txBody').length > 0
+    );
+  });
+  return fallback.length === 1 ? fallback[0] : undefined;
 };
 
 /** Speaker-note body text only (excludes header / slide number placeholders). */

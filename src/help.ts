@@ -38,6 +38,8 @@ Commands:
   schema        Print command JSON Schema (--list lists types) (self-describing CLI)
   measure       Heuristic text size estimate (for layout)
   validate      Validate package / relationships
+  comments      Read, create, reply to, resolve, reopen, delete or upgrade comments
+  revisions     Inspect, project, propose, accept or reject native Word revisions
   history       Show write history
   undo          Undo recent write revisions
   repair        Fix unambiguous notesSlide back-pointers in a PPTX workspace
@@ -57,6 +59,19 @@ interface HelpEntry {
 }
 
 const entries: Record<string, HelpEntry> = {
+  comments: {
+    usage:
+      'deckuse comments list|get|add|update|reply|resolve|reopen|delete|upgrade [id] [options]',
+    summary: 'Native PPTX and DOCX comments, including threaded replies and resolved state.',
+    example: `deckuse comments add --workspace ./work --author '{"id":"alice","name":"Alice"}' --anchor '{"target":"slide:1"}' --text "Please review" --json`,
+    details: `Writes accept --input <JSON file|->, or --author/--anchor JSON and --text. Root deletion requires --thread. PPTX legacy replies and resolution require explicit upgrade. --expect-revision is inferred from the current workspace when omitted; it can be pinned explicitly.`,
+  },
+  revisions: {
+    usage: 'deckuse revisions list|get|view|preview|propose|accept|reject [id] [options]',
+    summary: 'Read and write native DOCX tracked changes; workspace commit revisions are separate.',
+    example: 'deckuse revisions view --view original --workspace ./work --json',
+    details: `Use propose --author <JSON> --operations <JSON array>, or --input <JSON file|->. Decisions require --all or --ids <JSON array>. Preview also requires --decision accept|reject. Writes support --dry-run, --expect-revision and atomic apply. Merge/split proposals cover reversible vertical cell groups; other merged or irregular grids are rejected. Views return semantic text plus XML and completeness diagnostics.`,
+  },
   init: {
     usage: 'deckuse init <input.pptx> <workspace/>',
     summary: 'Unpack a PPTX into a versioned DeckUse workspace (revision starts at 1).',

@@ -1,3 +1,4 @@
+import { commentWrites, revisionWrites, reviewReads } from '../review/schema.js';
 import { z } from 'zod';
 
 export const PROTOCOL_VERSION = '2.0' as const;
@@ -735,6 +736,7 @@ const removeCommandSchema = z
     ...commandBase,
     ...mutationBase,
     type: z.literal('remove'),
+    commentsPolicy: z.literal('delete').optional(),
     ref: elementRefSchema.optional(),
     target: z.string().min(1).optional(),
   })
@@ -757,6 +759,7 @@ const duplicateCommandSchema = z
     ...commandBase,
     ...mutationBase,
     type: z.literal('duplicate'),
+    commentsPolicy: z.enum(['copy', 'omit']).optional(),
     ref: elementRefSchema.optional(),
     target: z.string().min(1).optional(),
     parent: elementRefSchema.optional(),
@@ -830,6 +833,8 @@ const validateCommandSchema = z
   .strict();
 
 export const atomicCommandSchema = z.discriminatedUnion('type', [
+  ...commentWrites,
+  ...revisionWrites,
   setTextCommandSchema,
   replaceTextCommandSchema,
   setTransformCommandSchema,
@@ -862,8 +867,30 @@ const batchCommandSchema = z
   })
   .strict();
 
+const listRevisionsCommandSchema = z
+  .object({
+    ...commandBase,
+    type: z.literal('listRevisions'),
+    workspaceId: z.string().min(1),
+    partUri: z.string().min(1).optional(),
+  })
+  .strict();
+const getRevisionCommandSchema = z
+  .object({
+    ...commandBase,
+    type: z.literal('getRevision'),
+    workspaceId: z.string().min(1),
+    id: z.string().min(1),
+  })
+  .strict();
+
 export const commandSchema = z.discriminatedUnion('type', [
+  ...commentWrites,
+  ...revisionWrites,
+  ...reviewReads,
   initCommandSchema,
+  listRevisionsCommandSchema,
+  getRevisionCommandSchema,
   statusCommandSchema,
   listCommandSchema,
   getCommandSchema,

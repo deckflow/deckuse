@@ -9,12 +9,38 @@ export const NS = {
 export const DOCUMENT_PART = '/word/document.xml';
 export const STYLES_PART = '/word/styles.xml';
 
-const PROTECTED = new Set([
+export const PROTECTED = new Set([
   'sdt',
   'del',
   'ins',
   'moveFrom',
   'moveTo',
+  'rPrChange',
+  'pPrChange',
+  'sectPrChange',
+  'tblPrChange',
+  'tblPrExChange',
+  'trPrChange',
+  'tcPrChange',
+  'tblGridChange',
+  'cellIns',
+  'cellDel',
+  'cellMerge',
+  'numberingChange',
+  'delText',
+  'delInstrText',
+  'moveFromRangeStart',
+  'moveFromRangeEnd',
+  'moveToRangeStart',
+  'moveToRangeEnd',
+  'customXmlInsRangeStart',
+  'customXmlInsRangeEnd',
+  'customXmlDelRangeStart',
+  'customXmlDelRangeEnd',
+  'customXmlMoveFromRangeStart',
+  'customXmlMoveFromRangeEnd',
+  'customXmlMoveToRangeStart',
+  'customXmlMoveToRangeEnd',
   'oMath',
   'oMathPara',
   'fldSimple',
@@ -76,17 +102,32 @@ export const ensureW14 = (doc: Document): void => {
   if (!tokens.includes('w14')) root.setAttribute('mc:Ignorable', [...tokens, 'w14'].join(' '));
 };
 
+export const isProtectedMarkup = (node: Element): boolean =>
+  (node.namespaceURI === NS.w &&
+    (PROTECTED.has(node.localName ?? '') ||
+      /(?:Change|RangeStart|RangeEnd)$/.test(node.localName ?? ''))) ||
+  (node.namespaceURI === 'http://schemas.openxmlformats.org/officeDocument/2006/math' &&
+    ['oMath', 'oMathPara'].includes(node.localName ?? '')) ||
+  (Boolean(node.namespaceURI?.startsWith('http://schemas.microsoft.com/office/word/')) &&
+    /(?:Change|RangeStart|RangeEnd|ins|del|moveFrom|moveTo)$/.test(node.localName ?? ''));
+
 export const protectionReason = (node: Element): string | undefined => {
   if (inProtectedRange(node)) return 'Cannot rewrite content inside a field or comment range';
   let ancestor = node.parentNode;
   while (ancestor?.nodeType === 1) {
-    if (PROTECTED.has((ancestor as Element).localName ?? ''))
+    if (
+      isProtectedMarkup(ancestor as Element) ||
+      children(ancestor).some(
+        (child) =>
+          ['pPr', 'rPr', 'trPr', 'tcPr', 'tblPr', 'tblGrid', 'sectPr'].includes(
+            child.localName ?? '',
+          ) && descendants(child).some(isProtectedMarkup),
+      )
+    )
       return 'Cannot rewrite protected ancestor markup';
     ancestor = ancestor.parentNode;
   }
-  const hit = PROTECTED.has(node.localName ?? '')
-    ? node
-    : descendants(node).find((item) => PROTECTED.has(item.localName ?? ''));
+  const hit = isProtectedMarkup(node) ? node : descendants(node).find(isProtectedMarkup);
   if (!hit) return undefined;
   return `Cannot rewrite ${hit.localName ?? 'markup'}; tracked changes, fields, comments, content controls, and equations are preserved`;
 };
@@ -103,6 +144,7 @@ const inProtectedRange = (target: Element): boolean => {
   if (!doc) return false;
   const state = { fields: 0, protectedTarget: false, uncertain: false };
   const comments = new Set<string>();
+  const ranges = new Set<string>();
   const within = new Set([target, ...descendants(target)]);
   const ancestors = new Set<Element>();
   let parent = target.parentNode;
@@ -112,6 +154,24 @@ const inProtectedRange = (target: Element): boolean => {
   }
   const visit = (node: Element): void => {
     const intersects = within.has(node) || ancestors.has(node);
+    if (node.namespaceURI !== NS.w) {
+      for (const child of children(node)) visit(child);
+      return;
+    }
+    if (intersects && ranges.size > 0) state.protectedTarget = true;
+    const name = node.localName ?? '';
+    if (/^(moveFrom|moveTo|customXml.*)Range(Start|End)$/.test(name)) {
+      const id = node.getAttributeNS(NS.w, 'id');
+      const key = name.replace(/(Start|End)$/, '') + ':' + (id ?? '');
+      if (!id) state.uncertain = true;
+      else if (name.endsWith('Start')) {
+        if (ranges.has(key)) state.uncertain = true;
+        ranges.add(key);
+      } else {
+        if (!ranges.delete(key)) state.uncertain = true;
+      }
+      if (intersects) state.protectedTarget = true;
+    }
     if (intersects && (state.fields > 0 || comments.size > 0)) state.protectedTarget = true;
     if (node.localName === 'fldChar') {
       const type = node.getAttributeNS(NS.w, 'fldCharType');
@@ -136,5 +196,11 @@ const inProtectedRange = (target: Element): boolean => {
     for (const child of children(node)) visit(child);
   };
   if (doc.documentElement) visit(doc.documentElement);
-  return state.protectedTarget || state.uncertain || state.fields > 0 || comments.size > 0;
+  return (
+    state.protectedTarget ||
+    state.uncertain ||
+    state.fields > 0 ||
+    comments.size > 0 ||
+    ranges.size > 0
+  );
 };

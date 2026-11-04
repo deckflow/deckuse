@@ -189,8 +189,7 @@ export function mutate(
       }
       const remaining = limit !== undefined ? limit - matched : undefined;
       if (remaining !== undefined && remaining <= 0) break;
-      const reason = protectionReason(hit.element);
-      // Only reject protected paragraphs when a match actually touches them.
+      // Replacement validates each touched run, allowing text outside anchored ranges.
       const replaced = replaceInParagraph(
         hit.element,
         command.find,
@@ -219,8 +218,6 @@ export function mutate(
           },
         );
       }
-      if (replaced.matched > 0 && reason)
-        return err('UNSUPPORTED_CAPABILITY', reason, [], { target: hit.path });
       changes.push(
         ...replaced.changes.map((change) => ({
           target: hit.path,

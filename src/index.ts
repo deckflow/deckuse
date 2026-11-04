@@ -63,3 +63,13 @@ export {
   type Edition,
   type EditionCapabilities,
 } from './edition.js';
+
+export type { TrackedRevision } from './docx/revisions.js';
+
+export type { NativeComment } from './docx/comments.js';
+export type {
+  ReviewWrite,
+  ReviewAuthor,
+  CommentAnchor,
+  ProposalOperation,
+} from './review/schema.js';

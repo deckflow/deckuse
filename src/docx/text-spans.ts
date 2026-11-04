@@ -1,22 +1,5 @@
 import { XMLSerializer, type Element } from '@xmldom/xmldom';
-import { children, writeTextNode } from './xml.js';
-
-const PROTECTED = new Set([
-  'sdt',
-  'del',
-  'ins',
-  'moveFrom',
-  'moveTo',
-  'oMath',
-  'oMathPara',
-  'fldSimple',
-  'fldChar',
-  'instrText',
-  'customXml',
-  'commentRangeStart',
-  'commentRangeEnd',
-  'commentReference',
-]);
+import { children, writeTextNode, isProtectedMarkup, protectionReason } from './xml.js';
 
 const SKIP = new Set([
   'pPr',
@@ -57,7 +40,7 @@ export const collectSpans = (paragraph: Element): ParagraphText => {
 const walk = (container: Element, acc: ParagraphText, inheritedProtected: boolean): void => {
   for (const child of children(container)) {
     const name = child.localName ?? '';
-    const protectedHere = inheritedProtected || PROTECTED.has(name);
+    const protectedHere = inheritedProtected || isProtectedMarkup(child);
     if (name === 'r') {
       for (const inner of children(child)) {
         if (inner.localName === 'rPr') continue;
@@ -83,7 +66,7 @@ const walk = (container: Element, acc: ParagraphText, inheritedProtected: boolea
       acc.text += '\u0000';
       walk(child, acc, protectedHere);
       acc.text += '\u0000';
-    } else if (children(child).length > 0 && PROTECTED.has(name)) walk(child, acc, true);
+    } else if (children(child).length > 0 && isProtectedMarkup(child)) walk(child, acc, true);
     else acc.text += '\u0000';
   }
 };
@@ -160,7 +143,8 @@ export const replaceInParagraph = (
     let end = start + match[0].length;
     if (match[0].includes('\u0000')) return { error: 'Match crosses an inline object boundary' };
     const original = spans.filter((s) => s.end > start && s.start < end);
-    if (original.some((s) => s.protected)) return { error: 'Match overlaps protected markup' };
+    if (original.some((s) => s.protected || protectionReason(s.run) !== undefined))
+      return { error: 'Match overlaps protected markup' };
     let value = replacement;
     if (policy === 'safe') {
       const old = Array.from(match[0]);

@@ -35,6 +35,10 @@
       "audit": "references/audit-doc.md"
     }
   },
-  "modules": ["references/operations.md", "references/verification-recovery.md"],
+  "modules": [
+    "references/operations.md",
+    "references/verification-recovery.md",
+    "references/review.md"
+  ],
   "evaluation": ["routing-cases.json", "references/evaluation.md"]
 }

@@ -1,3 +1,8 @@
+import { validateReviewParts } from '../review/validation.js';
+import { REVIEW_WRITES, reviewWriteSchema } from '../review/schema.js';
+import { wordComments, mutateWordComments } from './comments.js';
+import { reviewView, previewDecision, mutateRevisions } from './revision-engine.js';
+import { scanRevisions } from './revisions.js';
 import { timedSync } from '../timing.js';
 import {
   recoverTransaction,
@@ -76,12 +81,31 @@ const WRITE_TYPES = new Set([
   'addParagraph',
   'addTable',
   'insertBreak',
+  ...REVIEW_WRITES,
   'batch',
   'applyTransaction',
 ]);
 const STRUCTURAL_TYPES = new Set(['addParagraph', 'addTable', 'insertBreak', 'remove', 'setText']);
 
 export const docxCapabilities = {
+  comments: {
+    read: true,
+    write: true,
+    reply: true,
+    resolve: true,
+    reopen: true,
+    scope: 'body-and-tables',
+  },
+  trackedRevisions: {
+    inventory: true,
+    views: ['original', 'final', 'markup'],
+    preview: true,
+    propose: true,
+    accept: true,
+    reject: true,
+    scope: 'body-and-tables',
+    merge: 'vertical-reversible',
+  },
   protocol: '2.0',
   elements: ['paragraph', 'run', 'table', 'tableCell', 'section', 'style', 'bookmark'],
   addressing: {
@@ -113,7 +137,10 @@ const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>
   OpcArchive.openDirectory(sourceDir(workspace));
 
 const validateArchive = (archive: OpcArchive): Diagnostic[] => {
-  const diagnostics: Diagnostic[] = [];
+  const diagnostics: Diagnostic[] = [
+    ...scanRevisions(archive).diagnostics,
+    ...validateReviewParts(archive, 'docx'),
+  ];
   if (!archive.getPart(DOCUMENT_PART)) {
     diagnostics.push({
       severity: 'error',
@@ -249,7 +276,7 @@ export const docxAdapter: FormatAdapter = {
       );
     }
   },
-  async execute(command) {
+  async execute(command, context = {}) {
     const workspace = resolve(command.workspaceId);
     try {
       await access(resolve(workspace, '.deckuse'));
@@ -306,6 +333,36 @@ export const docxAdapter: FormatAdapter = {
         const archive = await openWorkspaceArchive(workspace);
         const index = await loadIndex(workspace, archive, manifest, { persist: true });
 
+        if (command.type === 'listComments' || command.type === 'getComment') {
+          const items = wordComments(archive);
+          if (command.type === 'listComments')
+            return ok({ items }, validateReviewParts(archive, 'docx'));
+          const item = items.find((n) => n.id === command.id);
+          return item
+            ? ok(item, validateReviewParts(archive, 'docx'))
+            : err('ELEMENT_NOT_FOUND', 'Comment not found');
+        }
+        if (command.type === 'readReview')
+          return ok(reviewView(archive, command.view, command.partUri));
+        if (command.type === 'previewRevisionDecision')
+          return ok(previewDecision(archive, command.ids, command.all, command.decision));
+
+        if (command.type === 'listRevisions' || command.type === 'getRevision') {
+          const scanned = scanRevisions(archive);
+          if (command.type === 'getRevision') {
+            const item = scanned.items.find((item) => item.id === command.id);
+            return item
+              ? ok(item, scanned.diagnostics)
+              : err('ELEMENT_NOT_FOUND', 'Tracked revision not found');
+          }
+          return ok({
+            ...scanned,
+            items: scanned.items.filter(
+              (item) => !command.partUri || item.partUri === command.partUri,
+            ),
+          });
+        }
+
         if (command.type === 'status') {
           const diagnostics = validateArchive(archive);
           return ok({
@@ -320,6 +377,7 @@ export const docxAdapter: FormatAdapter = {
             health: await historyHealth(workspace),
             packageStale: await isPackageStale(workspace, manifest),
             elementCount: index.elements.length,
+            trackedRevisions: scanRevisions(archive),
             capabilities: docxCapabilities,
             branch: 'main',
             valid: !diagnostics.some((d) => d.severity === 'error'),
@@ -344,6 +402,7 @@ export const docxAdapter: FormatAdapter = {
             return ok({
               document: {
                 format: 'docx',
+                trackedRevisions: scanRevisions(archive),
                 revision: index.revision,
                 capabilities: docxCapabilities,
               },
@@ -441,7 +500,15 @@ export const docxAdapter: FormatAdapter = {
           const diagnostics = validateArchive(archive);
           return diagnostics.some((d) => d.severity === 'error')
             ? err('VALIDATION_FAILED', 'DOCX validation failed', diagnostics)
-            : ok({ valid: true, revision: index.revision, capabilities: docxCapabilities });
+            : ok(
+                {
+                  valid: true,
+                  revision: index.revision,
+                  capabilities: docxCapabilities,
+                  trackedRevisions: scanRevisions(archive),
+                },
+                diagnostics,
+              );
         }
 
         if (command.type === 'export') {
@@ -539,7 +606,29 @@ export const docxAdapter: FormatAdapter = {
           const locked = assertExpectRevision(command, currentManifest.revision);
           if (locked) return locked;
           const working = await openWorkspaceArchive(workspace);
+          working.markClean();
           let currentIndex = await loadIndex(workspace, working, currentManifest);
+
+          const applyMutation = (input: AtomicCommand) => {
+            if (!REVIEW_WRITES.has(input.type)) return mutate(input, working, currentIndex);
+            try {
+              const parsed = reviewWriteSchema.parse(input);
+              const value = ['proposeChanges', 'acceptRevisions', 'rejectRevisions'].includes(
+                parsed.type,
+              )
+                ? mutateRevisions(working, parsed, context.now?.() ?? new Date())
+                : mutateWordComments(working, parsed, context.now?.() ?? new Date());
+              return ok({
+                ...value,
+                changedParts: working.getDirtyParts(),
+              } as unknown as import('./types.js').MutationOutcome);
+            } catch (cause) {
+              return err(
+                'UNSUPPORTED_CAPABILITY',
+                cause instanceof Error ? cause.message : 'Review write failed',
+              );
+            }
+          };
 
           const runBatch = async (
             nestedCommands: AtomicCommand[],
@@ -551,13 +640,17 @@ export const docxAdapter: FormatAdapter = {
             const changedTargets: string[] = [];
             const changedParts: string[] = [];
             for (const nested of nestedCommands) {
-              const result = timedSync('mutation', () => mutate(nested, working, currentIndex));
+              if (REVIEW_WRITES.has(nested.type)) {
+                const conflict = assertExpectRevision(nested, currentManifest.revision);
+                if (conflict) return conflict;
+              }
+              const result = timedSync('mutation', () => applyMutation(nested));
               diagnostics.push(...result.diagnostics);
               if (!result.ok) return result;
               results.push(result.value);
               if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
               if (result.value.changedParts) changedParts.push(...result.value.changedParts);
-              if (STRUCTURAL_TYPES.has(nested.type)) {
+              if (STRUCTURAL_TYPES.has(nested.type) || REVIEW_WRITES.has(nested.type)) {
                 currentIndex = buildIndex(
                   working,
                   currentManifest.workspaceId,
@@ -605,7 +698,7 @@ export const docxAdapter: FormatAdapter = {
 
           if (command.type === 'batch') return runBatch(command.commands, command.dryRun, command);
 
-          const result = timedSync('mutation', () => mutate(command, working, currentIndex));
+          const result = timedSync('mutation', () => applyMutation(command));
           if (!result.ok) return result;
           const validation = validateArchive(working);
           if (validation.some((d) => d.severity === 'error'))

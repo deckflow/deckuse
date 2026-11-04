@@ -645,6 +645,9 @@ describe('monitor', () => {
     await eventually(() => expect(client.events.join('')).toContain('event: ready'));
     expect(client.events.join('')).toContain('"revision":"1"');
     expect(watchFactory).toHaveBeenCalledTimes(1);
+    // Conversion completion rechecks the current package before settling. Wait
+    // for that cached result so the later write tests watcher filtering alone.
+    await eventually(() => expect(client.events.join('')).toContain('"cached":true'));
 
     await writeFile(join(workspace, 'package.pptx'), 'pptx-v2');
     await writeFile(

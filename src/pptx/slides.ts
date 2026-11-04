@@ -1,3 +1,4 @@
+import { cloneSlideComments, COMMENT_RELS } from './comments.js';
 import { posix } from 'node:path';
 import type { Diagnostic } from '../core/index.js';
 import { OpcArchive, type OpcRelationship } from '../opc/index.js';
@@ -95,6 +96,29 @@ export function ensureNotes(archive: OpcArchive, slidePart: string): string {
       resolvedTarget: slidePart,
     },
   ]);
+  const masters = archive
+    .getRelationships('/ppt/presentation.xml')
+    .filter(
+      (rel) =>
+        rel.type ===
+          'http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster' &&
+        !rel.external &&
+        rel.resolvedTarget &&
+        archive.getPart(rel.resolvedTarget),
+    );
+  const master = masters.length === 1 ? masters[0] : undefined;
+  if (master?.resolvedTarget) {
+    archive.setRelationships(part, [
+      ...archive.getRelationships(part),
+      {
+        id: 'rId2',
+        type: master.type,
+        external: false,
+        target: relativeTarget(part, master.resolvedTarget),
+        resolvedTarget: master.resolvedTarget,
+      },
+    ]);
+  }
   const rels = [...archive.getRelationships(slidePart)];
   const rid = nextRelId(rels);
   rels.push({
@@ -157,6 +181,7 @@ export function addSlide(
   templatePart?: string,
   layoutPart?: string,
   afterIndex?: number,
+  copyComments = true,
 ): string {
   const { doc, list, rels } = presentationState(archive);
   const number = nextNumber(archive, '/ppt/slides/');
@@ -217,10 +242,18 @@ export function addSlide(
   else list.appendChild(sld);
   archive.writeXml('/ppt/presentation.xml', doc);
   syncAppSlideCounts(archive);
+  if (templatePart) {
+    if (copyComments) cloneSlideComments(archive, templatePart, part);
+    else
+      archive.setRelationships(
+        part,
+        archive.getRelationships(part).filter((r) => !COMMENT_RELS.has(r.type)),
+      );
+  }
   return part;
 }
-export function duplicateSlide(archive: OpcArchive, part: string): string {
-  return addSlide(archive, part);
+export function duplicateSlide(archive: OpcArchive, part: string, copyComments = true): string {
+  return addSlide(archive, part, undefined, undefined, copyComments);
 }
 
 /**
@@ -270,7 +303,10 @@ export function removeSlide(archive: OpcArchive, part: string): void {
       (r) =>
         !r.external &&
         r.resolvedTarget &&
-        (r.type === REL.chart || r.type === REL.notes || r.type === REL.image),
+        (r.type === REL.chart ||
+          r.type === REL.notes ||
+          r.type === REL.image ||
+          COMMENT_RELS.has(r.type)),
     )
     .flatMap((r) => (r.resolvedTarget ? [r.resolvedTarget] : []));
   archive.deletePart(part);

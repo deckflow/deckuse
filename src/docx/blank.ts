@@ -62,6 +62,13 @@ export const buildBlankArchive = (): OpcArchive => {
   archive.contentTypes.defaults.set('xml', 'application/xml');
   archive.setPart('/word/document.xml', encoder.encode(DOCUMENT), MAIN);
   archive.setPart('/word/styles.xml', encoder.encode(STYLES), STYLES_TYPE);
+  archive.setPart(
+    '/word/settings.xml',
+    encoder.encode(
+      '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>',
+    ),
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml',
+  );
   archive.setRelationships('/', [
     {
       id: 'rId1',
@@ -71,6 +78,13 @@ export const buildBlankArchive = (): OpcArchive => {
     },
   ]);
   archive.setRelationships('/word/document.xml', [
+    {
+      id: 'rId2',
+      type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings',
+      target: 'settings.xml',
+      resolvedTarget: '/word/settings.xml',
+      external: false,
+    },
     {
       id: 'rId1',
       type: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles',

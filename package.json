@@ -27,7 +27,9 @@
     "docs/1.6-safety-migration.md",
     "docs/verification-1.6-safety.md",
     "docs/agent-reliability.md",
-    "docs/verification-agent-reliability.md"
+    "docs/verification-agent-reliability.md",
+    "docs/review.md",
+    "docs/review-implementation-status.md"
   ],
   "bin": {
     "deckuse": "./dist/bin.js"

@@ -21,7 +21,7 @@ export async function loadIndex(
     if (options?.persist) await writeMetadata(root, manifest, index);
     return index;
   }
-  if (index.revision !== manifest.revision) {
+  if (index.revision !== manifest.revision || index.indexVersion !== 2) {
     index = buildIndex(archive, manifest.workspaceId, manifest.revision);
     if (options?.persist) await writeMetadata(root, manifest, index);
   }

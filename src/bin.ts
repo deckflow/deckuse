@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
@@ -303,6 +304,7 @@ const lengthArg = (raw: string | undefined): number | string | undefined => {
 };
 
 const APPLY_WRITE_TYPES = new Set([
+  ...REVIEW_WRITES,
   'setText',
   'replaceText',
   'setTransform',
@@ -540,6 +542,70 @@ const main = async (): Promise<void> => {
           workspaceId: resolve(workspace),
           format,
           source,
+        });
+      } else if (action === 'comments' || action === 'revisions') {
+        const sub = clean[1] ?? '';
+        const workspace = await findWorkspace(workspaceOpt);
+        const commentTypes: Record<string, string> = {
+          list: 'listComments',
+          get: 'getComment',
+          add: 'addComment',
+          update: 'updateComment',
+          reply: 'replyComment',
+          resolve: 'resolveComment',
+          reopen: 'reopenComment',
+          delete: 'deleteComment',
+          upgrade: 'upgradeComments',
+        };
+        const revisionTypes: Record<string, string> = {
+          list: 'listRevisions',
+          get: 'getRevision',
+          view: 'readReview',
+          preview: 'previewRevisionDecision',
+          propose: 'proposeChanges',
+          accept: 'acceptRevisions',
+          reject: 'rejectRevisions',
+        };
+        const type = (action === 'comments' ? commentTypes : revisionTypes)[sub];
+        if (!type) throw new Error(`Unknown ${action} subcommand: ${sub}`);
+        const input = optionFrom(clean, '--input');
+        const payload: Record<string, unknown> = input
+          ? (JSON.parse(
+              input === '-' ? await readStdin() : await readFile(resolve(input), 'utf8'),
+            ) as Record<string, unknown>)
+          : {};
+        const jsonOption = (name: string): unknown => {
+          const value = optionFrom(clean, name);
+          return value ? (JSON.parse(value) as unknown) : undefined;
+        };
+        if (['get', 'update', 'reply', 'resolve', 'reopen', 'delete'].includes(sub))
+          payload['id'] = payload['id'] ?? clean[2];
+        for (const name of ['author', 'anchor', 'operations', 'ids']) {
+          const value = jsonOption('--' + name);
+          if (value !== undefined) payload[name] = value;
+        }
+        for (const name of ['text', 'format', 'decision', 'view']) {
+          const value = optionFrom(clean, '--' + name);
+          if (value !== undefined) payload[name] = value;
+        }
+        if (clean.includes('--thread')) payload['thread'] = true;
+        if (clean.includes('--all')) payload['all'] = true;
+        const write = REVIEW_WRITES.has(type);
+        const extras = write
+          ? await mutationExtras(workspace)
+          : { version: PROTOCOL_VERSION, workspaceId: workspace };
+        ok = await execute(`deckuse ${action} ${sub}`, {
+          ...payload,
+          ...extras,
+          ...(write
+            ? {
+                expectRevision:
+                  expectRevisionOpt ?? payload['expectRevision'] ?? (await revisionFor(workspace)),
+                transactionId:
+                  payload['transactionId'] ?? (extras as { transactionId?: string }).transactionId,
+              }
+            : {}),
+          type,
         });
       } else if (action === 'status') {
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
@@ -825,6 +891,9 @@ const main = async (): Promise<void> => {
           ...(await mutationExtras(workspace)),
           type: 'remove',
           target,
+          ...(optionFrom(clean, '--comments-policy')
+            ? { commentsPolicy: optionFrom(clean, '--comments-policy') }
+            : {}),
         });
       } else if (action === 'set') {
         const workspace = await findWorkspace(workspaceOpt);
@@ -1005,7 +1074,8 @@ const main = async (): Promise<void> => {
           if (
             typeof parsed === 'object' &&
             parsed !== null &&
-            Array.isArray((parsed as { operations?: unknown }).operations)
+            Array.isArray((parsed as { operations?: unknown }).operations) &&
+            (!('type' in parsed) || (parsed as { type?: unknown }).type === 'applyTransaction')
           ) {
             wrappedOperations = (parsed as { operations: unknown[] }).operations;
           } else {
@@ -1025,7 +1095,13 @@ const main = async (): Promise<void> => {
             if (value['type'] === 'batch') return value;
             if (!APPLY_WRITE_TYPES.has(String(value['type'])))
               throw new Error(`apply input contains non-write command: ${String(value['type'])}`);
-            return { ...extras, ...value };
+            return {
+              ...extras,
+              ...(REVIEW_WRITES.has(String(value['type']))
+                ? { expectRevision: extras.expectRevision ?? extras.transactionId }
+                : {}),
+              ...value,
+            };
           });
           const payload =
             commands.length === 1 && commands[0]?.['type'] !== 'batch'

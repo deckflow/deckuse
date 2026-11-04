@@ -1,3 +1,6 @@
+import { validateReviewParts } from '../review/validation.js';
+import { REVIEW_WRITES, reviewWriteSchema } from '../review/schema.js';
+import { slideComments, mutateSlideComments } from './comments.js';
 import { requireDefined } from '../required.js';
 import { timed, timedSync } from '../timing.js';
 import {
@@ -67,6 +70,7 @@ const buildIndex: typeof buildIndexImpl = (...args) =>
 
 const VERSION = '0.5.0';
 const WRITE_TYPES = new Set([
+  ...REVIEW_WRITES,
   'setText',
   'replaceText',
   'setTransform',
@@ -88,6 +92,14 @@ const WRITE_TYPES = new Set([
 ]);
 
 export const pptxCapabilities = {
+  comments: {
+    formats: ['legacy', 'modern'],
+    read: true,
+    write: true,
+    modernThreads: true,
+    upgrade: 'explicit',
+    anchors: ['slide', 'shape', 'text'],
+  },
   protocol: '2.0',
   ...editionMetadata,
   slides: { add: true, duplicate: true, remove: true, setLayout: true },
@@ -267,7 +279,7 @@ const chartDataDiagnostics = (
     }));
 
 const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
-  const diagnostics: Diagnostic[] = [];
+  const diagnostics: Diagnostic[] = validateReviewParts(archive, 'pptx');
   for (const [source, rels] of archive.relationships)
     for (const rel of rels)
       if (!rel.external && rel.resolvedTarget && !archive.getPart(rel.resolvedTarget))
@@ -717,7 +729,7 @@ export const pptxAdapter: FormatAdapter = {
       );
     }
   },
-  async execute(command) {
+  async execute(command, context = {}) {
     const workspace = resolve(command.workspaceId);
     try {
       await access(resolve(workspace, '.deckuse'));
@@ -1096,6 +1108,23 @@ export const pptxAdapter: FormatAdapter = {
           });
         }
 
+        if (command.type === 'listComments' || command.type === 'getComment') {
+          const items = slideComments(archive);
+          if (command.type === 'listComments')
+            return ok({ items }, validateReviewParts(archive, 'pptx'));
+          const item = items.find((n) => n.id === command.id);
+          return item
+            ? ok(item, validateReviewParts(archive, 'pptx'))
+            : err('ELEMENT_NOT_FOUND', 'Comment not found');
+        }
+        if (
+          command.type === 'listRevisions' ||
+          command.type === 'getRevision' ||
+          command.type === 'readReview' ||
+          command.type === 'previewRevisionDecision'
+        )
+          return err('UNSUPPORTED_CAPABILITY', 'Tracked revisions require DOCX');
+
         if (!WRITE_TYPES.has(command.type))
           return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
 
@@ -1109,6 +1138,23 @@ export const pptxAdapter: FormatAdapter = {
 
           const working = await openWorkspaceArchive(workspace);
           let currentIndex = await loadIndex(workspace, working, currentManifest);
+          const applyMutation = async (input: AtomicCommand) => {
+            if (!REVIEW_WRITES.has(input.type)) return mutate(input, working, currentIndex);
+            try {
+              const value = mutateSlideComments(
+                working,
+                currentIndex,
+                reviewWriteSchema.parse(input),
+                context.now?.() ?? new Date(),
+              );
+              return ok(value as unknown as import('./types.js').MutationOutcome);
+            } catch (cause) {
+              return err(
+                'UNSUPPORTED_CAPABILITY',
+                cause instanceof Error ? cause.message : 'Comment write failed',
+              );
+            }
+          };
           const STRUCTURAL_TYPES = new Set([
             'set',
             'setProperties',
@@ -1135,7 +1181,11 @@ export const pptxAdapter: FormatAdapter = {
             const changedTargets: string[] = [];
             working.markClean();
             for (const nested of nestedCommands) {
-              const result = await timed('mutation', () => mutate(nested, working, currentIndex));
+              if (REVIEW_WRITES.has(nested.type)) {
+                const conflict = assertExpectRevision(nested, currentManifest.revision);
+                if (conflict) return conflict;
+              }
+              const result = await timed('mutation', () => applyMutation(nested));
               diagnostics.push(...result.diagnostics);
               if (!result.ok) return result;
               results.push(result.value);
@@ -1235,7 +1285,7 @@ export const pptxAdapter: FormatAdapter = {
           }
 
           working.markClean();
-          const result = await timed('mutation', () => mutate(command, working, currentIndex));
+          const result = await timed('mutation', () => applyMutation(command));
           if (!result.ok) return result;
           if (command.type === 'addSlide') {
             const fresh = buildIndex(

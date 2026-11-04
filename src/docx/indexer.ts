@@ -318,6 +318,7 @@ export const buildIndex = (
   revision: string,
 ): IndexFile => ({
   revision,
+  indexVersion: 2,
   elements: collectHits(archive).map((hit) => toIndexed(hit, documentId)),
 });
 

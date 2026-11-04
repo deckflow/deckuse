@@ -43,6 +43,7 @@ Carry between stages: scenario, format, input type, goal, preserved objects, all
 
 ## Load modules only when needed
 
+- [native review](references/review.md): load for comments, native Word tracked changes, or review decisions.
 - [operations](references/operations.md): addressing, geometry, typography, tables, charts and Word mutation recipes.
 - [verification-recovery](references/verification-recovery.md): preservation, delivery gates and failure recovery. Required before modifying existing files or delivering outputs.
 
