@@ -3,9 +3,7 @@ import { timed } from './timing.js';
 import { createHash } from 'node:crypto';
 import { withWriteLock } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
-import { renderLibreOfficePages } from './render-libreoffice.js';
 import { auditVisuals } from './pptx/visual-audit.js';
-import { renderLibreOffice } from './render-libreoffice.js';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +25,8 @@ export type ScreenshotFn = (options: {
   readonly indexHtmlPath: string;
   readonly outputPath: string;
   readonly scale?: number | undefined;
+  /** DOCX page in the paginated HTML (1-based). */
+  readonly documentPage?: number;
 }) => Promise<void>;
 
 export interface RenderDependencies {
@@ -36,7 +36,6 @@ export interface RenderDependencies {
 
 export interface RenderOptions {
   /** 1-based page index; exactly one page per call. */
-  readonly engine?: 'html' | 'libreoffice';
   readonly page: number;
   /** PNG path; default: `<workspace>/.deckuse/render/page-<n>.png`. */
   readonly output?: string;
@@ -112,9 +111,27 @@ const launchChromium = async (): Promise<Browser> => {
   );
 };
 
+const DOCUMENT_PAGE_SELECTOR = 'section.doc-section, section.footnotes, section.endnotes';
+const prepareDocumentPage = async (page: Page): Promise<void> => {
+  await page.waitForSelector('main.doc', { timeout: 30_000 });
+  await page.evaluate(WAIT_FONTS_SCRIPT);
+  await page.waitForFunction(
+    "document.documentElement.hasAttribute('data-o2h-paginated')",
+    undefined,
+    {
+      timeout: 60_000,
+    },
+  );
+  await page.evaluate(`document.querySelectorAll('section.is-lazy-page').forEach(section => {
+    section.classList.remove('is-lazy-page');
+    section.style.contentVisibility = 'visible';
+  })`);
+  await sleep(AUTOFIT_SETTLE_MS);
+};
+
 const screenshotWithBrowser = async (
   browser: Browser,
-  { indexHtmlPath, outputPath, scale }: Parameters<ScreenshotFn>[0],
+  { indexHtmlPath, outputPath, scale, documentPage }: Parameters<ScreenshotFn>[0],
 ) => {
   const context = await browser.newContext({
     viewport: DEFAULT_VIEWPORT,
@@ -124,6 +141,14 @@ const screenshotWithBrowser = async (
     const page = await context.newPage();
     const url = pathToFileURL(indexHtmlPath).href;
     await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
+    if (documentPage !== undefined) {
+      await prepareDocumentPage(page);
+      const pages = page.locator(DOCUMENT_PAGE_SELECTOR);
+      if (documentPage > (await pages.count())) throw new Error('Requested page does not exist');
+      await mkdir(dirname(outputPath), { recursive: true });
+      await pages.nth(documentPage - 1).screenshot({ path: outputPath, type: 'png' });
+      return;
+    }
     await page.waitForSelector('#deck', { timeout: 30_000 });
 
     await page.evaluate(WAIT_FONTS_SCRIPT);
@@ -161,12 +186,6 @@ const renderPageSnapshot = async (
   }
 
   const absoluteWorkspace = resolve(workspace);
-  if (options.engine === 'libreoffice')
-    return renderLibreOffice(
-      absoluteWorkspace,
-      page,
-      options.output ?? joinRenderDefault(absoluteWorkspace, page),
-    );
   await ensureGitignore(absoluteWorkspace);
 
   let snapshot = PACKAGE_PPTX;
@@ -180,17 +199,12 @@ const renderPageSnapshot = async (
   } catch {
     // Missing manifest keeps the PPTX snapshot path used by existing render callers.
   }
-  if (snapshot === 'package.docx') {
-    throw new Error(
-      'DOCX page render is not available. @deckflow/deck2html converts PPTX only and does not paginate Word documents. Export the .docx and open it in Word to check layout.',
-    );
-  }
-
   const output = resolve(options.output ?? joinRenderDefault(absoluteWorkspace, page));
-  const packagePath = resolve(absoluteWorkspace, PACKAGE_PPTX);
+  const packagePath = resolve(absoluteWorkspace, snapshot);
   const converter = options.dependencies?.convert ?? deck2html.convert;
   const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
-  const diagnostics = await inspectChartRenderFidelity(absoluteWorkspace, page);
+  const diagnostics =
+    snapshot === PACKAGE_PPTX ? await inspectChartRenderFidelity(absoluteWorkspace, page) : [];
   const warnings = diagnostics.map((item) => `${item.code}: ${item.message}`);
 
   if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
@@ -200,7 +214,7 @@ const renderPageSnapshot = async (
     const result = await timed('convert', () =>
       converter(packagePath, {
         output: staging,
-        pages: String(page),
+        ...(snapshot === PACKAGE_PPTX ? { pages: String(page) } : {}),
       }),
     );
     if (result.exitCode !== 0) {
@@ -222,6 +236,7 @@ const renderPageSnapshot = async (
       screenshot({
         indexHtmlPath,
         outputPath: output,
+        ...(snapshot === 'package.docx' ? { documentPage: page } : {}),
         ...(options.scale !== undefined ? { scale: options.scale } : {}),
       }),
     );
@@ -254,7 +269,7 @@ const renderPageSnapshot = async (
   }
 };
 
-/** Capture package and revision under the same lock before either renderer reads. */
+/** Capture package and revision under the same lock before the renderer reads. */
 export const renderPage = async (
   workspace: string,
   options: RenderOptions,
@@ -275,10 +290,6 @@ export const renderPage = async (
         if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
       }
       const format = manifest.format ?? 'pptx';
-      if (format === 'docx' && options.engine !== 'libreoffice')
-        throw new Error(
-          'DOCX page render is not available with HTML. Use --engine libreoffice or open the document in Word.',
-        );
       if (format !== 'pptx' && format !== 'docx') throw new Error('Unsupported render format');
       const bytes = await readFile(join(root, `package.${format}`));
       await mkdir(join(staging, '.deckuse'));
@@ -320,7 +331,6 @@ const joinRenderDefault = (workspace: string, page: number): string =>
   resolve(renderDir(workspace), `page-${String(page)}.png`);
 
 export interface RenderPagesOptions {
-  readonly engine?: 'html' | 'libreoffice';
   readonly pages?: readonly number[] | undefined;
   readonly all?: boolean;
   readonly outputDir?: string | undefined;
@@ -388,35 +398,51 @@ export async function renderPages(
     await writeFile(join(staging, '.deckuse/manifest.json'), JSON.stringify(manifest));
     await writeFile(join(staging, `package.${manifest.format}`), bytes);
     const outputDir = resolve(options.outputDir ?? join(root, '.deckuse/render'));
-    if (options.engine === 'libreoffice') {
-      const results = await renderLibreOfficePages(
-        staging,
-        options.all ? undefined : options.pages,
-        outputDir,
-      );
-      return {
-        ok: results.every((r) => r.ok),
-        engine: 'libreoffice',
-        revision: manifest.revision,
-        inputSha256: sha,
-        results,
-      };
+    let count: number;
+    if (manifest.format === 'docx') {
+      // Word's page count is determined by deck2html's browser pagination.
+      if (!options.all) {
+        count = Number.MAX_SAFE_INTEGER;
+      } else {
+        const htmlDir = join(staging, 'document-html');
+        await mkdir(htmlDir);
+        if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
+        const converted = await (options.dependencies?.convert ?? deck2html.convert)(
+          join(staging, 'package.docx'),
+          { output: htmlDir },
+        );
+        if (converted.exitCode !== 0)
+          throw new Error(converted.stderr || 'deck2html conversion failed');
+        const entry = resolve(converted.indexHtmlPath);
+        const entryRelative = relative(htmlDir, entry);
+        if (entryRelative === '..' || entryRelative.startsWith(`..${sep}`))
+          throw new Error('deck2html returned an output outside the staging directory');
+        browser = await launchChromium();
+        const page = await browser.newPage({ viewport: DEFAULT_VIEWPORT });
+        try {
+          await page.goto(pathToFileURL(entry).href, { waitUntil: 'networkidle', timeout: 60_000 });
+          await prepareDocumentPage(page);
+          count = await page.locator(DOCUMENT_PAGE_SELECTOR).count();
+        } finally {
+          await page.close();
+        }
+        if (count === 0) throw new Error('No document pages found');
+      }
+    } else {
+      const archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
+      count = archive
+        .readXml('/ppt/presentation.xml')
+        .getElementsByTagNameNS(
+          'http://schemas.openxmlformats.org/presentationml/2006/main',
+          'sldId',
+        ).length;
     }
-    if (manifest.format !== 'pptx')
-      throw new Error('HTML rendering supports PPTX only; use --engine libreoffice for DOCX');
-    const archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
-    const count = archive
-      .readXml('/ppt/presentation.xml')
-      .getElementsByTagNameNS(
-        'http://schemas.openxmlformats.org/presentationml/2006/main',
-        'sldId',
-      ).length;
     const pages = options.all
       ? Array.from({ length: count }, (_, i) => i + 1)
       : [...new Set(options.pages)];
     if (pages.some((p) => !Number.isInteger(p) || p < 1 || p > count))
       throw new Error('Requested page does not exist');
-    if (!options.dependencies?.screenshot) browser = await launchChromium();
+    if (!options.dependencies?.screenshot && !browser) browser = await launchChromium();
     const shared = browser;
     const results: RenderPageOutcome[] = [];
     for (const page of pages) {

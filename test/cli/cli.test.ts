@@ -192,6 +192,7 @@ describe('deckuse CLI', () => {
     expect(renderHelp.stdout).toContain('usage: deckuse render --page <n>');
     expect(renderHelp.stdout).toContain('--page <n>');
     expect(renderHelp.stdout).toContain('deck2html');
+    expect(renderHelp.stdout).not.toContain('--engine');
 
     const monitorHelp = await run(['monitor', '--help']);
     expect(monitorHelp).toMatchObject({ code: 0, stderr: '' });
@@ -800,6 +801,16 @@ describe('deckuse CLI', () => {
     expect(xml).toContain('OpsCard');
     expect(xml).toContain('F3F4F6');
     expect(xml).toContain('Ops');
+  });
+
+  it('rejects engine selection for single and batch rendering', async () => {
+    for (const selection of [['--page', '1'], ['--pages', '1,2'], ['--all']]) {
+      for (const engine of ['html', 'libreoffice']) {
+        const result = await run(['render', ...selection, '--engine', engine]);
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain('--engine is no longer supported');
+      }
+    }
   });
 
   it('rejects render without a single page', async () => {

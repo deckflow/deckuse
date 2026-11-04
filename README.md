@@ -358,7 +358,7 @@ Word uses the same workspace loop as PPTX (`new` / `init`, `list`, `apply`, `val
 - Slide commands (`addShape`, `xfrmSet`, `alignElements`, …) return `UNSUPPORTED_CAPABILITY`.
 - Tracked changes, fields, comments, content controls, and equations are preserved. A command that would have to rewrite them fails instead of stripping them.
 - Community edition does not write style definitions, numbering definitions, theme, or settings parts.
-- `render --page` is PPTX-only. `@deckflow/deck2html` does not paginate Word; export and open the `.docx` to check layout.
+- `render` supports PPTX and DOCX through deck2html → HTML → Playwright screenshots. DOCX page numbers follow HTML pagination and may differ from Word.
 
 ## PPTX `setProperties` example
 

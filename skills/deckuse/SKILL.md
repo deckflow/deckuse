@@ -311,7 +311,7 @@ Word often splits one sentence across `w:r` nodes (`w:proofErr`, direct formatti
 ]
 ```
 
-`deckuse render --page` with the default HTML engine does not paginate DOCX; use the optional LibreOffice engine. `@deckflow/deck2html` converts PPTX only. Export and open the file in Word for layout checks.
+`deckuse render` converts PPTX and DOCX to HTML with deck2html and captures pages with Playwright. DOCX page numbers follow the HTML pagination and may differ from Word. Use Word for native layout checks.
 
 Schema: `deckuse schema --type addParagraph --json`.
 
@@ -330,6 +330,6 @@ For existing files, record the original SHA-256 and object inventory, produce a 
 
 `validate --profile delivery` and `export --profile delivery` refuse unverified referenced chart data. Supported fixed-length A1 constant ranges in embedded XLSX workbooks are synchronized atomically, with shared chart/workbook isolation. Formula dependencies, external links, resizing, pivot data and unrecognized extensions are refused. Do not bypass this by modifying chart caches directly. Ordinary structure export remains available for diagnosis.
 
-`render --engine libreoffice --page N` requires LibreOffice and Poppler (`pdfinfo`, `pdftoppm`). Set `DECKUSE_SOFFICE_PATH` if needed. It renders the package snapshot, reports its SHA-256 and engine version, and leaves font/native verification unknown. Compare against a baseline rendered with the same engine and font environment. Missing software is unverified, never a visual pass.
+`render` uses deck2html to convert PPTX / DOCX to HTML, then Playwright to capture PNG screenshots. Single-page and batch rendering use the same pipeline and report the input SHA-256 and converter version. DOCX pages follow deck2html's HTML pagination and may differ from native Word pagination. Font/native verification remains unverified.
 
 Use separate delivery states: structure verified, external layout reviewed, native open tested, native visual reviewed. Only record a state when its check was performed. HTML render/monitor is a process preview. Local monitor defaults to 127.0.0.1; expose it only with an explicit --host.

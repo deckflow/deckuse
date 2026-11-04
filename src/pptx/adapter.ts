@@ -135,7 +135,7 @@ export const pptxCapabilities = {
     },
     grouping: ['clustered'],
     secondaryAxis: 'combo',
-    rendering: { html: 'approximate', libreoffice: 'optional', nativeOfficeReviewRequired: true },
+    rendering: { html: 'approximate', nativeOfficeReviewRequired: true },
     createFamilies: ['bar', 'column', 'line', 'pie', 'combo'],
     editExistingAdvanced: !editionCapabilities.chartBasicOnly,
   },

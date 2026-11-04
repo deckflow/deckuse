@@ -108,14 +108,32 @@ describe('renderPage', () => {
     expect(rendered.output).toBe(output);
   });
 
-  it('refuses to invent Word page numbers', async () => {
+  it('converts DOCX and selects its HTML page for the screenshot', async () => {
     const workspace = await workspaceFixture();
     await writeFile(
       join(workspace, '.deckuse', 'manifest.json'),
       JSON.stringify({ format: 'docx' }),
     );
-    await expect(renderPage(workspace, { page: 1 })).rejects.toThrow(
-      /DOCX page render is not available/,
-    );
+    await writeFile(join(workspace, 'package.docx'), 'docx');
+    const convert = vi.fn(async (input: string, options: { output: string; pages?: string }) => {
+      expect(input).toMatch(/package\.docx$/);
+      expect(await readFile(input, 'utf8')).toBe('docx');
+      expect(options.pages).toBeUndefined();
+      const indexHtmlPath = join(options.output, 'index.html');
+      await writeFile(
+        indexHtmlPath,
+        '<main class="doc"><section class="doc-section"></section></main>',
+      );
+      return { indexHtmlPath, exitCode: 0, stdout: '', stderr: '' };
+    });
+    const screenshot = vi.fn(async (opts: { outputPath: string; documentPage?: number }) => {
+      expect(opts.documentPage).toBe(2);
+      await writeFile(opts.outputPath, 'png');
+    });
+    const result = await renderPage(workspace, { page: 2, dependencies: { convert, screenshot } });
+    expect(result.engine).toBe('html');
+    expect(result.diagnostics).toEqual([]);
+    expect(convert).toHaveBeenCalledOnce();
+    expect(screenshot).toHaveBeenCalledOnce();
   });
 });

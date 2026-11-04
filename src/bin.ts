@@ -1242,6 +1242,8 @@ const main = async (): Promise<void> => {
         process.once('SIGTERM', () => void shutdown('SIGTERM'));
         return;
       } else if (action === 'render') {
+        if (clean.some((arg) => arg === '--engine' || arg.startsWith('--engine=')))
+          throw new Error('--engine is no longer supported; render uses deck2html and Playwright.');
         const pageRaw = optionFrom(clean, '--page');
         const pagesRaw = optionFrom(clean, '--pages');
         const all = clean.includes('--all');
@@ -1250,14 +1252,10 @@ const main = async (): Promise<void> => {
             throw new Error(
               'Use --pages or --all with --output-dir; do not combine with --page/--output',
             );
-          const engine = optionFrom(clean, '--engine') ?? 'html';
-          if (engine !== 'html' && engine !== 'libreoffice')
-            throw new Error('Unknown render engine');
           const workspace = await findWorkspace(workspaceOpt);
           const selection = pagesRaw !== undefined ? parsePageSelection(pagesRaw) : undefined;
           try {
             const rendered = await renderPages(workspace, {
-              engine,
               all,
               pages: selection,
               outputDir: optionFrom(clean, '--output-dir'),
@@ -1296,11 +1294,7 @@ const main = async (): Promise<void> => {
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
         const outputOpt = optionFrom(clean, '--output');
         try {
-          const engine = optionFrom(clean, '--engine') ?? 'html';
-          if (engine !== 'html' && engine !== 'libreoffice')
-            throw new Error('Unknown render engine');
           const rendered = await renderPage(workspace, {
-            engine,
             page,
             ...(outputOpt ? { output: resolve(outputOpt) } : {}),
             ...(scale !== undefined ? { scale } : {}),

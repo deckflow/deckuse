@@ -787,8 +787,7 @@ Examples:
   },
 
   render: {
-    usage:
-      'deckuse render --page <n> [--engine html|libreoffice] [--output <file.png>] [--scale <n>]',
+    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
     summary:
       'Convert one slide to HTML (deck2html), screenshot it with Playwright, then delete the HTML staging output.',
     example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',
@@ -809,7 +808,7 @@ Notes:
   Combo/advanced charts emit COMBO_CHART_RENDER_LIMITED; explicit series colors emit
   CHART_SERIES_COLOR_UNVERIFIED. Pages without those charts omit the generic warning.
   Verify ppt/charts/*.xml or PowerPoint when color accuracy matters.
-  DOCX workspaces cannot be paginated: deck2html converts PPTX only. Export and open the .docx in Word.
+  DOCX pages follow deck2html's HTML pagination; native Word pagination may differ.
   Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
   Temporary deck2html output is always removed after the screenshot.`,
   },
