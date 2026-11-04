@@ -802,6 +802,15 @@ Examples:
   deckuse monitor stop --all`,
   },
 
+  'agent-context': {
+    usage:
+      'deckuse agent-context [--format pptx|docx | --workspace <path>] [--scenario <id>] [--include-schema] --json',
+    summary:
+      'Return a versioned task capability context without creating a document or starting a browser.',
+    example: 'deckuse agent-context --format pptx --scenario create --include-schema --json',
+    details:
+      'Scenarios: create, replicate, edit, populate-template, audit, preview-export. DOCX excludes replicate/template. Static fingerprint excludes live workspace/environment state. Contracts are JSON operation schemas; recipe.cli documents shell syntax. Older binaries use same-version skill plus schema --list / --type.',
+  },
   render: {
     usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
     summary:

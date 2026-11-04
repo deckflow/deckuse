@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
@@ -385,6 +386,26 @@ const main = async (): Promise<void> => {
       const action = requireDefined(clean[0]);
       let ok = true;
 
+      if (action === 'agent-context') {
+        for (const flag of ['--format', '--scenario'])
+          if (clean.includes(flag) && !optionFrom(clean, flag))
+            throw new Error(flag + ' requires a value');
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse agent-context',
+          data: await agentContext({
+            ...(optionFrom(clean, '--format')
+              ? { format: optionFrom(clean, '--format') ?? 'pptx' }
+              : {}),
+            ...(workspaceOpt ? { workspace: workspaceOpt } : {}),
+            ...(optionFrom(clean, '--scenario')
+              ? { scenario: optionFrom(clean, '--scenario') ?? 'create' }
+              : {}),
+            includeSchema: clean.includes('--include-schema'),
+          }),
+        });
+        return;
+      }
       if (action === 'schema') {
         if (clean.includes('--type') && !optionFrom(clean, '--type'))
           throw new Error('--type requires a command type');

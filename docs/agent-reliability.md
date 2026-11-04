@@ -164,3 +164,31 @@ processes cannot share this memory; hosts should retain failed provider outcomes
 for the task rather than relaunching unchanged commands. Batch keeps one browser
 and isolated contexts; it does not relaunch per page. No --no-sandbox workaround
 or LibreOffice fallback is used. Catching an error cannot undo an OS crash dialog.
+
+## Task capability context
+
+`agent-context --format pptx --scenario create --json` returns static identity,
+adapter capabilities, skill resource locations, cache fingerprint, execution
+conventions, browser preflight and an executable smoke recipe. Use --include-schema
+for reachable task contracts in the same response, or retrieve them once later.
+JSON operation contracts are separate from recipe.cli shell syntax. Capability
+flags are taken from the same adapters as status; schemas do not override edition,
+format, protected-target or data restrictions. Chart creation without a new embedded
+workbook and conditional existing constant-cell updates remain distinct flags.
+
+--workspace reads only format/current revision from its manifest; it does not
+load object text or inventory or run validation/transaction recovery. Dynamic
+health is explicitly not-probed. Refresh revision, health, inventory and environment
+for each operation rather than caching them with the static fingerprint. Cache by
+binary path/build plus version/protocol/edition/format/scenario/fingerprint.
+The fingerprint includes actual task schemas/capabilities, so a changed build
+invalidates it even without a product version bump. No browser is launched or
+downloaded, and no document is created by this command.
+
+Measured deterministic smoke: one agent-context response with --include-schema
+provides the new/apply/validate/render/export command forms and operations. Tests
+execute new/apply/validate/export from it without extra help/schema calls; real
+render smoke is reported separately. This establishes legal commands, not model
+first-write accuracy or a measured task-time improvement. Older CLIs without
+agent-context use the same-version installed skill and targeted schema; do not
+retry unknown commands indefinitely.

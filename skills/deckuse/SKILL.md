@@ -9,7 +9,7 @@ description: Create, replicate, edit, populate, audit, preview or export PPTX an
 
 Use this installed skill directory, including [manifest.json](manifest.json), rather than online main documentation. Check `deckuse --version` once per installed binary/session. These workflows target CLI >= 1.7.0 (community). Older installations must upgrade or inspect targeted schema/help before using a step; never silently omit a preservation or verification gate.
 
-Cache discovered contracts keyed by actual binary path and version. If a capability snapshot is available in that binary, use its documented interface; otherwise use `schema --list --json` and targeted `schema --type TYPE --json` only for commands needed now. Do not assume a future snapshot API exists. Invalidate on version/path changes; query unknown fields before writing. Read only the selected scenario and modules needed for its operations.
+Cache discovered contracts keyed by actual binary path and version. Use `agent-context --format pptx --scenario create --json` (choose actual format/scenario, or pass `--workspace`). Add `--include-schema` once for task contracts. If this entry is absent in an older binary, use `schema --list --json` and targeted `schema --type TYPE --json` only for commands needed now. Do not assume a future snapshot API exists. Invalidate on version/path changes; query unknown fields before writing. Read only the selected scenario and modules needed for its operations.
 
 ## Select format, then scenario
 
