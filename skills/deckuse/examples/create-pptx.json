@@ -1,0 +1,8 @@
+[
+  { "type": "addSlide", "layout": "Blank", "name": "Introduction" },
+  { "type": "remove", "target": "slide:1" },
+  { "type": "addShape", "slide": 1, "shapeType": "rect", "name": "Background", "x": "0px", "y": "0px", "width": "100%", "height": "100%", "fill": { "color": "F8FAFC" } },
+  { "type": "addShape", "slide": 1, "shapeType": "text", "name": "Title", "x": "6%", "y": "8%", "width": "88%", "height": "80px", "blocks": [{ "text": "Introduction", "fontSize": 30, "bold": true, "textColor": "0F172A" }], "autofit": "resize" },
+  { "type": "addShape", "slide": 1, "shapeType": "text", "name": "Points", "x": "8%", "y": "32%", "width": "80%", "height": "220px", "blocks": [{ "text": "Preserve editable content", "fontSize": 20, "spaceAfter": 12 }, { "text": "Verify the exported document", "fontSize": 20, "spaceAfter": 12 }] },
+  { "type": "setProperties", "target": "slide:1/shape:Points", "properties": { "bullet": true, "paragraph.level": 0 } }
+]

@@ -1,11 +1,3 @@
-# Replicate PDF or image appearance into PPTX
+# Compatibility entry: replicate
 
-Input: visual PDF pages/screenshots/images, optionally an editable PPTX. Choose this only when reference appearance must be preserved; source material used just for narrative belongs to create. Output: editable PPTX plus page comparison and object coverage report.
-
-1. If PPTX source exists, inventory it and prefer bounded edits preserving native objects. Read edit-deck before modifying it. Otherwise preserve/hash references and use host PDF extraction/rasterization, OCR and image inspection tools. Deckuse does not import PDF or perform OCR; if these tools are unavailable, obtain readable reference content before reconstructing uncertain pages.
-2. Record each reference page's width/height and origin, text, object bounding boxes, reading/z order, colors, font family/size/weight, images and crop. Map coordinates proportionally to slide dimensions from the installed schema; convert reference units explicitly. Identify uncertain OCR and font substitutions for review.
-3. Classify objects: native text/shapes/tables/charts, reusable raster artwork, and unrecoverable content. If editability is required, never use a full-page screenshot as the completed slide. Explain necessary raster regions and seek missing data only where it affects reconstruction.
-4. Read operations only for the needed objects. Use create-deck's atomic Blank recipe for a new workspace, choose reference aspect ratio through supported schema, then batch native objects in reading/layer order with named targets. Reuse assets with deliberate crop; do not invent chart data inferred from pixels.
-5. Read verification-recovery. Validate, render each page, compare reference/output side by side at matching scale: geometry, text, font substitution, crop, color and layering. Iterate bounded changes. Count native editable objects separately from visual similarity; HTML similarity cannot prove PowerPoint pixel equivalence.
-
-Recovery: uncertain OCR/data needs source confirmation; unavailable fonts need explicit fallback and reflow review. Failed rendering must be diagnosed before claiming appearance verified. Deliver original references unchanged, independent PPTX, comparison findings and explicit unresolved visual/editability limitations.
+Read [the replicate workflow](../scenarios/replicate.md) and its required modules. This file preserves the previous packaged reference path. Load only that workflow, not all scenarios.

@@ -1,3 +1,3 @@
-# Edit an existing presentation
+# Compatibility entry: edit-deck
 
-Read [verification-recovery](verification-recovery.md) for the preservation workflow. Input: existing PPTX plus bounded changes; output: independent edited PPTX and change report. Inventory targets, dry-run a coherent apply batch, apply, then re-inventory and compare allowed changes against the no-edit baseline. Prefer duplicate plus bounded edits. Inspect chart data references before changing values. Fixed-length A1 constant ranges in embedded XLSX are synchronized with copy-on-write isolation. Formula dependencies, external links, range resizing and unrecognized data extensions are refused; do not bypass the refusal by hand-editing the cache. Verify original slides and shared media remain unchanged.
+Read [the edit workflow](../scenarios/edit.md) and its required modules. This file preserves the previous packaged reference path. Load only that workflow, not all scenarios.

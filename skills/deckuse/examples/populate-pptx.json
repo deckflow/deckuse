@@ -1,0 +1,3 @@
+[
+  { "type": "replaceText", "find": "{{customer}}", "replace": "Example customer", "regex": false }
+]

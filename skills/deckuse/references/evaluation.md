@@ -1,5 +1,0 @@
-# Router evaluation
-
-Run fixed routing-cases.json prompts against the installed skill in fresh model contexts. Record chosen scenario and loaded resources, clarifications, repeated help/schema calls, first legal write/attempts and delivered content/object/visual quality. Include an audit-then-authorized-edit task and a reference-image-plus-editable-source task; require preservation assessment before rebuilding. Ambiguous missing data should trigger a focused question, known input should not.
-
-Compare baseline and candidate with identical model, binary, inputs and tools. Report scenario accuracy, unnecessary resource loads and repeated probes separately from CLI checks. First legal write requires an actual validated command; artifact quality needs inventory and page review, not command exit alone. Do not execute writes for read-only cases. Automatic package/link checks do not establish model routing accuracy or native visual quality. Publish observed results and unavailable checks separately.

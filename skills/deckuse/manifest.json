@@ -1,44 +1,248 @@
 {
   "schemaVersion": 1,
-  "minimumCliVersion": "1.8.0",
+  "name": "deckuse",
+  "targetCli": "1.9.0 community",
   "entry": "SKILL.md",
   "scenarios": {
     "create": {
-      "formats": ["pptx", "docx"],
-      "resource": "references/create-deck.md"
+      "path": "scenarios/create.md",
+      "formats": [
+        "pptx",
+        "docx"
+      ],
+      "schemaTypes": [
+        "addSlide",
+        "remove",
+        "addShape",
+        "setProperties"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/typography-layout.md"
+      ],
+      "resource": "scenarios/create.md"
     },
     "replicate": {
-      "formats": ["pptx"],
-      "resource": "references/replicate.md"
+      "path": "scenarios/replicate.md",
+      "formats": [
+        "pptx"
+      ],
+      "schemaTypes": [
+        "addSlide",
+        "remove",
+        "addShape",
+        "setProperties",
+        "setTransform"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/typography-layout.md"
+      ],
+      "resource": "scenarios/replicate.md"
     },
     "edit": {
-      "formats": ["pptx", "docx"],
-      "resource": "references/edit-deck.md"
+      "path": "scenarios/edit.md",
+      "formats": [
+        "pptx",
+        "docx"
+      ],
+      "schemaTypes": [
+        "setText",
+        "setProperties",
+        "replaceText",
+        "setSlideLayout",
+        "duplicate"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/edit.md"
     },
     "populate-template": {
-      "formats": ["pptx"],
-      "resource": "references/populate-template.md"
+      "path": "scenarios/populate-template.md",
+      "formats": [
+        "pptx"
+      ],
+      "schemaTypes": [
+        "setText",
+        "replaceText",
+        "setProperties"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/populate-template.md"
     },
     "audit": {
-      "formats": ["pptx", "docx"],
-      "resource": "references/audit-deck.md"
+      "path": "scenarios/audit.md",
+      "formats": [
+        "pptx",
+        "docx"
+      ],
+      "schemaTypes": [
+        "status",
+        "inspect",
+        "list",
+        "get",
+        "validate"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/audit.md"
     },
     "preview-export": {
-      "formats": ["pptx", "docx"],
-      "resource": "references/preview-export.md"
+      "path": "scenarios/preview-export.md",
+      "formats": [
+        "pptx",
+        "docx"
+      ],
+      "schemaTypes": [
+        "status",
+        "export",
+        "validate"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/preview-export.md"
+    },
+    "create-doc": {
+      "path": "scenarios/create-doc.md",
+      "formats": [
+        "docx"
+      ],
+      "schemaTypes": [
+        "addParagraph",
+        "addTable",
+        "insertBreak"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md"
+      ],
+      "resource": "scenarios/create-doc.md"
+    },
+    "edit-doc": {
+      "path": "scenarios/edit-doc.md",
+      "formats": [
+        "docx"
+      ],
+      "schemaTypes": [
+        "setText",
+        "replaceText",
+        "setProperties",
+        "addParagraph"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/edit-doc.md"
+    },
+    "audit-doc": {
+      "path": "scenarios/audit-doc.md",
+      "formats": [
+        "docx"
+      ],
+      "schemaTypes": [
+        "status",
+        "inspect",
+        "list",
+        "get",
+        "validate"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/audit-doc.md"
+    },
+    "cli": {
+      "path": "scenarios/cli.md",
+      "formats": [
+        "pptx",
+        "docx"
+      ],
+      "schemaTypes": [
+        "status"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md"
+      ],
+      "resource": "scenarios/cli.md"
+    },
+    "preview-doc": {
+      "path": "scenarios/preview-doc.md",
+      "formats": [
+        "docx"
+      ],
+      "schemaTypes": [
+        "status",
+        "validate",
+        "export"
+      ],
+      "requiredModules": [
+        "modules/cli-context.md",
+        "modules/verification-recovery.md",
+        "modules/preservation.md"
+      ],
+      "resource": "scenarios/preview-doc.md"
     }
   },
+  "optionalModules": [
+    "modules/charts-tables.md",
+    "modules/typography-layout.md",
+    "modules/native-drawing.md",
+    "modules/quality-review.md",
+    "modules/pdf-reconstruction.md",
+    "modules/complex-edit.md",
+    "references/review.md"
+  ],
+  "examples": [
+    "examples/create-pptx.json",
+    "examples/edit-pptx.json",
+    "examples/populate-pptx.json",
+    "examples/create-docx.json",
+    "examples/native-blueprints.json"
+  ],
+  "scripts": [
+    "scripts/load_context.py"
+  ],
+  "legacyReferences": {
+    "references/create-deck.md": "scenarios/create.md",
+    "references/edit-deck.md": "scenarios/edit.md",
+    "references/audit-deck.md": "scenarios/audit.md",
+    "references/replicate.md": "scenarios/replicate.md",
+    "references/create-doc.md": "scenarios/create-doc.md",
+    "references/edit-doc.md": "scenarios/edit-doc.md",
+    "references/audit-doc.md": "scenarios/audit-doc.md"
+  },
+  "skillVersion": "1.5.0",
+  "minimumCliVersion": "1.8.0",
   "formatOverrides": {
     "docx": {
-      "create": "references/create-doc.md",
-      "edit": "references/edit-doc.md",
-      "audit": "references/audit-doc.md"
+      "create": "scenarios/create-doc.md",
+      "edit": "scenarios/edit-doc.md",
+      "audit": "scenarios/audit-doc.md",
+      "preview-export": "scenarios/preview-doc.md"
     }
   },
   "modules": [
-    "references/operations.md",
-    "references/verification-recovery.md",
+    "modules/cli-context.md",
+    "modules/verification-recovery.md",
     "references/review.md"
-  ],
-  "evaluation": ["routing-cases.json", "references/evaluation.md"]
+  ]
 }
