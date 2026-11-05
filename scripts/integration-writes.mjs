@@ -15,8 +15,9 @@
  *   --bin <path>           deckuse entry (default: dist/bin.js)
  *   --recursive            scan subdirectories for packages (dir mode only)
  *   --force                remove existing workspace before init
- *   --continue-on-error    keep going after a failed step / file
- *                          (directory scans already continue past unreadable packages)
+ *   --continue-on-error    keep going after a failed step inside one case.
+ *                          A failed package is always recorded; directory scans
+ *                          continue with the remaining files.
  *   --limit <n>            process at most n packages (dir mode only)
  *   --skip-export          omit final export
  *   --skip-new             omit bundled-template `deckuse new` bootstrap cases
@@ -35,7 +36,8 @@
  * (setSlideLayout / list layouts) and DOCX `--format docx` (paragraph/table flow).
  *
  * Directory mode runs each package in its own child process (concurrency =
- * availableParallelism()-2, minimum 1) so independent cases overlap.
+ * availableParallelism()-2, minimum 1) so independent cases overlap. A failed
+ * package is reported and the rest of the directory still runs.
  */
 
 import { spawn } from 'node:child_process';
@@ -298,7 +300,7 @@ Options:
   --bin <path>            deckuse bin.js (default: dist/bin.js)
   --recursive             include packages in subdirectories (dir mode)
   --force                 delete existing workspace before init
-  --continue-on-error     do not stop on first failure
+  --continue-on-error     after a failed step, keep running later steps in that case
   --limit <n>             max packages to process (dir mode)
   --skip-export           skip final export step
   --skip-new              skip deckuse new bootstrap cases (pptx + docx)
@@ -2332,32 +2334,27 @@ const processOneInWorker = (packagePath, options) =>
   });
 
 /**
- * Process items with a fixed worker pool. Stops scheduling new work when
- * `shouldStop` returns true (in-flight tasks still finish).
+ * Process every item with a fixed worker pool. A worker failure must be
+ * returned by `fn`; it does not cancel the remaining items.
  * @template T, R
  * @param {T[]} items
  * @param {number} concurrency
  * @param {(item: T, index: number) => Promise<R>} fn
- * @param {{ shouldStop?: (result: R) => boolean }} [opts]
- * @returns {Promise<(R | undefined)[]>}
+ * @returns {Promise<R[]>}
  */
-const mapPool = async (items, concurrency, fn, opts = {}) => {
-  /** @type {(R | undefined)[]} */
+const mapPool = async (items, concurrency, fn) => {
+  /** @type {R[]} */
   const results = Array.from({ length: items.length });
   let next = 0;
-  let stopping = false;
 
   const workers = Array.from(
     { length: Math.min(Math.max(1, concurrency), Math.max(1, items.length)) },
     async () => {
       for (;;) {
-        if (stopping) return;
         const index = next;
         next += 1;
         if (index >= items.length) return;
-        const result = await fn(items[index], index);
-        results[index] = result;
-        if (opts.shouldStop?.(result)) stopping = true;
+        results[index] = await fn(items[index], index);
       }
     },
   );
@@ -2630,44 +2627,34 @@ const main = async () => {
   /** @type {Awaited<ReturnType<typeof processOne>>[]} */
   const reports = [];
 
-  const isAbortingFailure = (report) => Boolean(report && !report.ok && !report.unreadable);
-
+  // One bad package is recorded and the scan continues. Exit status stays
+  // non-zero when any case fails. --continue-on-error only keeps later steps
+  // inside the failed case.
   if (mode === 'dir' && files.length > 1) {
-    const pooled = await mapPool(
-      files,
-      options.concurrency,
-      async (file) => {
-        try {
-          return await processOneInWorker(file, options);
-        } catch (cause) {
-          const message = cause instanceof Error ? cause.message : String(cause);
-          process.stdout.write(`\n=== ${basename(file)}\n  → FAIL  ${message}\n`);
-          return {
-            ok: false,
-            pptx: file,
-            source: file,
-            format: packageFormat(file),
-            workspace: join(dirname(file), basename(file, extname(file))),
-            error: message,
-            steps: [],
-            failedSteps: [],
-          };
-        }
-      },
-      {
-        shouldStop: (report) => !options.continueOnError && isAbortingFailure(report),
-      },
-    );
-    for (const report of pooled) {
-      if (report) reports.push(report);
-    }
+    const pooled = await mapPool(files, options.concurrency, async (file) => {
+      try {
+        return await processOneInWorker(file, options);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        process.stdout.write(`\n=== ${basename(file)}\n  → FAIL  ${message}\n`);
+        return {
+          ok: false,
+          pptx: file,
+          source: file,
+          format: packageFormat(file),
+          workspace: join(dirname(file), basename(file, extname(file))),
+          error: message,
+          steps: [],
+          failedSteps: [],
+        };
+      }
+    });
+    reports.push(...pooled);
   } else {
     for (const file of files) {
       try {
         const report = await processOne(file, options);
         reports.push(report);
-        // Unreadable corpus packages (truncated ZIP, etc.) should not abort a directory scan.
-        if (!options.continueOnError && isAbortingFailure(report)) break;
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         process.stdout.write(`  → FAIL  ${message}\n`);
@@ -2680,7 +2667,6 @@ const main = async () => {
           error: message,
           steps: [],
         });
-        if (!options.continueOnError) break;
       }
     }
   }
@@ -2706,9 +2692,6 @@ const main = async () => {
     try {
       const newReport = await processNewBootstrap(summaryDir, options);
       reports.push(newReport);
-      if (!newReport.ok && !options.continueOnError) {
-        // keep going to write summary; exit code set below
-      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       process.stdout.write(`  → FAIL  ${message}\n`);
