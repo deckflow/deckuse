@@ -1,6 +1,6 @@
 {
   "name": "@deckflow/deckuse",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "license": "AGPL-3.0",
   "type": "module",
   "private": false,
@@ -61,7 +61,7 @@
     "test:native-office": "node scripts/create-native-capability-fixture.mjs && node scripts/check-native-office.mjs"
   },
   "dependencies": {
-    "@deckflow/deck2html": "^0.6.0",
+    "@deckflow/deck2html": "^0.6.2",
     "@typesafe-ai/sdk": "^0.6.0",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
