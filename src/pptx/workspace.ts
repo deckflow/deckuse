@@ -2,13 +2,12 @@ import { timed } from '../timing.js';
 import { withWorkspaceTransaction } from '../workspace/transaction.js';
 import { withInitialization } from '../workspace/initialize.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { readFile, readdir, rename, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { WorkspaceManifest } from '../core/index.js';
 import { OpcArchive, snapshotArchive, type OpcArchive as OpcArchiveType } from '../opc/index.js';
 import {
   appendOperationCommit,
-  deckuseDir,
   indexPath,
   initGitRepo,
   readManifest,
@@ -139,10 +138,13 @@ export async function initializeWorkspace(
   index: IndexFile,
 ): Promise<WorkspaceManifest> {
   const root = resolve(workspace);
-  return withInitialization(root, async (staging) => {
-    const root = staging;
-    await mkdir(deckuseDir(root), { recursive: true });
-    await archive.writeDirectory(sourceDir(root), true);
+  return withInitialization(root, async (root, reserve) => {
+    await reserve('.deckuse', 'directory');
+    await reserve('source', 'directory');
+    await reserve('.git', 'directory');
+    await reserve('.gitignore', 'file');
+    await reserve('package.pptx', 'file');
+    await archive.writeDirectoryContents(sourceDir(root));
     const packed = await packPackage(root, archive, manifest);
     const next: WorkspaceManifest = {
       ...packed,

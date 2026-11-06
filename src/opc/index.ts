@@ -574,22 +574,26 @@ export class OpcArchive {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     }
-    // Keep source/[Content_Types].xml in sync with in-memory overrides so the
-    // next openDirectory() does not fall back to Default Extension="xml".
-    this.syncContentTypes();
     const temporary = `${destination}.${randomUUID()}.tmp`;
     try {
-      for (const part of this.parts.values()) {
-        const file = resolve(temporary, part.name.slice(1));
-        await mkdir(dirname(file), { recursive: true });
-        const data = isXmlPart(part) ? formatXmlBytes(part.data) : part.data;
-        await writeFile(file, data);
-      }
+      await this.writeDirectoryContents(temporary);
       await rm(destination, { recursive: true, force: true });
       await rename(temporary, destination);
     } catch (error) {
       await rm(temporary, { recursive: true, force: true });
       throw error;
+    }
+  }
+  /** Write in place. The caller must own this directory and handle failure cleanup. */
+  async writeDirectoryContents(path: string): Promise<void> {
+    // Keep source/[Content_Types].xml in sync with in-memory overrides so the
+    // next openDirectory() does not fall back to Default Extension="xml".
+    this.syncContentTypes();
+    for (const part of this.parts.values()) {
+      const file = resolve(path, part.name.slice(1));
+      await mkdir(dirname(file), { recursive: true });
+      const data = isXmlPart(part) ? formatXmlBytes(part.data) : part.data;
+      await writeFile(file, data);
     }
   }
   async writeFile(path: string, overwrite = false): Promise<void> {

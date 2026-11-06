@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, open, readdir, rename, rm, lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readdir, rm } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 export class WorkspaceNotEmptyError extends Error {
   constructor() {
@@ -9,10 +9,12 @@ export class WorkspaceNotEmptyError extends Error {
   }
 }
 
-/** Initialize privately, then publish only owned entries under a destination reservation. */
+type ReserveEntry = (name: string, kind: 'directory' | 'file') => Promise<string>;
+
+/** Write directly under a destination reservation; roll back only reserved entries. */
 export async function withInitialization<T>(
   root: string,
-  initialize: (staging: string) => Promise<T>,
+  initialize: (root: string, reserve: ReserveEntry) => Promise<T>,
 ): Promise<T> {
   await mkdir(root, { recursive: true });
   const marker = join(root, '.deckuse-init.lock');
@@ -23,32 +25,40 @@ export async function withInitialization<T>(
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new WorkspaceNotEmptyError();
     throw error;
   }
-  let staging: string | undefined;
-  const published: string[] = [];
+  const owned: string[] = [];
+  const reserve: ReserveEntry = async (name, kind) => {
+    if (
+      !name ||
+      basename(name) !== name ||
+      name === '.' ||
+      name === '..' ||
+      name === '.deckuse-init.lock'
+    )
+      throw new Error('Initialization entries must be top-level workspace paths');
+    const path = join(root, name);
+    try {
+      if (kind === 'directory') {
+        await mkdir(path);
+        owned.push(path);
+      } else {
+        const handle = await open(path, 'wx');
+        owned.push(path);
+        await handle.close();
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new WorkspaceNotEmptyError();
+      throw error;
+    }
+    return path;
+  };
   try {
     if ((await readdir(root)).some((entry) => entry !== '.deckuse-init.lock'))
       throw new WorkspaceNotEmptyError();
-    staging = await mkdtemp(join(root, '.deckuse-init-content-'));
-    const result = await initialize(staging);
-    for (const entry of await readdir(staging)) {
-      const destination = join(root, entry);
-      let present = false;
-      try {
-        await lstat(destination);
-        present = true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      if (present) throw new WorkspaceNotEmptyError();
-      await rename(join(staging, entry), destination);
-      published.push(destination);
-    }
-    return result;
+    return await initialize(root, reserve);
   } catch (error) {
-    for (const path of published) await rm(path, { recursive: true, force: true });
+    for (const path of owned.reverse()) await rm(path, { recursive: true, force: true });
     throw error;
   } finally {
-    if (staging) await rm(staging, { recursive: true, force: true });
     await lock.close();
     await rm(marker, { force: true });
   }

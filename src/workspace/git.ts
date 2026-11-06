@@ -34,7 +34,7 @@ const repoOpts = (workspace: string) => ({
 
 export const hasWorkspaceGitRepo = async (workspace: string): Promise<boolean> => {
   try {
-    await access(join(repoDir(workspace), '.git'));
+    await access(join(repoDir(workspace), '.git', 'HEAD'));
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
