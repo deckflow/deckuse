@@ -19,6 +19,7 @@ import {
   convertWithConfiguredBinary,
   ensureDeck2HtmlExecutable,
   converterFailure,
+  converterPreflight,
 } from './deck2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
@@ -459,6 +460,7 @@ export async function renderPages(
     throw new Error('Choose pages or all');
   if (options.scale !== undefined && (!Number.isFinite(options.scale) || options.scale <= 0))
     throw new Error('Invalid render scale');
+  if (!options.dependencies?.convert) await converterPreflight();
   const root = resolve(workspace);
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-batch-'));
   let browser: Browser | undefined;
