@@ -606,7 +606,9 @@ const addShapeCommandSchema = z
     ...commandBase,
     ...mutationBase,
     type: z.literal('addShape'),
-    slide: z.number().int().positive(),
+    slide: z
+      .union([z.number().int().positive(), z.string().min(1)])
+      .describe('1-based slide index or exact unique slide name'),
     shapeType: z.enum([
       'text',
       'rect',

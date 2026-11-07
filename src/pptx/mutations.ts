@@ -906,7 +906,15 @@ export async function mutate(
       }
     }
     const slides = index.elements.filter((item) => item.kind === 'slide');
-    const slide = slides[command.slide - 1];
+    const requestedSlide = command.slide;
+    const matches =
+      typeof requestedSlide === 'string'
+        ? slides.filter((item) => item.name === requestedSlide)
+        : [];
+    if (matches.length > 1)
+      return err('INVALID_COMMAND', `Slide name is ambiguous: ${String(requestedSlide)}`);
+    const slide = typeof requestedSlide === 'number' ? slides[requestedSlide - 1] : matches[0];
+    const slideNumber = slide ? slides.indexOf(slide) + 1 : 0;
     if (!slide)
       return err('TARGET_NOT_FOUND', `slide:${String(command.slide)} does not exist`, [], {
         target: `slide:${String(command.slide)}`,
@@ -979,7 +987,7 @@ export async function mutate(
           tableHeightMayClipDiagnostic({
             estimatedEmu: tableLayout.contentEmu,
             givenEmu: tableLayout.frameEmu,
-            target: `slide:${String(command.slide)}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
+            target: `slide:${String(slideNumber)}/shape:${attr(cNvPr(created), 'id') ?? '?'}`,
           }),
         );
       }
@@ -1060,8 +1068,8 @@ export async function mutate(
     return ok(
       {
         changed: true,
-        slides: [command.slide],
-        changedTargets: [`slide:${String(command.slide)}/shape:${id}`],
+        slides: [slideNumber],
+        changedTargets: [`slide:${String(slideNumber)}/shape:${id}`],
         changedParts: [slide.partUri],
         diagnostics,
         ...(tableLayout ? { layout: tableLayout } : {}),
