@@ -301,7 +301,7 @@ const chartDataDiagnostics = (
       details: { ...item },
     }));
 
-const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
+const validateArchiveImpl = (archive: OpcArchive, workspace?: string): Diagnostic[] => {
   const diagnostics: Diagnostic[] = validateReviewParts(archive, 'pptx');
   for (const part of archive.parts.keys())
     if (/^\/ppt\/slides\/[^/]+\.xml$/.test(part))
@@ -400,6 +400,9 @@ const validateArchive = (archive: OpcArchive, workspace?: string): Diagnostic[] 
 
   return diagnostics;
 };
+
+const validateArchive: typeof validateArchiveImpl = (...args) =>
+  timedSync('structural-validation', () => validateArchiveImpl(...args));
 
 const notesRepairHintExtra = (
   workspace: string,
@@ -887,7 +890,7 @@ export const pptxAdapter: FormatAdapter = {
             });
           }
         }
-        const manifest = await readManifest(workspace);
+        const manifest = await timed('revision-load', () => readManifest(workspace));
         if ((manifest.schemaVersion as string) !== '2.0' || !isIntegerRevision(manifest.revision)) {
           if (command.type === 'status') {
             return ok({

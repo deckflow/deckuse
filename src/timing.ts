@@ -28,3 +28,8 @@ export function timedSync<T>(phase: string, action: () => T): T {
     record(phase, start);
   }
 }
+
+/** Elapsed runtime startup and module loading before CLI dispatch. */
+export function recordCliStartup(): void {
+  record('cli-startup', 0);
+}

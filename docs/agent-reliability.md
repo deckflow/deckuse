@@ -251,3 +251,12 @@ like this and substitute the current revision and desired geometry.
 Run `deckuse apply --workspace ./ws --input ./corrections.json --expect-revision 2 --json`,
 then re-export to a new output and report path. Compare the affected findings
 and inspect the updated slide. A warning may describe intentional geometry.
+
+## Measure packed PPTX creation
+
+After building, run `node scripts/benchmark-packed-pptx.mjs ./packed-benchmark.json 8`.
+Use `12` for the larger fixture. The benchmark records a fresh-cache install and
+three process-cold runs, with separate context, creation, validation, first export
+and incremental export wall times. Set `DECKUSE_TIMINGS_FILE` to a writable JSONL
+path to collect nested CLI phase spans without changing stdout. Phase spans can
+overlap, and local measurements exclude host scheduling and visual review.
