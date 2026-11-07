@@ -13,7 +13,7 @@ import {
   RecoveryRequiredError,
   historyHealth,
 } from '../workspace/transaction.js';
-import { WorkspaceNotEmptyError } from '../workspace/initialize.js';
+import { initializationState, WorkspaceNotEmptyError } from '../workspace/initialize.js';
 import { auditVisuals } from './visual-audit.js';
 import { ChartDataError, verifyChartData, prepareChartData } from './chart-data.js';
 import { randomUUID } from 'node:crypto';
@@ -731,7 +731,11 @@ export const pptxAdapter: FormatAdapter = {
       // Normalize on import so validate / first writes are not blocked by pre-existing drift.
       if (command.pageSize) {
         try {
-          if (resolve(command.source) !== resolve(await assertDefaultPptxExists()))
+          if (
+            ![await assertDefaultPptxExists(), await assertDefaultPptxExists(true)].includes(
+              resolve(command.source),
+            )
+          )
             return err(
               'INVALID_COMMAND',
               'pageSize is only supported with the bundled blank template',
@@ -757,15 +761,35 @@ export const pptxAdapter: FormatAdapter = {
         metadata: { capabilities: pptxCapabilities },
       };
       const index = buildIndex(archive, workspace, rev);
-      const saved = await initializeWorkspace(workspace, archive, manifest, index);
-      return ok({
-        workspaceId: saved.workspaceId,
-        format: saved.format,
-        source: saved.source,
-        revision: saved.revision,
-        pageSize: describeSlideSize(archive),
-        elementCount: index.elements.length,
-      });
+      const cleanupWarnings: Diagnostic[] = [];
+      const saved = await initializeWorkspace(
+        workspace,
+        archive,
+        manifest,
+        index,
+        (path, cause) => {
+          cleanupWarnings.push({
+            severity: 'warning',
+            code: 'INIT_CLEANUP_FAILED',
+            message: String(cause),
+            details: { path },
+          });
+        },
+      );
+      return ok(
+        {
+          workspaceId: saved.workspaceId,
+          format: saved.format,
+          source: saved.source,
+          revision: saved.revision,
+          pageSize: describeSlideSize(archive),
+          elementCount: index.elements.length,
+          initializationState: cleanupWarnings.length
+            ? 'committed-with-cleanup-warning'
+            : 'committed',
+        },
+        cleanupWarnings,
+      );
     } catch (cause) {
       return err(
         cause instanceof WorkspaceNotEmptyError ? 'WORKSPACE_NOT_EMPTY' : 'IO_ERROR',
@@ -776,6 +800,13 @@ export const pptxAdapter: FormatAdapter = {
   async execute(command, context = {}) {
     const workspace = resolve(command.workspaceId);
     try {
+      const initialization = await initializationState(workspace);
+      if (initialization?.state === 'initialization-incomplete') {
+        return err('RECOVERY_REQUIRED', 'Workspace initialization is incomplete or locked.', [], {
+          details: initialization,
+          hint: 'Allow an active initializer to finish. If it has exited, preserve this directory and initialize a fresh workspace from the original input.',
+        });
+      }
       await access(resolve(workspace, '.deckuse'));
     } catch (cause) {
       return err(
@@ -876,7 +907,10 @@ export const pptxAdapter: FormatAdapter = {
 
         if (command.type === 'status') {
           const diagnostics = validateArchive(archive, workspace);
+          const initialization = await initializationState(workspace);
           return ok({
+            initializationState: initialization?.state ?? 'committed',
+            ...(initialization ? { initializationMarker: initialization.marker } : {}),
             workspaceId: workspace,
             format: manifest.format,
             revision: manifest.revision,
