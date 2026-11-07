@@ -17,15 +17,21 @@ Deckuse 是一款面向编程智能体的本地优先、模式驱动的 Office �
 
 目前已实现 PPTX 与 DOCX（**协议 2.0**）。XLSX、Keynote 和 Numbers 适配器会明确返回 `FORMAT_NOT_IMPLEMENTED`；它们尚不是受支持的编辑目标。Word 与 PPTX 共用工作区循环（`new --format docx`、`init`、`apply`、`validate`、`export`），寻址用 `body/p:N`、`bookmark:名称`、`para:<paraId>`，而不是幻灯片形状。`render --page` 仍只支持 PPTX。完整说明见 [README.md](README.md) 的 DOCX capabilities。
 
-## Agent Skill（请优先安装）
+## 在编程智能体中使用 Deckuse
 
-Deckuse 面向编程智能体。**使用 CLI 前，请先安装 Deckuse skill**——其中固化了 workspace 优先、批量 `apply`、语义寻址、单位制与常用配方；仅靠 README 很容易用错。
+[Deckuse skill](skills/deckuse/SKILL.md) 指导智能体编辑演示文稿和 Word 文档，CLI 执行实际的文档操作。
 
-- Skill 文件：[`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
-- Cursor（项目级）：复制或软链到 `.cursor/skills/deckuse/`
-- Cursor（个人级）：复制或软链到 `~/.cursor/skills/deckuse/`
+在使用智能体的项目目录中运行：
 
-需要 **CLI `deckuse >= 1.2.0`**。速查：[docs/agent-cookbook.md](docs/agent-cookbook.md)。
+```sh
+npx skills add deckflow/deckuse
+```
+
+按提示选择智能体和安装范围。项目级安装供当前项目使用，用户级安装可跨项目使用。手动安装时，将整个 `skills/deckuse/` 目录复制到智能体的技能目录。各工具的发现路径见[安装路径表](https://github.com/vercel-labs/skills/blob/main/docs/agents.md)。
+
+如果先装了 skill，运行 `deckuse --version` 检查 CLI。缺少 CLI 时，按[安装](#安装)一节操作。如果已经安装 CLI，想让智能体驱动 Deckuse 时，再运行上面的命令。需要固定版本时，从与 npm 包版本对应的发布标签安装 skill。
+
+两者就绪后，直接给智能体具体任务，例如“用 Deckuse 更新 `report.pptx` 的数字，并导出一份修订稿”。
 
 ## 为何选择 Deckuse
 
@@ -43,7 +49,7 @@ Deckuse 会尽可能保留未修改的 XML 和未知的包部件。它不是完�
 
 ## 安装
 
-要求：Node.js 18 或更高版本。
+需要 Node.js 20.19.0 或更高版本。
 
 ```sh
 npm install -g @deckflow/deckuse

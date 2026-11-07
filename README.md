@@ -20,15 +20,21 @@ This repository is the **community edition** (`edition=community`). See [docs/ed
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
-## Agent Skill (install first)
+## Use Deckuse with a coding agent
 
-Deckuse is agent-first. **Coding agents should install the Deckuse skill before using the CLI** — it encodes the workspace-first loop, batch `apply`, semantic addresses, units, and high-value recipes that are easy to get wrong from the README alone.
+The [Deckuse skill](skills/deckuse/SKILL.md) guides your agent through editing presentations and Word documents. The CLI performs the document operations.
 
-- Skill: [`skills/deckuse/SKILL.md`](skills/deckuse/SKILL.md)
-- Cursor (project): copy or symlink into `.cursor/skills/deckuse/`
-- Cursor (personal): copy or symlink into `~/.cursor/skills/deckuse/`
+Run this from the project where you use your agent:
 
-Requires **CLI `deckuse >= 1.2.0`**. Quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md).
+```sh
+npx skills add deckflow/deckuse
+```
+
+Select your agent and installation scope when prompted. Use project scope for the current project or user scope to make the skill available across projects. For manual installation, copy the full `skills/deckuse/` directory into your agent's skills directory. See the [agent directory reference](https://github.com/vercel-labs/skills/blob/main/docs/agents.md).
+
+If you installed the skill first, run `deckuse --version` to check whether the CLI is available. If it is missing, follow [Installation](#installation). If you already installed the CLI, use the command above when you want your agent to use Deckuse. For a version-pinned setup, install the skill from the release tag that matches your npm package version.
+
+Once both are available, ask your agent for a concrete task, such as “Use Deckuse to update the figures in `report.pptx` and export a revised copy.”
 
 ## Why Deckuse
 
@@ -60,7 +66,7 @@ and auditable:
 
 ## Installation
 
-Requirements: Node.js 18 or later.
+Requires Node.js 20.19.0 or later.
 
 ```sh
 npm install -g @deckflow/deckuse
