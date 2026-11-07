@@ -2,7 +2,7 @@
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
-import { access, readFile, realpath, stat } from 'node:fs/promises';
+import { access, open, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -1240,7 +1240,7 @@ const main = async (): Promise<void> => {
         if (!output) throw new Error('Usage: deckuse export <output.pptx>');
         const workspace = await findWorkspace(workspaceOpt);
         const fromPackage = takeFlag(clean, '--from-package');
-        ok = await execute('deckuse export', {
+        const command = {
           version: PROTOCOL_VERSION,
           type: 'export',
           profile: optionFrom(clean, '--profile') ?? 'structure',
@@ -1248,7 +1248,72 @@ const main = async (): Promise<void> => {
           output: resolve(output),
           ...(revisionOpt ? { revision: revisionOpt } : {}),
           ...(fromPackage ? { fromPackage: true } : {}),
-        });
+        };
+        const report = optionFrom(clean, '--report');
+        if (!report) {
+          if (clean.includes('--report')) throw new Error('--report requires a path');
+          ok = await execute('deckuse export', command);
+        } else {
+          const reportPath = resolve(report);
+          if (reportPath === command.output)
+            throw new Error('--report must differ from the export output');
+          const file = await open(reportPath, 'wx');
+          try {
+            const envelope = toEnvelope('deckuse export', await runCommand(command));
+            const data = envelope.data as
+              | {
+                  output?: string;
+                  revision?: string;
+                  valid?: boolean;
+                  diagnostics?: Diagnostic[];
+                  visual?: { diagnostics?: Diagnostic[] };
+                }
+              | undefined;
+            const diagnostics = new Map<string, Diagnostic>();
+            for (const finding of [
+              ...(data?.diagnostics ?? []),
+              ...(data?.visual?.diagnostics ?? []),
+              ...((envelope.error as { diagnostics?: Diagnostic[] } | undefined)?.diagnostics ??
+                []),
+            ])
+              diagnostics.set(JSON.stringify(finding), finding);
+            const counts: Record<string, number> = {};
+            for (const { code } of diagnostics.values()) counts[code] = (counts[code] ?? 0) + 1;
+            const summary = {
+              output: data?.output,
+              revision: data?.revision,
+              valid: data?.valid,
+              diagnosticCounts: counts,
+              reportPath,
+            };
+            try {
+              await file.writeFile(JSON.stringify(envelope, null, 2) + '\n');
+              await file.sync();
+              outputEnvelope({
+                ok: envelope.ok,
+                command: envelope.command,
+                ...(envelope.error
+                  ? { error: { code: envelope.error.code, message: envelope.error.message } }
+                  : {}),
+                data: summary,
+              });
+              ok = envelope.ok;
+            } catch (cause) {
+              outputEnvelope({
+                ok: false,
+                command: envelope.command,
+                error: {
+                  code: 'EXPORT_REPORT_WRITE_FAILED',
+                  message: cause instanceof Error ? cause.message : String(cause),
+                },
+                data: { ...summary, reportPath: undefined, attemptedReportPath: reportPath },
+              });
+              ok = false;
+            }
+          } finally {
+            await file.close();
+          }
+        }
       } else if (action === 'monitor') {
         const sub =
           clean[1] === 'start' || clean[1] === 'stop' || clean[1] === 'status'
