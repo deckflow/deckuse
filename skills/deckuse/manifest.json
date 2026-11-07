@@ -6,16 +6,8 @@
   "scenarios": {
     "create": {
       "path": "scenarios/create.md",
-      "formats": [
-        "pptx",
-        "docx"
-      ],
-      "schemaTypes": [
-        "addSlide",
-        "remove",
-        "addShape",
-        "setProperties"
-      ],
+      "formats": ["pptx", "docx"],
+      "schemaTypes": ["addSlide", "remove", "addShape", "setProperties"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -25,16 +17,8 @@
     },
     "replicate": {
       "path": "scenarios/replicate.md",
-      "formats": [
-        "pptx"
-      ],
-      "schemaTypes": [
-        "addSlide",
-        "remove",
-        "addShape",
-        "setProperties",
-        "setTransform"
-      ],
+      "formats": ["pptx"],
+      "schemaTypes": ["addSlide", "remove", "addShape", "setProperties", "setTransform"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -44,17 +28,8 @@
     },
     "edit": {
       "path": "scenarios/edit.md",
-      "formats": [
-        "pptx",
-        "docx"
-      ],
-      "schemaTypes": [
-        "setText",
-        "setProperties",
-        "replaceText",
-        "setSlideLayout",
-        "duplicate"
-      ],
+      "formats": ["pptx", "docx"],
+      "schemaTypes": ["setText", "setProperties", "replaceText", "setSlideLayout", "duplicate"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -64,14 +39,8 @@
     },
     "populate-template": {
       "path": "scenarios/populate-template.md",
-      "formats": [
-        "pptx"
-      ],
-      "schemaTypes": [
-        "setText",
-        "replaceText",
-        "setProperties"
-      ],
+      "formats": ["pptx"],
+      "schemaTypes": ["setText", "replaceText", "setProperties"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -81,17 +50,8 @@
     },
     "audit": {
       "path": "scenarios/audit.md",
-      "formats": [
-        "pptx",
-        "docx"
-      ],
-      "schemaTypes": [
-        "status",
-        "inspect",
-        "list",
-        "get",
-        "validate"
-      ],
+      "formats": ["pptx", "docx"],
+      "schemaTypes": ["status", "inspect", "list", "get", "validate"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -101,15 +61,8 @@
     },
     "preview-export": {
       "path": "scenarios/preview-export.md",
-      "formats": [
-        "pptx",
-        "docx"
-      ],
-      "schemaTypes": [
-        "status",
-        "export",
-        "validate"
-      ],
+      "formats": ["pptx", "docx"],
+      "schemaTypes": ["status", "export", "validate"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -119,31 +72,15 @@
     },
     "create-doc": {
       "path": "scenarios/create-doc.md",
-      "formats": [
-        "docx"
-      ],
-      "schemaTypes": [
-        "addParagraph",
-        "addTable",
-        "insertBreak"
-      ],
-      "requiredModules": [
-        "modules/cli-context.md",
-        "modules/verification-recovery.md"
-      ],
+      "formats": ["docx"],
+      "schemaTypes": ["addParagraph", "addTable", "insertBreak"],
+      "requiredModules": ["modules/cli-context.md", "modules/verification-recovery.md"],
       "resource": "scenarios/create-doc.md"
     },
     "edit-doc": {
       "path": "scenarios/edit-doc.md",
-      "formats": [
-        "docx"
-      ],
-      "schemaTypes": [
-        "setText",
-        "replaceText",
-        "setProperties",
-        "addParagraph"
-      ],
+      "formats": ["docx"],
+      "schemaTypes": ["setText", "replaceText", "setProperties", "addParagraph"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -153,16 +90,8 @@
     },
     "audit-doc": {
       "path": "scenarios/audit-doc.md",
-      "formats": [
-        "docx"
-      ],
-      "schemaTypes": [
-        "status",
-        "inspect",
-        "list",
-        "get",
-        "validate"
-      ],
+      "formats": ["docx"],
+      "schemaTypes": ["status", "inspect", "list", "get", "validate"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -172,28 +101,15 @@
     },
     "cli": {
       "path": "scenarios/cli.md",
-      "formats": [
-        "pptx",
-        "docx"
-      ],
-      "schemaTypes": [
-        "status"
-      ],
-      "requiredModules": [
-        "modules/cli-context.md"
-      ],
+      "formats": ["pptx", "docx"],
+      "schemaTypes": ["status"],
+      "requiredModules": ["modules/cli-context.md"],
       "resource": "scenarios/cli.md"
     },
     "preview-doc": {
       "path": "scenarios/preview-doc.md",
-      "formats": [
-        "docx"
-      ],
-      "schemaTypes": [
-        "status",
-        "validate",
-        "export"
-      ],
+      "formats": ["docx"],
+      "schemaTypes": ["status", "validate", "export"],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",
@@ -219,9 +135,7 @@
     "examples/native-blueprints.json",
     "examples/create-blank-pptx.json"
   ],
-  "scripts": [
-    "scripts/load_context.py"
-  ],
+  "scripts": ["scripts/load_context.py"],
   "legacyReferences": {
     "references/create-deck.md": "scenarios/create.md",
     "references/edit-deck.md": "scenarios/edit.md",
@@ -241,9 +155,5 @@
       "preview-export": "scenarios/preview-doc.md"
     }
   },
-  "modules": [
-    "modules/cli-context.md",
-    "modules/verification-recovery.md",
-    "references/review.md"
-  ]
+  "modules": ["modules/cli-context.md", "modules/verification-recovery.md", "references/review.md"]
 }
