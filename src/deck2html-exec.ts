@@ -1,3 +1,4 @@
+import { RenderFailure } from './render-browser.js';
 import { access, chmod, constants } from 'node:fs/promises';
 import deck2html from '@deckflow/deck2html';
 
@@ -61,3 +62,59 @@ export const convertWithConfiguredBinary: typeof deck2html.convert = async (inpu
     }),
   );
 };
+
+/** Identify a shared .NET bundle setup failure before treating it as a page error. */
+export function converterFailure(message: string): RenderFailure {
+  const extraction =
+    /bundle.{0,80}extract|extract.{0,80}bundle|DOTNET_BUNDLE_EXTRACT_BASE_DIR/i.test(message);
+  return new RenderFailure(
+    extraction ? 'RENDER_CONVERTER_EXTRACTION_FAILED' : 'RENDER_CONVERSION_FAILED',
+    message,
+    {
+      stage: extraction ? 'converter-extraction' : 'convert',
+      ...(extraction
+        ? {
+            retryable: false,
+            extractionBase: process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] ?? null,
+            hint: 'Verify the converter can create and commit files in its extraction directory under the host policy before retrying preview.',
+          }
+        : {}),
+    },
+  );
+}
+
+/** Run the selected binary through runtime startup without converting user content. */
+export async function converterPreflight() {
+  const binary = process.env['DECKUSE_DECK2HTML_BINARY'] ?? deck2html.getBinaryPath();
+  const { execFile } = await import('node:child_process');
+  const { resolve } = await import('node:path');
+  await ensureDeck2HtmlExecutable();
+  const version = await new Promise<string>((done, reject) => {
+    execFile(
+      resolve(binary),
+      ['--version'],
+      { timeout: 5000, maxBuffer: 65536, killSignal: 'SIGKILL' },
+      (error, stdout, stderr) => {
+        if (error) {
+          const message = stderr.trim() || error.message;
+          const failure = converterFailure(message);
+          reject(
+            failure.code === 'RENDER_CONVERTER_EXTRACTION_FAILED'
+              ? failure
+              : new RenderFailure('RENDER_CONVERTER_STARTUP_FAILED', message, {
+                  stage: 'converter-startup',
+                }),
+          );
+        } else done(stdout.trim());
+      },
+    );
+  });
+  return {
+    binary,
+    version,
+    extractionBase: process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] ?? null,
+    extractionSource: process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR']
+      ? 'explicit'
+      : 'runtime-default',
+  };
+}

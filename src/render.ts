@@ -15,7 +15,11 @@ import { launchRenderBrowser, RenderFailure } from './render-browser.js';
 import type { Diagnostic } from './core/index.js';
 import { OpcArchive } from './opc/index.js';
 import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
-import { convertWithConfiguredBinary, ensureDeck2HtmlExecutable } from './deck2html-exec.js';
+import {
+  convertWithConfiguredBinary,
+  ensureDeck2HtmlExecutable,
+  converterFailure,
+} from './deck2html-exec.js';
 
 const PACKAGE_PPTX = 'package.pptx';
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 } as const;
@@ -244,11 +248,7 @@ const renderPageSnapshot = async (
       }),
     );
     if (result.exitCode !== 0) {
-      throw new RenderFailure(
-        'RENDER_CONVERSION_FAILED',
-        result.stderr || 'deck2html conversion failed',
-        { stage: 'convert' },
-      );
+      throw converterFailure(result.stderr || 'deck2html conversion failed');
     }
 
     const indexHtmlPath = resolve(result.indexHtmlPath);
@@ -493,7 +493,7 @@ export async function renderPages(
           { output: htmlDir },
         );
         if (converted.exitCode !== 0)
-          throw new Error(converted.stderr || 'deck2html conversion failed');
+          throw converterFailure(converted.stderr || 'deck2html conversion failed');
         const entry = resolve(converted.indexHtmlPath);
         const entryRelative = relative(htmlDir, entry);
         if (entryRelative === '..' || entryRelative.startsWith(`..${sep}`))
@@ -548,6 +548,8 @@ export async function renderPages(
           result: { ...result, revision: manifest.revision, inputSha256: sha },
         });
       } catch (cause) {
+        if (cause instanceof RenderFailure && cause.code === 'RENDER_CONVERTER_EXTRACTION_FAILED')
+          throw cause;
         results.push({
           page,
           ok: false,

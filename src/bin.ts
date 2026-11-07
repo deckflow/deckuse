@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { converterPreflight } from './deck2html-exec.js';
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
@@ -1438,7 +1439,11 @@ const main = async (): Promise<void> => {
       } else if (action === 'render') {
         if (clean.includes('--preflight')) {
           try {
-            outputEnvelope({ ok: true, command: 'deckuse render', data: await browserPreflight() });
+            outputEnvelope({
+              ok: true,
+              command: 'deckuse render',
+              data: { ...(await browserPreflight()), converter: await converterPreflight() },
+            });
           } catch (cause) {
             outputEnvelope({
               ok: false,
