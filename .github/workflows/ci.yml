@@ -19,4 +19,5 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm test:agent-package
       - run: pnpm check:no-commercial-leak

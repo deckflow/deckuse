@@ -164,6 +164,9 @@ export async function agentContext(options: {
       minimumCliVersion: manifest.minimumCliVersion,
       scenario: manifest.formatOverrides[format]?.[scenario] ?? workflow.resource,
       modules: manifest.modules,
+      ...(format === 'pptx' && scenario === 'create'
+        ? { example: 'skills/deckuse/examples/create-pptx.json' }
+        : {}),
     },
     cache: {
       staticKey: [version, PROTOCOL_VERSION, EDITION, format, scenario, fingerprint],

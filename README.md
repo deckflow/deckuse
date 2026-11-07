@@ -20,6 +20,22 @@ This repository is the **community edition** (`edition=community`). See [docs/ed
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
+## Create an editable PPTX from the installed example
+
+Run this in a fresh directory with a writable npm cache. The installed binary and example come from the same package version.
+
+```sh
+npm install --cache ./.npm-cache @deckflow/deckuse
+deckuse_cli=./node_modules/.bin/deckuse
+"$deckuse_cli" agent-context --format pptx --scenario create --include-schema --json
+"$deckuse_cli" new ./example-workspace --json
+"$deckuse_cli" apply --workspace ./example-workspace --input ./node_modules/@deckflow/deckuse/skills/deckuse/examples/create-pptx.json --json
+"$deckuse_cli" validate --workspace ./example-workspace --json
+"$deckuse_cli" export ./example.pptx --workspace ./example-workspace --json
+```
+
+The example contains CLI apply operations. The context response's `data.contracts` describes protocol commands, which include workspace and version fields. Export and structural validation work without a browser. For optional preview, use `render --preflight --json` to check converter and browser setup.
+
 ## Use Deckuse with a coding agent
 
 The [Deckuse skill](skills/deckuse/SKILL.md) guides your agent through editing presentations and Word documents. The CLI performs the document operations.
