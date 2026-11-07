@@ -215,3 +215,39 @@ unknown and nativeVerification unverified even when PNG generation succeeds.
 Check chosen/fallback fonts on the renderer and Office hosts, inspect affected
 pages and perform native review when required. Font availability, glyph coverage,
 DOM completeness, screenshot success and visual approval are separate states.
+
+## Apply reviewed layout corrections to an existing revision
+
+Read `validate --render --json` or `export --report ./layout.json --json`. Layout
+findings include `details.target` (or both `details.targets` for overlap) in
+the same `slide:N/shape:ID` syntax accepted by writes. Bounds and height excess
+are in EMU. Overlap width and height are in EMU and area is in square EMU.
+`heuristic: true` indicates estimated overflow or overlap that needs review.
+
+For example, after confirming the targets in the current report, save a batch
+like this and substitute the current revision and desired geometry.
+
+```json
+[
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:3",
+    "properties": { "insets": { "top": "4px", "bottom": "4px" } }
+  },
+  {
+    "type": "xfrmSet",
+    "target": "slide:1/shape:3",
+    "height": "130px"
+  },
+  {
+    "type": "xfrmSet",
+    "target": "slide:1/shape:4",
+    "x": "30px",
+    "y": "250px"
+  }
+]
+```
+
+Run `deckuse apply --workspace ./ws --input ./corrections.json --expect-revision 2 --json`,
+then re-export to a new output and report path. Compare the affected findings
+and inspect the updated slide. A warning may describe intentional geometry.
