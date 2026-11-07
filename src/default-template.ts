@@ -22,13 +22,15 @@ export const assertDefaultDocxExists = async (): Promise<string> => {
   }
   return path;
 };
-export const assertDefaultPptxExists = async (): Promise<string> => {
-  const path = resolveDefaultPptxPath();
+export const assertDefaultPptxExists = async (blank = false): Promise<string> => {
+  const path = blank
+    ? join(dirname(resolveDefaultPptxPath()), 'blank.pptx')
+    : resolveDefaultPptxPath();
   try {
     await access(path);
   } catch {
     throw new Error(
-      `Bundled default template missing: ${path}. Reinstall this deckuse package or restore assets/default.pptx.`,
+      `Bundled default template missing: ${path}. Reinstall this deckuse package or restore the bundled PPTX asset.`,
     );
   }
   return path;

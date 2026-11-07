@@ -216,7 +216,8 @@
     "examples/edit-pptx.json",
     "examples/populate-pptx.json",
     "examples/create-docx.json",
-    "examples/native-blueprints.json"
+    "examples/native-blueprints.json",
+    "examples/create-blank-pptx.json"
   ],
   "scripts": [
     "scripts/load_context.py"

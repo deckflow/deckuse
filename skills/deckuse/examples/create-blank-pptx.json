@@ -1,0 +1,25 @@
+[
+  { "type": "addSlide", "layout": "Blank", "name": "Details" },
+  {
+    "type": "addShape",
+    "slide": "Blank starter",
+    "shapeType": "text",
+    "name": "Title",
+    "x": "1in",
+    "y": "1in",
+    "width": "8in",
+    "height": "1in",
+    "text": "Introduction"
+  },
+  {
+    "type": "addShape",
+    "slide": "Details",
+    "shapeType": "text",
+    "name": "Title",
+    "x": "1in",
+    "y": "1in",
+    "width": "8in",
+    "height": "1in",
+    "text": "Editable details"
+  }
+]

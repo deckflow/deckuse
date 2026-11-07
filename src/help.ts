@@ -107,6 +107,7 @@ Notes:
   <workspace/>              Destination directory (must be absent or empty)
 
 Options:
+  --blank                  Start with one empty Blank-layout PPTX slide
   --format pptx|docx        Template format (default: pptx)
   --width / --height        PPTX canvas lengths; supply both, 1–56 inches
   --unit                   Unit for bare numeric dimensions; no percentages

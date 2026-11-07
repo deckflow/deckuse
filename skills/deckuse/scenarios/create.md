@@ -20,3 +20,16 @@ Copy/adapt the bundled JSON into the task's `ops.json`; do not edit installed sk
 5. For diagrams, quantitative charts and tables, load [Native drawing](../modules/native-drawing.md) and adapt its executable object recipes rather than defaulting to screenshots or many unrelated rectangles.
 6. Check exact page count, expected title/text and native object inventory. Validate, export, batch-render and inspect every delivered page using [Quality review](../modules/quality-review.md). Check Chinese line endings and chart legend/value association even when diagnostics are empty. Fix diagnosed content/geometry in another bounded batch. Keep heuristic warnings distinct from visual defects.
 7. Deliver the PPTX and report the actual verification states, selected font strategy and remaining native review. Do not use an entire-slide bitmap as an editable design substitute.
+
+### Start with a blank slide
+
+Use the [two-slide operations](../examples/create-blank-pptx.json) with a blank starter.
+
+```sh
+deckuse new ./blank-example --blank --json
+deckuse apply --workspace ./blank-example --input ./create-blank-pptx.json --json
+deckuse validate --workspace ./blank-example --json
+deckuse export ./blank-example.pptx --workspace ./blank-example --json
+```
+
+The first slide is named `Blank starter`. Give each added slide a unique name and use it as the `slide` value in `addShape` operations. The name is resolved against the live batch index, so inserts before that slide do not change the destination. Numeric indexes remain supported.

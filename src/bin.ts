@@ -552,11 +552,13 @@ const main = async (): Promise<void> => {
           source: resolve(source),
         });
       } else if (action === 'new') {
+        const blank = takeFlag(clean, '--blank');
         const format = (optionFrom(clean, '--format') ?? 'pptx').toLowerCase();
         const workspace = workspaceOpt ?? positionalArg(clean);
         if (!workspace) throw new Error('Usage: deckuse new <workspace/> [--format pptx|docx]');
         if (format !== 'pptx' && format !== 'docx')
           throw new Error('Usage: deckuse new <workspace/> [--format pptx|docx]');
+        if (blank && format !== 'pptx') throw new Error('--blank requires --format pptx');
         const width = optionFrom(clean, '--width'),
           height = optionFrom(clean, '--height');
         const unit = optionFrom(clean, '--unit');
@@ -572,7 +574,9 @@ const main = async (): Promise<void> => {
           return unit ? value + unit : value;
         };
         const source =
-          format === 'docx' ? await assertDefaultDocxExists() : await assertDefaultPptxExists();
+          format === 'docx'
+            ? await assertDefaultDocxExists()
+            : await assertDefaultPptxExists(blank);
         ok = await execute('deckuse new', {
           version: PROTOCOL_VERSION,
           type: 'init',
