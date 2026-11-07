@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { recoverPptxExport } from './pptx/export-recovery.js';
 import { converterPreflight } from './deck2html-exec.js';
+import { recordCliStartup, timed, timedSync } from './timing.js';
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
@@ -1125,11 +1126,13 @@ const main = async (): Promise<void> => {
       } else if (action === 'apply') {
         const input = optionFrom(clean, '--input') ?? '-';
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
-        const raw = input === '-' ? await readStdin() : await readFile(resolve(input), 'utf8');
+        const raw = await timed('input-read', () =>
+          input === '-' ? readStdin() : readFile(resolve(input), 'utf8'),
+        );
         let values: unknown[] | undefined;
         let wrappedOperations: unknown[] | undefined;
         try {
-          const parsed = JSON.parse(raw) as unknown;
+          const parsed = timedSync('input-parse', () => JSON.parse(raw) as unknown);
           if (
             typeof parsed === 'object' &&
             parsed !== null &&
@@ -1141,10 +1144,12 @@ const main = async (): Promise<void> => {
             values = Array.isArray(parsed) ? parsed : [parsed];
           }
         } catch {
-          values = raw
-            .split(/\r?\n/)
-            .filter(Boolean)
-            .map((line) => JSON.parse(line) as unknown);
+          values = timedSync('input-parse-jsonl', () =>
+            raw
+              .split(/\r?\n/)
+              .filter(Boolean)
+              .map((line) => JSON.parse(line) as unknown),
+          );
         }
 
         const extras = await mutationExtras(workspace);
@@ -1638,4 +1643,5 @@ const main = async (): Promise<void> => {
   }
 };
 
+recordCliStartup();
 void main();
