@@ -1,6 +1,6 @@
 {
   "name": "@deckflow/deckuse",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "license": "AGPL-3.0",
   "type": "module",
   "private": false,
