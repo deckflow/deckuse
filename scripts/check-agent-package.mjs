@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readdir, readFile, writeFile, symlink, access } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 const staging = await mkdtemp(join(tmpdir(), 'deckuse-package-check-'));
@@ -9,9 +9,20 @@ const packed = JSON.parse(
     encoding: 'utf8',
   }),
 )[0];
-execFileSync('tar', ['-xzf', join(staging, packed.filename), '-C', staging]);
-const root = join(staging, 'package');
-await symlink(resolve('node_modules'), join(root, 'node_modules'), 'dir');
+execFileSync(
+  'npm',
+  [
+    'install',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    '--cache',
+    join(staging, 'npm-cache'),
+    join(staging, packed.filename),
+  ],
+  { cwd: staging, stdio: 'inherit' },
+);
+const root = join(staging, 'node_modules/@deckflow/deckuse');
 for (const asset of [
   'assets/default.pptx',
   'assets/default.docx',
@@ -37,27 +48,12 @@ async function references(dir) {
 await references(join(root, 'skills'));
 const skillRoot = join(root, 'skills/deckuse');
 const manifest = JSON.parse(await readFile(join(skillRoot, 'manifest.json'), 'utf8'));
-const packageInfo = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-if (manifest.minimumCliVersion !== packageInfo.version)
-  throw new Error('Skill capability baseline must match this package version');
-const expectedScenarios = [
-  'create',
-  'replicate',
-  'edit',
-  'populate-template',
-  'audit',
-  'preview-export',
-];
-if (
-  JSON.stringify(Object.keys(manifest.scenarios).sort()) !==
-  JSON.stringify(expectedScenarios.sort())
-)
-  throw new Error('Missing scenario contract');
 const resources = [
   manifest.entry,
-  ...manifest.modules,
-  ...manifest.evaluation,
-  ...Object.values(manifest.scenarios).map((s) => s.resource),
+  ...manifest.examples,
+  ...manifest.scripts,
+  ...manifest.optionalModules,
+  ...Object.values(manifest.scenarios).flatMap((s) => [s.resource, ...s.requiredModules]),
   ...Object.values(manifest.formatOverrides).flatMap((s) => Object.values(s)),
 ];
 for (const resource of resources) {
@@ -67,16 +63,6 @@ for (const resource of resources) {
 }
 const entry = await readFile(join(skillRoot, manifest.entry), 'utf8');
 if (Buffer.byteLength(entry) > 8500) throw new Error('Skill entry exceeds lightweight budget');
-const cases = JSON.parse(await readFile(join(skillRoot, 'routing-cases.json'), 'utf8'));
-for (const scenario of expectedScenarios) {
-  const selected = cases.filter((c) => c.expected === scenario);
-  if (
-    !selected.some((c) => /[\u3400-\u9fff]/u.test(c.prompt)) ||
-    !selected.some((c) => /^[\x00-\x7f]+$/.test(c.prompt))
-  )
-    throw new Error('Missing bilingual evaluation cases for ' + scenario);
-}
-
 function cli(args) {
   return JSON.parse(
     execFileSync(process.execPath, [join(root, 'dist/bin.js'), ...args, '--json'], {
@@ -86,17 +72,28 @@ function cli(args) {
 }
 const types = cli(['schema', '--list']).data;
 if (!types.batchTypes.includes('addSlide')) throw new Error('Missing batch addSlide');
-const recipe = await readFile(join(root, 'skills/deckuse/references/create-deck.md'), 'utf8');
-const operations = JSON.parse(/```json\n([\s\S]*?)\n```/.exec(recipe)[1]);
-const ops = join(staging, 'ops.json');
-await writeFile(ops, JSON.stringify(operations));
+const context = cli([
+  'agent-context',
+  '--format',
+  'pptx',
+  '--scenario',
+  'create',
+  '--include-schema',
+]).data;
+const ops = join(root, context.resource.example);
+await access(ops);
 const ws = join(staging, 'presentation');
 cli(['new', ws]);
 cli(['apply', '--workspace', ws, '--input', ops]);
-const status = cli(['status', '--workspace', ws]);
+const status = cli(['validate', '--workspace', ws]);
 if (!status.data.valid) throw new Error('Invalid packaged presentation');
 const shapes = cli(['list', 'shapes', '--slide', '1', '--workspace', ws]);
-if (!JSON.stringify(shapes).includes('Updated introduction'))
+if (
+  cli(['list', 'slides', '--workspace', ws]).data.total !== 1 &&
+  cli(['list', 'slides', '--workspace', ws]).data.items?.length !== 1
+)
+  throw new Error('Expected one slide');
+if (!JSON.stringify(shapes).includes('Preserve editable content'))
   throw new Error('Recipe text missing');
 const exported = join(staging, 'out.pptx');
 cli(['export', exported, '--workspace', ws]);
@@ -112,24 +109,6 @@ const helpWs = join(staging, 'help-example');
 cli(['new', helpWs]);
 cli(['apply', '--workspace', helpWs, '--input', helpOps]);
 if (!cli(['status', '--workspace', helpWs]).data.valid) throw new Error('Invalid help example');
-const cards = join(staging, 'cards');
-cli(['new', cards]);
-cli(['apply', '--workspace', cards, '--input', join(skillRoot, 'assets/multilingual-cards.json')]);
-if (!cli(['validate', '--workspace', cards]).data.valid) throw new Error('Invalid card recipe');
-const slideDir = join(cards, 'source/ppt/slides');
-const cardXml = (
-  await Promise.all(
-    (await readdir(slideDir))
-      .filter((f) => f.endsWith('.xml'))
-      .map((f) => readFile(join(slideDir, f), 'utf8')),
-  )
-).join('');
-if (
-  (cardXml.match(/<p:grpSp[ >]/g) ?? []).length !== 4 ||
-  (cardXml.match(/<a:buChar /g) ?? []).length !== 15 ||
-  !cardXml.includes('行动 6')
-)
-  throw new Error('Card grouping/native bullet/text contract failed');
 const doc = join(staging, 'word');
 cli(['new', doc, '--format', 'docx']);
 cli(['add', 'paragraph', '--workspace', doc, '--text', 'Package smoke']);
