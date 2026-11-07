@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { recoverPptxExport } from './pptx/export-recovery.js';
 import { converterPreflight } from './deck2html-exec.js';
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
@@ -114,6 +115,7 @@ const toEnvelope = (
         message: result.error.message,
         ...(result.error.target ? { target: result.error.target } : {}),
         ...(result.error.hint ? { hint: result.error.hint } : {}),
+        ...(result.error.details ? { details: result.error.details } : {}),
         ...(result.error.diagnostics?.length
           ? { diagnostics: result.error.diagnostics }
           : result.diagnostics.length
@@ -1243,6 +1245,17 @@ const main = async (): Promise<void> => {
       } else if (action === 'export') {
         const output = clean[1];
         if (!output) throw new Error('Usage: deckuse export <output.pptx>');
+        const recoveryReport = optionFrom(clean, '--recover-report');
+        if (recoveryReport) {
+          const envelope: unknown = JSON.parse(await readFile(recoveryReport, 'utf8'));
+          outputEnvelope({
+            ok: true,
+            command: 'deckuse export',
+            data: await recoverPptxExport(envelope, output),
+          });
+          return;
+        }
+        if (clean.includes('--recover-report')) throw new Error('--recover-report requires a path');
         const workspace = await findWorkspace(workspaceOpt);
         const fromPackage = takeFlag(clean, '--from-package');
         const command = {
@@ -1268,6 +1281,7 @@ const main = async (): Promise<void> => {
             const data = envelope.data as
               | {
                   output?: string;
+                  state?: string;
                   revision?: string;
                   valid?: boolean;
                   diagnostics?: Diagnostic[];
@@ -1285,9 +1299,10 @@ const main = async (): Promise<void> => {
             const counts: Record<string, number> = {};
             for (const { code } of diagnostics.values()) counts[code] = (counts[code] ?? 0) + 1;
             const summary = {
-              output: data?.output,
-              revision: data?.revision,
-              valid: data?.valid,
+              output: data?.output ?? envelope.error?.details?.['output'],
+              state: data?.state ?? envelope.error?.details?.['state'],
+              revision: data?.revision ?? envelope.error?.details?.['revision'],
+              valid: data?.valid ?? envelope.error?.details?.['valid'],
               diagnosticCounts: counts,
               reportPath,
             };
@@ -1298,7 +1313,13 @@ const main = async (): Promise<void> => {
                 ok: envelope.ok,
                 command: envelope.command,
                 ...(envelope.error
-                  ? { error: { code: envelope.error.code, message: envelope.error.message } }
+                  ? {
+                      error: {
+                        code: envelope.error.code,
+                        message: envelope.error.message,
+                        details: envelope.error.details,
+                      },
+                    }
                   : {}),
                 data: summary,
               });

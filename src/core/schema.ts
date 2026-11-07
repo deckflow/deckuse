@@ -1198,6 +1198,7 @@ export interface DeckuseError {
   diagnostics?: Diagnostic[];
   retryable?: boolean;
   cause?: unknown;
+  details?: Record<string, unknown>;
   target?: string;
   hint?: string;
 }
@@ -1213,7 +1214,7 @@ export const err = <T = never>(
   code: ErrorCode,
   message: string,
   diagnostics: Diagnostic[] = [],
-  extra: { target?: string; hint?: string } = {},
+  extra: { target?: string; hint?: string; details?: Record<string, unknown> } = {},
 ): Result<T> => ({
   ok: false,
   error: {
@@ -1222,6 +1223,7 @@ export const err = <T = never>(
     ...(diagnostics.length > 0 ? { diagnostics } : {}),
     ...(extra.target ? { target: extra.target } : {}),
     ...(extra.hint ? { hint: extra.hint } : {}),
+    ...(extra.details ? { details: extra.details } : {}),
   },
   diagnostics,
 });

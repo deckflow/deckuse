@@ -1,3 +1,4 @@
+import { exportDigest } from './export-recovery.js';
 import { tableMergeDiagnostics } from './table.js';
 import { assertChartProperties } from './properties.js';
 import { assertDefaultPptxExists } from '../default-template.js';
@@ -16,7 +17,7 @@ import { WorkspaceNotEmptyError } from '../workspace/initialize.js';
 import { auditVisuals } from './visual-audit.js';
 import { ChartDataError, verifyChartData, prepareChartData } from './chart-data.js';
 import { randomUUID } from 'node:crypto';
-import { access, copyFile, rename, rm } from 'node:fs/promises';
+import { access, copyFile, readFile, rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
   err,
@@ -1082,16 +1083,20 @@ export const pptxAdapter: FormatAdapter = {
             exportRevision = packed.manifest.revision;
             repacked = true;
           }
-          const temporary = `${output}.${randomUUID()}.tmp`;
+          const invocationId = randomUUID();
+          const temporary = `${output}.${invocationId}.tmp`;
+          const cleanup = async () => {
+            try {
+              await rm(temporary, { force: true });
+              return undefined;
+            } catch (cause) {
+              return `Could not remove export staging file ${temporary}: ${String(cause)}`;
+            }
+          };
           try {
             await copyFile(packagePath(workspace), temporary);
-            let exported: OpcArchive;
-            try {
-              exported = await OpcArchive.openFile(temporary);
-            } catch (cause) {
-              await rm(temporary, { force: true });
-              throw cause;
-            }
+            const bytes = await readFile(temporary);
+            const exported = await OpcArchive.open(bytes);
             const diagnostics = validateArchive(exported, workspace);
             const chartData = await verifyChartData(exported);
             const visual = auditVisuals(exported);
@@ -1101,19 +1106,42 @@ export const pptxAdapter: FormatAdapter = {
               diagnostics.push(...visual.diagnostics.filter((d) => d.severity === 'error'));
               diagnostics.push(...chartDataDiagnostics(chartData, true));
               if (diagnostics.some((d) => d.severity === 'error')) {
-                await rm(temporary, { force: true });
+                const cleanupWarning = await cleanup();
                 return err(
                   'VALIDATION_FAILED',
                   'Delivery validation failed; output was not replaced',
                   diagnostics,
+                  {
+                    details: {
+                      state: 'no-usable-artifact',
+                      output,
+                      revision: exportRevision,
+                      invocationId,
+                      cleanupWarning,
+                    },
+                  },
                 );
               }
             }
+            const valid = !diagnostics.some((d) => d.severity === 'error');
             try {
               await rename(temporary, output);
-            } finally {
-              await rm(temporary, { force: true });
+            } catch (cause) {
+              const cleanupWarning = valid ? undefined : await cleanup();
+              return err('IO_ERROR', `Could not publish export: ${String(cause)}`, diagnostics, {
+                details: {
+                  state: valid ? 'validated-staging' : 'no-usable-artifact',
+                  output,
+                  revision: exportRevision,
+                  invocationId,
+                  ...(valid
+                    ? { stagingPath: temporary, sha256: exportDigest(bytes), valid: true }
+                    : {}),
+                  cleanupWarning,
+                },
+              });
             }
+            const cleanupWarning = await cleanup();
 
             return ok({
               output,
@@ -1122,11 +1150,23 @@ export const pptxAdapter: FormatAdapter = {
               fromPackage,
               chartData,
               visual,
-              valid: !diagnostics.some((d) => d.severity === 'error'),
+              valid,
+              state: 'committed',
+              invocationId,
+              ...(cleanupWarning ? { warnings: [cleanupWarning] } : {}),
               diagnostics,
             });
-          } finally {
-            await rm(temporary, { force: true });
+          } catch (cause) {
+            const cleanupWarning = await cleanup();
+            return err('IO_ERROR', String(cause), [], {
+              details: {
+                state: 'no-usable-artifact',
+                output,
+                revision: exportRevision,
+                invocationId,
+                cleanupWarning,
+              },
+            });
           }
         }
 
