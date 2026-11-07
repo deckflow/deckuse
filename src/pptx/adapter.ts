@@ -787,6 +787,7 @@ export const pptxAdapter: FormatAdapter = {
           revision: saved.revision,
           pageSize: describeSlideSize(archive),
           elementCount: index.elements.length,
+          ...(cleanupWarnings.length ? { diagnostics: cleanupWarnings } : {}),
           initializationState: cleanupWarnings.length
             ? 'committed-with-cleanup-warning'
             : 'committed',
