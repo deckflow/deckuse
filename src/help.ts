@@ -770,6 +770,7 @@ Notes:
 
 Options:
   --workspace <path>        Workspace root
+  --report <path>           Save the full export envelope to a new JSON file and print a compact summary
   --from-package            Copy existing package snapshot without rebuilding from source/
   --profile <mode>          structure (default) or delivery; strict failures preserve output
   --revision <rev>          Export a historical revision (not available in Phase 1a)
