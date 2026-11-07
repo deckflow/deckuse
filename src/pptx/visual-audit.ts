@@ -1,6 +1,7 @@
 import type { Diagnostic } from '../core/index.js';
 import { measureText } from '../core/measure.js';
 import type { OpcArchive } from '../opc/index.js';
+import { targetPathForItem } from './addressing.js';
 import { buildIndex } from './indexer.js';
 import { nodeFor } from './node-for.js';
 import { readSlideSize } from './slide-size.js';
@@ -40,7 +41,7 @@ export function auditVisuals(archive: OpcArchive, onlyPage?: number): VisualAudi
       [];
     const doc = archive.readXml(slide.partUri);
     for (const item of items) {
-      const target = item.ref.path ?? item.ref.elementId ?? item.name ?? item.kind;
+      const target = targetPathForItem(index, item);
       const node = nodeFor(doc, item);
       if (item.kind === 'picture') {
         const mediaPart =
@@ -120,6 +121,12 @@ export function auditVisuals(archive: OpcArchive, onlyPage?: number): VisualAudi
             target,
             bounds: { x: bx, y: by, width: bw, height: bh },
             slide: size,
+            excessEmu: {
+              left: Math.max(0, -bx),
+              top: Math.max(0, -by),
+              right: Math.max(0, bx + bw - size.widthEmu),
+              bottom: Math.max(0, by + bh - size.heightEmu),
+            },
             heuristic: false,
           },
         });
@@ -151,6 +158,7 @@ export function auditVisuals(archive: OpcArchive, onlyPage?: number): VisualAudi
                 target,
                 estimatedHeight: estimated.heightEmu,
                 availableHeight: h - top - bottom,
+                excessHeightEmu: estimated.heightEmu - (h - top - bottom),
                 heuristic: true,
               },
             });
@@ -171,7 +179,14 @@ export function auditVisuals(archive: OpcArchive, onlyPage?: number): VisualAudi
             severity: 'warning',
             code: 'CONTENT_OVERLAP_SUSPECTED',
             message: 'Content objects overlap; confirm whether the overlap is intentional',
-            details: { page, targets: [a.target, b.target], overlapArea: dx * dy, heuristic: true },
+            details: {
+              page,
+              targets: [a.target, b.target],
+              overlapArea: dx * dy,
+              overlapWidthEmu: dx,
+              overlapHeightEmu: dy,
+              heuristic: true,
+            },
           });
       }
   }
