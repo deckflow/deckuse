@@ -1,3 +1,4 @@
+import { initializationState } from './workspace/initialize.js';
 import { withWriteLock } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
 import { access, readFile } from 'node:fs/promises';
@@ -19,6 +20,8 @@ export const createDefaultExecutor = (): Executor =>
     {
       resolveAdapter: async (workspaceId) => {
         try {
+          if ((await initializationState(workspaceId))?.state === 'initialization-incomplete')
+            return pptxAdapter;
           await access(join(workspaceId, '.deckuse'));
           await withWriteLock(workspaceId, () => recoverTransaction(workspaceId));
           const manifest = JSON.parse(

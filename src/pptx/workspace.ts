@@ -136,26 +136,31 @@ export async function initializeWorkspace(
   archive: OpcArchiveType,
   manifest: WorkspaceManifest,
   index: IndexFile,
+  onCleanupWarning?: (path: string, cause: unknown) => void,
 ): Promise<WorkspaceManifest> {
   const root = resolve(workspace);
-  return withInitialization(root, async (root, reserve) => {
-    await reserve('.deckuse', 'directory');
-    await reserve('source', 'directory');
-    await reserve('.git', 'directory');
-    await reserve('.gitignore', 'file');
-    await reserve('package.pptx', 'file');
-    await archive.writeDirectoryContents(sourceDir(root));
-    const packed = await packPackage(root, archive, manifest);
-    const next: WorkspaceManifest = {
-      ...packed,
-      revision: index.revision,
-      updatedAt: new Date().toISOString(),
-    };
-    await writeMetadata(root, next, index);
-    await writeOperations(root, []);
-    await initGitRepo(root, 'deckuse: init');
-    return next;
-  });
+  return withInitialization(
+    root,
+    async (root, reserve) => {
+      await reserve('.deckuse', 'directory');
+      await reserve('source', 'directory');
+      await reserve('.git', 'directory');
+      await reserve('.gitignore', 'file');
+      await reserve('package.pptx', 'file');
+      await archive.writeDirectoryContents(sourceDir(root));
+      const packed = await packPackage(root, archive, manifest);
+      const next: WorkspaceManifest = {
+        ...packed,
+        revision: index.revision,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeMetadata(root, next, index);
+      await writeOperations(root, []);
+      await initGitRepo(root, 'deckuse: init');
+      return next;
+    },
+    onCleanupWarning,
+  );
 }
 
 export async function persistWrite(

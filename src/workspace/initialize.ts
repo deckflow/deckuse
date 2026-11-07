@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 export class WorkspaceNotEmptyError extends Error {
@@ -9,12 +9,27 @@ export class WorkspaceNotEmptyError extends Error {
   }
 }
 
+export async function initializationState(root: string) {
+  const marker = join(root, '.deckuse-init.lock');
+  try {
+    const value = await readFile(marker, 'utf8');
+    return {
+      state: value === 'committed' ? 'committed-with-cleanup-warning' : 'initialization-incomplete',
+      marker,
+    };
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw cause;
+  }
+}
+
 type ReserveEntry = (name: string, kind: 'directory' | 'file') => Promise<string>;
 
 /** Write directly under a destination reservation; roll back only reserved entries. */
 export async function withInitialization<T>(
   root: string,
   initialize: (root: string, reserve: ReserveEntry) => Promise<T>,
+  onCleanupWarning?: (path: string, cause: unknown) => void,
 ): Promise<T> {
   await mkdir(root, { recursive: true });
   const marker = join(root, '.deckuse-init.lock');
@@ -51,15 +66,39 @@ export async function withInitialization<T>(
     }
     return path;
   };
+  let preserveMarker = false;
   try {
     if ((await readdir(root)).some((entry) => entry !== '.deckuse-init.lock'))
       throw new WorkspaceNotEmptyError();
-    return await initialize(root, reserve);
+    const result = await initialize(root, reserve);
+    try {
+      await lock.writeFile('committed');
+      await lock.sync();
+    } catch (cause) {
+      onCleanupWarning?.(marker, cause);
+    }
+    return result;
   } catch (error) {
-    for (const path of owned.reverse()) await rm(path, { recursive: true, force: true });
+    for (const path of owned.reverse()) {
+      try {
+        await rm(path, { recursive: true, force: true });
+      } catch (cause) {
+        preserveMarker = true;
+        onCleanupWarning?.(path, cause);
+      }
+    }
+    if (preserveMarker)
+      throw new Error(
+        `Initialization did not complete and cleanup was denied. Keep ${root} for inspection and initialize in a fresh directory.`,
+        { cause: error },
+      );
     throw error;
   } finally {
-    await lock.close();
-    await rm(marker, { force: true });
+    try {
+      await lock.close();
+      if (!preserveMarker) await rm(marker, { force: true });
+    } catch (cause) {
+      onCleanupWarning?.(marker, cause);
+    }
   }
 }
