@@ -3,7 +3,7 @@ name: deckuse
 description: Create, recreate, edit, populate, inspect, render, or export PowerPoint presentations and Word documents with the Deckuse CLI. Use for new PPTX/DOCX files, editable slides from PDF/image references, changes to existing Office files, template-driven documents, and document QA. Routes to one task workflow and loads only the relevant instructions.
 compatibility: Requires an installed Deckuse CLI; recipes regression-tested with 1.9.0 Community. Optional capability helper requires Python 3. HTML previews require a host-approved Playwright browser. PDF/image extraction and native Office review use available host tools.
 metadata:
-  version: "1.5.0"
+  version: '1.5.0'
 ---
 
 # Deckuse
@@ -12,18 +12,18 @@ Use the user's language. Identify the outcome, supplied inputs, and what must be
 
 ## Choose a workflow
 
-| User's goal and input | Load |
-| --- | --- |
-| CLI syntax/capabilities/units, or installation-state diagnosis without document work | [CLI questions](scenarios/cli.md) |
-| New PPT from a topic, outline, or source material | [Create](scenarios/create.md) |
-| Reproduce the appearance of PDF pages, images, or screenshots in editable slides | [Replicate](scenarios/replicate.md) |
-| Change an existing PPTX while preserving unaffected content | [Edit](scenarios/edit.md) |
-| Fill named fields/repeated layouts in a template, including multiple outputs | [Populate a template](scenarios/populate-template.md) |
-| Manage comments or native Word tracked changes | [Native review](references/review.md) |
-| Check an existing PPTX and report problems | [Audit](scenarios/audit.md) |
-| Preview/export an existing presentation, or diagnose a rendering failure | [Preview/export](scenarios/preview-export.md) |
-| Create / edit / check a Word document | [Create DOCX](scenarios/create-doc.md) / [Edit DOCX](scenarios/edit-doc.md) / [Audit DOCX](scenarios/audit-doc.md) |
-| Export an existing Word workspace without changing content | [Export DOCX](scenarios/preview-doc.md) |
+| User's goal and input                                                                | Load                                                                                                               |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| CLI syntax/capabilities/units, or installation-state diagnosis without document work | [CLI questions](scenarios/cli.md)                                                                                  |
+| New PPT from a topic, outline, or source material                                    | [Create](scenarios/create.md)                                                                                      |
+| Reproduce the appearance of PDF pages, images, or screenshots in editable slides     | [Replicate](scenarios/replicate.md)                                                                                |
+| Change an existing PPTX while preserving unaffected content                          | [Edit](scenarios/edit.md)                                                                                          |
+| Fill named fields/repeated layouts in a template, including multiple outputs         | [Populate a template](scenarios/populate-template.md)                                                              |
+| Manage comments or native Word tracked changes                                       | [Native review](references/review.md)                                                                              |
+| Check an existing PPTX and report problems                                           | [Audit](scenarios/audit.md)                                                                                        |
+| Preview/export an existing presentation, or diagnose a rendering failure             | [Preview/export](scenarios/preview-export.md)                                                                      |
+| Create / edit / check a Word document                                                | [Create DOCX](scenarios/create-doc.md) / [Edit DOCX](scenarios/edit-doc.md) / [Audit DOCX](scenarios/audit-doc.md) |
+| Export an existing Word workspace without changing content                           | [Export DOCX](scenarios/preview-doc.md)                                                                            |
 
 Route by intended result, not keywords. A PDF used only as factual material goes to create; preserving its appearance goes to replicate. Small edits to a branded template go to edit; systematic field substitution goes to populate. Prefer an editable original over reconstructing its screenshot. For a request to audit then repair, start with audit and retain edit as the next authorized phase. Retain the inventory and decisions between phases.
 

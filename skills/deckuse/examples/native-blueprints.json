@@ -1,17 +1,185 @@
 [
-  {"type":"addSlide","layout":"Blank","name":"Native workflow"},
-  {"type":"addSlide","layout":"Blank","name":"Native chart"},
-  {"type":"addSlide","layout":"Blank","name":"Native table"},
-  {"type":"remove","target":"slide:1"},
-  {"type":"addShape","slide":1,"shapeType":"rect","name":"Background","x":"0px","y":"0px","width":"100%","height":"100%","fill":{"color":"F6F8FC"}},
-  {"type":"addShape","slide":1,"shapeType":"text","name":"Title","x":"64px","y":"70px","width":"1152px","height":"90px","blocks":[{"text":"Native editable workflow","fontSize":30,"bold":true,"textColor":"182230"}]},
-  {"type":"addShape","slide":1,"shapeType":"rounded-rect","name":"Collect","x":"64px","y":"260px","width":"320px","height":"170px","cornerRadius":0.12,"fill":{"color":"E9E6FF"},"blocks":[{"text":"Collect inputs","fontSize":22,"bold":true,"align":"center","textColor":"4035A8"}],"anchor":"ctr"},
-  {"type":"addShape","slide":1,"shapeType":"connector","name":"CollectToExecute","x":"384px","y":"345px","width":"96px","height":"0px","stroke":{"color":"6D5EF5","width":2,"tailEnd":"triangle"}},
-  {"type":"addShape","slide":1,"shapeType":"rounded-rect","name":"Execute","x":"480px","y":"260px","width":"320px","height":"170px","cornerRadius":0.12,"fill":{"color":"E9E6FF"},"blocks":[{"text":"Execute tasks","fontSize":22,"bold":true,"align":"center","textColor":"4035A8"}],"anchor":"ctr"},
-  {"type":"addShape","slide":1,"shapeType":"connector","name":"ExecuteToReview","x":"800px","y":"345px","width":"96px","height":"0px","stroke":{"color":"6D5EF5","width":2,"tailEnd":"triangle"}},
-  {"type":"addShape","slide":1,"shapeType":"rounded-rect","name":"Review","x":"896px","y":"260px","width":"320px","height":"170px","cornerRadius":0.12,"fill":{"color":"E9E6FF"},"blocks":[{"text":"Review outcomes","fontSize":22,"bold":true,"align":"center","textColor":"4035A8"}],"anchor":"ctr"},
-  {"type":"addShape","slide":2,"shapeType":"text","name":"Title","x":"64px","y":"70px","width":"1152px","height":"90px","blocks":[{"text":"Native chart: comparable units and periods","fontSize":28,"bold":true}]},
-  {"type":"addShape","slide":2,"shapeType":"chart","name":"DeliveryCycle","x":"64px","y":"210px","width":"1000px","height":"410px","chartType":"column","fontSize":14,"legend":"b","showDataLabels":true,"data":{"title":"Delivery cycle (days)","categories":["Jan","Feb","Mar","Apr"],"series":[{"name":"Before","values":[12,12,13,12],"color":"CBD2DE"},{"name":"Pilot","values":[11,10,9,8],"color":"6D5EF5"}]},"valueAxis":{"visible":true,"min":0,"max":16}},
-  {"type":"addShape","slide":3,"shapeType":"text","name":"Title","x":"64px","y":"70px","width":"1152px","height":"90px","blocks":[{"text":"Native table: editable cells","fontSize":30,"bold":true}]},
-  {"type":"addShape","slide":3,"shapeType":"table","name":"Rollout","x":"64px","y":"220px","width":"1152px","height":"300px","fontSize":18,"columnWidths":["20%","40%","40%"],"alignColumns":["left","left","left"],"theme":"zebra","rows":[["Phase","Work","Acceptance"],["Week 1","Map the workflow","Agree on inputs and owner"],["Week 2","Run the pilot","Complete an end-to-end run"],["Week 3","Review outcomes","Compare baseline and pilot"]]}
+  { "type": "addSlide", "layout": "Blank", "name": "Native workflow" },
+  { "type": "addSlide", "layout": "Blank", "name": "Native chart" },
+  { "type": "addSlide", "layout": "Blank", "name": "Native table" },
+  { "type": "remove", "target": "slide:1" },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "rect",
+    "name": "Background",
+    "x": "0px",
+    "y": "0px",
+    "width": "100%",
+    "height": "100%",
+    "fill": { "color": "F6F8FC" }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "text",
+    "name": "Title",
+    "x": "64px",
+    "y": "70px",
+    "width": "1152px",
+    "height": "90px",
+    "blocks": [
+      { "text": "Native editable workflow", "fontSize": 30, "bold": true, "textColor": "182230" }
+    ]
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "rounded-rect",
+    "name": "Collect",
+    "x": "64px",
+    "y": "260px",
+    "width": "320px",
+    "height": "170px",
+    "cornerRadius": 0.12,
+    "fill": { "color": "E9E6FF" },
+    "blocks": [
+      {
+        "text": "Collect inputs",
+        "fontSize": 22,
+        "bold": true,
+        "align": "center",
+        "textColor": "4035A8"
+      }
+    ],
+    "anchor": "ctr"
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "connector",
+    "name": "CollectToExecute",
+    "x": "384px",
+    "y": "345px",
+    "width": "96px",
+    "height": "0px",
+    "stroke": { "color": "6D5EF5", "width": 2, "tailEnd": "triangle" }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "rounded-rect",
+    "name": "Execute",
+    "x": "480px",
+    "y": "260px",
+    "width": "320px",
+    "height": "170px",
+    "cornerRadius": 0.12,
+    "fill": { "color": "E9E6FF" },
+    "blocks": [
+      {
+        "text": "Execute tasks",
+        "fontSize": 22,
+        "bold": true,
+        "align": "center",
+        "textColor": "4035A8"
+      }
+    ],
+    "anchor": "ctr"
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "connector",
+    "name": "ExecuteToReview",
+    "x": "800px",
+    "y": "345px",
+    "width": "96px",
+    "height": "0px",
+    "stroke": { "color": "6D5EF5", "width": 2, "tailEnd": "triangle" }
+  },
+  {
+    "type": "addShape",
+    "slide": 1,
+    "shapeType": "rounded-rect",
+    "name": "Review",
+    "x": "896px",
+    "y": "260px",
+    "width": "320px",
+    "height": "170px",
+    "cornerRadius": 0.12,
+    "fill": { "color": "E9E6FF" },
+    "blocks": [
+      {
+        "text": "Review outcomes",
+        "fontSize": 22,
+        "bold": true,
+        "align": "center",
+        "textColor": "4035A8"
+      }
+    ],
+    "anchor": "ctr"
+  },
+  {
+    "type": "addShape",
+    "slide": 2,
+    "shapeType": "text",
+    "name": "Title",
+    "x": "64px",
+    "y": "70px",
+    "width": "1152px",
+    "height": "90px",
+    "blocks": [
+      { "text": "Native chart: comparable units and periods", "fontSize": 28, "bold": true }
+    ]
+  },
+  {
+    "type": "addShape",
+    "slide": 2,
+    "shapeType": "chart",
+    "name": "DeliveryCycle",
+    "x": "64px",
+    "y": "210px",
+    "width": "1000px",
+    "height": "410px",
+    "chartType": "column",
+    "fontSize": 14,
+    "legend": "b",
+    "showDataLabels": true,
+    "data": {
+      "title": "Delivery cycle (days)",
+      "categories": ["Jan", "Feb", "Mar", "Apr"],
+      "series": [
+        { "name": "Before", "values": [12, 12, 13, 12], "color": "CBD2DE" },
+        { "name": "Pilot", "values": [11, 10, 9, 8], "color": "6D5EF5" }
+      ]
+    },
+    "valueAxis": { "visible": true, "min": 0, "max": 16 }
+  },
+  {
+    "type": "addShape",
+    "slide": 3,
+    "shapeType": "text",
+    "name": "Title",
+    "x": "64px",
+    "y": "70px",
+    "width": "1152px",
+    "height": "90px",
+    "blocks": [{ "text": "Native table: editable cells", "fontSize": 30, "bold": true }]
+  },
+  {
+    "type": "addShape",
+    "slide": 3,
+    "shapeType": "table",
+    "name": "Rollout",
+    "x": "64px",
+    "y": "220px",
+    "width": "1152px",
+    "height": "300px",
+    "fontSize": 18,
+    "columnWidths": ["20%", "40%", "40%"],
+    "alignColumns": ["left", "left", "left"],
+    "theme": "zebra",
+    "rows": [
+      ["Phase", "Work", "Acceptance"],
+      ["Week 1", "Map the workflow", "Agree on inputs and owner"],
+      ["Week 2", "Run the pilot", "Complete an end-to-end run"],
+      ["Week 3", "Review outcomes", "Compare baseline and pilot"]
+    ]
+  }
 ]

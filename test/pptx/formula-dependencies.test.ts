@@ -13,7 +13,13 @@ function fixture(formula: string) {
     ),
   );
   a.setRelationships('/xl/workbook.xml', [
-    { id: 'rId1', type: R + '/worksheet', target: 'worksheets/sheet1.xml',resolvedTarget:'/xl/worksheets/sheet1.xml', external: false },
+    {
+      id: 'rId1',
+      type: R + '/worksheet',
+      target: 'worksheets/sheet1.xml',
+      resolvedTarget: '/xl/worksheets/sheet1.xml',
+      external: false,
+    },
   ]);
   a.setPart(
     '/xl/worksheets/sheet1.xml',
