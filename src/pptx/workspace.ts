@@ -1,3 +1,4 @@
+import { writeApplyReceipt, type ApplyReceipt } from '../workspace/receipts.js';
 import { timed } from '../timing.js';
 import { withWorkspaceTransaction } from '../workspace/transaction.js';
 import { withInitialization } from '../workspace/initialize.js';
@@ -170,16 +171,21 @@ export async function persistWrite(
   index: IndexFile,
   operation: unknown,
   slides: number[],
+  receipt?: Omit<ApplyReceipt, 'commitToken'>,
+  changedParts = archive.getDirtyParts(),
 ): Promise<WorkspaceManifest> {
   const root = resolve(workspace);
   const rev = index.revision;
   const source = sourceDir(root);
   const sourceTmp = `${source}.${randomUUID()}.tmp`;
-  return withWorkspaceTransaction(root, async (transactionId, prepareCommit) => {
+  return withWorkspaceTransaction(root, async (transactionId, prepareCommit, journal) => {
     try {
       await archive.writeDirectory(sourceTmp);
-      await rm(source, { recursive: true, force: true });
-      await rename(sourceTmp, source);
+      await timed('source-swap', async () => {
+        // Keep the outgoing source inside the journal until the commit is durable.
+        await rename(source, join(journal, 'retired-source'));
+        await rename(sourceTmp, source);
+      });
       const next: WorkspaceManifest = {
         ...manifest,
         revision: rev,
@@ -187,12 +193,15 @@ export async function persistWrite(
       };
       const packed = await packPackage(root, archive, next);
       await writeMetadata(root, packed, index);
+      if (receipt) await writeApplyReceipt(root, { ...receipt, commitToken: transactionId });
       await appendOperationCommit(
         root,
         {
           at: new Date().toISOString(),
           revision: rev,
           operation,
+          commitToken: transactionId,
+          changedParts,
           slides: [...new Set(slides)].sort((a, b) => a - b),
         },
         transactionId,

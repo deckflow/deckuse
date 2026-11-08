@@ -127,6 +127,7 @@ Notes:
     details: `Options:
   --workspace <path>        Workspace root (default: nearest .deckuse)
   --revision <rev>          Read a historical revision
+  --request-id <id>         Query a PPTX apply receipt in the live workspace
   --json                    Machine-readable envelope`,
   },
 
@@ -609,6 +610,9 @@ Options:
 
 Options:
   --input <file|->          Input path; "-" (default) reads stdin
+  --request-id <id>        Deduplicate a PPTX apply; query with status --request-id
+  --summary                Compact result with operation, page, and diagnostic counts
+  --report <path>          Write complete result to a new file
   ${WRITE_GLOBALS}
 
 Accepted input shapes:
@@ -837,8 +841,12 @@ Examples:
 
 Options:
   --pages <1,3-5>          Render several pages from one snapshot (use --output-dir)
-  --preflight              Static browser/host checks; no workspace or launch required
+  --preflight              Check converter and browser configuration without a workspace
+  --probe-browser           With --preflight, also verify browser launch
   --all                    Render all pages from one snapshot
+  --since-revision <rev>   PPTX: reuse verified PNGs in the same output directory
+  --contact-sheet         PPTX batch: also save contact-sheet.png
+  --review-notes <json>   Annotate exact out-of-bounds/overlap targets with reasons
   --output-dir <dir>       Batch PNG directory; mutually exclusive with --output
   --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)
   --scale <n>               Device scale factor (default: 1)

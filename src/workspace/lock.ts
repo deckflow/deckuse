@@ -1,11 +1,13 @@
+import { timed } from '../timing.js';
 import { requireDefined } from '../required.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { resolve } from 'node:path';
-import { mkdir, open, readFile, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import { deckuseDir, lockPath } from './paths.js';
 
 const LOCK_WAIT_MS = 30_000;
 const LOCK_POLL_MS = 50;
+const LOCK_INITIALIZING_MS = 500;
 
 interface LockPayload {
   pid: number;
@@ -46,11 +48,21 @@ const reclaimIfStale = async (path: string): Promise<boolean> => {
   }
   const payload = parseLockPayload(raw);
   if (payload && isProcessAlive(payload.pid)) return false;
-  await rm(path, { force: true });
+  if (!payload && !raw.trim()) {
+    // An exclusive open creates an empty file before the holder writes its PID.
+    try {
+      if (Date.now() - (await stat(path)).mtimeMs < LOCK_INITIALIZING_MS) return false;
+      if ((await readFile(path, 'utf8')).trim()) return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw error;
+    }
+  }
+  await timed('cleanup-lock-reclaim', () => rm(path, { force: true }));
   return true;
 };
 
-/** True when a live process holds the write lock (stale/empty files count as unlocked). */
+/** A freshly created empty file can be a lock whose holder is writing its PID. */
 export const isWriteLockHeld = async (workspace: string): Promise<boolean> => {
   const path = lockPath(workspace);
   let raw: string;
@@ -62,8 +74,7 @@ export const isWriteLockHeld = async (workspace: string): Promise<boolean> => {
   }
   const payload = parseLockPayload(raw);
   if (payload && isProcessAlive(payload.pid)) return true;
-  await rm(path, { force: true });
-  return false;
+  return !(await reclaimIfStale(path));
 };
 
 export const acquireWriteLock = async (workspace: string): Promise<() => Promise<void>> => {
@@ -90,7 +101,7 @@ export const acquireWriteLock = async (workspace: string): Promise<() => Promise
   }
   return async () => {
     await handle.close();
-    await rm(path, { force: true });
+    await timed('cleanup-lock-release', () => rm(path, { force: true }));
   };
 };
 
@@ -103,7 +114,7 @@ export const withWriteLock = async <T>(
   const key = resolve(workspace);
   const held = heldLocks.getStore();
   if (held?.has(key)) return operation();
-  const release = await acquireWriteLock(workspace);
+  const release = await timed('lock-wait', () => acquireWriteLock(workspace));
   try {
     return await heldLocks.run(new Set([...(held ?? []), key]), operation);
   } finally {

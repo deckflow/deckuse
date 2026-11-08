@@ -1,4 +1,5 @@
 import { OpcArchive } from './opc/index.js';
+import type { IndexFile } from './pptx/types.js';
 import { buildIndex } from './pptx/indexer.js';
 import { nodeFor } from './pptx/node-for.js';
 import { descendants, NS } from './pptx/xml.js';
@@ -21,8 +22,10 @@ export async function renderFontInventory(
   file: string,
   format: 'pptx' | 'docx',
   page: number,
+  archive?: OpcArchive,
+  pptxIndex?: IndexFile,
 ): Promise<FontInventory> {
-  const archive = await OpcArchive.openFile(file);
+  archive ??= await OpcArchive.openFile(file);
   const usages: TextFontUsage[] = [];
   const themeFonts = new Set<string>();
   for (const uri of archive.parts.keys()) {
@@ -37,7 +40,7 @@ export async function renderFontInventory(
     }
   }
   if (format === 'pptx') {
-    const index = buildIndex(archive, 'render-fonts', '0');
+    const index = pptxIndex ?? buildIndex(archive, 'render-fonts', '0');
     const slide = index.elements.filter((e) => e.kind === 'slide')[page - 1];
     if (slide) {
       const doc = archive.readXml(slide.partUri);

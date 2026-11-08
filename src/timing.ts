@@ -6,7 +6,7 @@ function record(phase: string, start: number) {
   try {
     appendFileSync(
       path,
-      `${JSON.stringify({ phase, pid: process.pid, at: Date.now(), durationMs: performance.now() - start })}\n`,
+      `${JSON.stringify({ phase, commandId: process.env['DECKUSE_COMMAND_ID'], pid: process.pid, at: Date.now(), durationMs: performance.now() - start })}\n`,
     );
   } catch {
     /* Telemetry cannot change command success. */

@@ -1,3 +1,4 @@
+import { operationDigest, readApplyReceipt } from '../workspace/receipts.js';
 import { exportDigest } from './export-recovery.js';
 import { tableMergeDiagnostics } from './table.js';
 import { assertChartProperties } from './properties.js';
@@ -820,7 +821,9 @@ export const pptxAdapter: FormatAdapter = {
     }
     return withWriteLock(workspace, async () => {
       try {
-        await withWriteLock(workspace, () => recoverTransaction(workspace));
+        await recoverTransaction(workspace, {
+          allowCommittedCleanupFailure: command.type === 'status' && Boolean(command.requestId),
+        });
         if (command.type === 'undo') {
           return await withWriteLock(workspace, async () => {
             try {
@@ -832,6 +835,25 @@ export const pptxAdapter: FormatAdapter = {
                 cause instanceof Error ? cause.message : 'Undo failed',
               );
             }
+          });
+        }
+        if (command.type === 'status' && command.requestId) {
+          const found = await readApplyReceipt(workspace, command.requestId);
+          if (!found) return ok({ requestId: command.requestId, state: 'unknown' });
+          const { requestId, operationSha256, previousRevision, revision, result } = found.receipt;
+          const affectedSlides = Array.isArray(result['affectedSlides'])
+            ? result['affectedSlides']
+            : [];
+          return ok({
+            requestId,
+            operationSha256,
+            previousRevision,
+            revision,
+            state: 'committed',
+            current: found.current && !(await isPackageStale(workspace)),
+            operationCount: Array.isArray(result['results']) ? result['results'].length : 0,
+            affectedSlides: affectedSlides.slice(0, 256),
+            affectedSlideCount: affectedSlides.length,
           });
         }
         if (command.type === 'history') {
@@ -1300,11 +1322,39 @@ export const pptxAdapter: FormatAdapter = {
         if (!WRITE_TYPES.has(command.type))
           return err('INVALID_COMMAND', `Unsupported command type: ${command.type}`);
 
-        const conflict = assertExpectRevision(command, manifest.revision);
-        if (conflict) return conflict;
-
         return await withWriteLock(workspace, async () => {
           const currentManifest = await readManifest(workspace);
+          const requestId =
+            command.type === 'batch' || command.type === 'applyTransaction'
+              ? command.requestId
+              : undefined;
+          const digest =
+            requestId && (command.type === 'batch' || command.type === 'applyTransaction')
+              ? operationDigest(command)
+              : undefined;
+          if (requestId && digest && !command.dryRun) {
+            const existing = await readApplyReceipt(workspace, requestId);
+            if (existing) {
+              if (existing.receipt.operationSha256 !== digest)
+                return err(
+                  'TRANSACTION_CONFLICT',
+                  'Request ID was already used for different operations',
+                );
+              if (
+                !existing.current ||
+                existing.receipt.revision !== currentManifest.revision ||
+                (await isPackageStale(workspace, currentManifest))
+              )
+                return err(
+                  'TRANSACTION_CONFLICT',
+                  'Request receipt is stale; query status before continuing',
+                );
+              return ok(
+                { ...existing.receipt.result, replayed: true },
+                existing.receipt.diagnostics,
+              );
+            }
+          }
           const locked = assertExpectRevision(command, currentManifest.revision);
           if (locked) return locked;
 
@@ -1358,13 +1408,16 @@ export const pptxAdapter: FormatAdapter = {
             const slidePages: number[] = [];
             const touchedParts = new Set<string>();
             const changedTargets: string[] = [];
-            working.markClean();
+            const batchDirty = new Set<string>();
             for (const nested of nestedCommands) {
               if (REVIEW_WRITES.has(nested.type)) {
                 const conflict = assertExpectRevision(nested, currentManifest.revision);
                 if (conflict) return conflict;
               }
+              working.markClean();
               const result = await timed('mutation', () => applyMutation(nested));
+              const dirty = working.getDirtyParts();
+              for (const part of dirty) batchDirty.add(part);
               diagnostics.push(...result.diagnostics);
               if (!result.ok) return result;
               results.push(result.value);
@@ -1379,12 +1432,31 @@ export const pptxAdapter: FormatAdapter = {
               if (nested.type === 'addSlide' && result.value.partUri)
                 touchedParts.add(result.value.partUri);
               if (result.value.changedTargets) changedTargets.push(...result.value.changedTargets);
-              if (STRUCTURAL_TYPES.has(nested.type)) {
-                currentIndex = buildIndex(
-                  working,
-                  currentManifest.workspaceId,
-                  currentManifest.revision,
+              if (dirty.length || STRUCTURAL_TYPES.has(nested.type)) {
+                // Shared dependencies (e.g. charts, layouts) can affect several pages.
+                const local = dirty.every(
+                  (part) =>
+                    /^\/ppt\/(slides|notesSlides)\//.test(part) ||
+                    [
+                      '/ppt/presentation.xml',
+                      '/ppt/_rels/presentation.xml.rels',
+                      '/[Content_Types].xml',
+                      '/docProps/app.xml',
+                    ].includes(part),
                 );
+                const dirtyOwners = new Set(
+                  dirty.map((part) => part.replace(/\/_rels\/([^/]+)\.rels$/, '/$1')),
+                );
+                currentIndex = local
+                  ? timedSync('index-local', () =>
+                      buildIndexImpl(
+                        working,
+                        currentManifest.workspaceId,
+                        currentManifest.revision,
+                        { index: currentIndex, dirty: dirtyOwners },
+                      ),
+                    )
+                  : buildIndex(working, currentManifest.workspaceId, currentManifest.revision);
               }
             }
             const finalSlides = currentIndex.elements.filter((item) => item.kind === 'slide');
@@ -1406,7 +1478,7 @@ export const pptxAdapter: FormatAdapter = {
             }
             // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
             syncAppSlideCounts(working);
-            const changedParts = working.getDirtyParts();
+            const changedParts = [...new Set([...batchDirty, ...working.getDirtyParts()])].sort();
             const validation = validateArchive(working, workspace);
             if (validation.some((d) => d.severity === 'error'))
               return err(
@@ -1421,6 +1493,7 @@ export const pptxAdapter: FormatAdapter = {
                   results,
                   revision: currentManifest.revision,
                   dryRun: true,
+                  ...(requestId ? { requestId } : {}),
                   changedTargets: [...new Set(changedTargets)],
                   changedParts,
                   affectedSlides: mergeSlides(slidePages),
@@ -1429,24 +1502,34 @@ export const pptxAdapter: FormatAdapter = {
               );
             const rev = nextRevision(currentManifest.revision);
             const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
-            const saved = await persistWrite(
+            const value = {
+              results,
+              revision: rev,
+              changedTargets: [...new Set(changedTargets)],
+              changedParts,
+              affectedSlides: mergeSlides(slidePages),
+              ...(requestId ? { requestId } : {}),
+            };
+            await persistWrite(
               workspace,
               working,
               currentManifest,
               nextIndex,
               operation,
-              mergeSlides(slidePages),
+              value.affectedSlides,
+              requestId && digest
+                ? {
+                    requestId,
+                    operationSha256: digest,
+                    previousRevision: currentManifest.revision,
+                    revision: rev,
+                    result: value,
+                    diagnostics,
+                  }
+                : undefined,
+              changedParts,
             );
-            return ok(
-              {
-                results,
-                revision: saved.revision,
-                changedTargets: [...new Set(changedTargets)],
-                changedParts,
-                affectedSlides: mergeSlides(slidePages),
-              },
-              diagnostics,
-            );
+            return ok(value, diagnostics);
           };
 
           if (command.type === 'applyTransaction') {

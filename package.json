@@ -56,24 +56,27 @@
     "version-packages": "changeset version",
     "release": "bash scripts/release.sh",
     "test:agent-package": "node scripts/check-agent-package.mjs",
+    "benchmark:pptx-create": "node scripts/benchmark-pptx-create.mjs",
     "benchmark:agent": "node scripts/benchmark-agent-workflow.mjs",
     "test:native-preview": "node scripts/check-native-preview.mjs",
     "test:native-office": "node scripts/create-native-capability-fixture.mjs && node scripts/check-native-office.mjs"
   },
   "dependencies": {
     "@deckflow/deck2html": "^0.6.2",
+    "@fortawesome/fontawesome-free": "6.5.2",
     "@typesafe-ai/sdk": "^0.6.0",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
     "isomorphic-git": "latest",
     "playwright-core": "^1.62.1",
+    "echarts": "5.5.1",
+    "tailwindcss": "3.4.17",
     "zod": "latest"
   },
   "devDependencies": {
     "@changesets/cli": "latest",
     "@eslint/js": "latest",
     "@types/node": "latest",
-    "echarts": "5.5.1",
     "eslint": "latest",
     "eslint-config-prettier": "latest",
     "prettier": "latest",

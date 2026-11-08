@@ -28,14 +28,14 @@ describe('batch render snapshot', () => {
       (await runCommand({ ...base, type: 'addSlide', transactionId: '1', layout: 'Blank' })).ok,
     ).toBe(true);
     const inputs: Buffer[] = [];
+    const requestedPages: (string | undefined)[] = [];
     const result = await renderPages(root, {
       all: true,
       dependencies: {
         convert: async (input, options) => {
           inputs.push(await readFile(input));
+          requestedPages.push(options.pages);
           await writeFile(join(root, 'package.pptx'), 'concurrent replacement');
-          if (options.pages === '2')
-            return { exitCode: 1, stderr: 'injected page failure', stdout: '', indexHtmlPath: '' };
           await writeFile(join(options.output, 'index.html'), '<div id="deck"></div>');
           return {
             exitCode: 0,
@@ -45,13 +45,15 @@ describe('batch render snapshot', () => {
           };
         },
         screenshot: async (opts) => {
+          if (opts.slideIndex === 1) throw new Error('injected screenshot failure');
           await writeFile(opts.outputPath, 'png');
         },
       },
     });
     expect(result.ok).toBe(false);
     expect(result.results.map((r) => r.ok)).toEqual([true, false]);
-    expect(inputs[0]).toEqual(inputs[1]);
+    expect(inputs).toHaveLength(1);
+    expect(requestedPages).toEqual(['1,2']);
     expect(result.results[0].result?.inputSha256).toBe(result.inputSha256);
     expect(await readFile(join(root, '.deckuse/render/page-1.png'), 'utf8')).toBe('png');
   });

@@ -11,6 +11,7 @@ const WORKSPACE_GITIGNORE = `package.*
 .deckuse/preview/
 .deckuse/preview.next/
 .deckuse/render/
+.deckuse/receipts/
 .deckuse/*.tmp
 .deckuse/transaction/
 .deckuse/transaction.*.tmp/

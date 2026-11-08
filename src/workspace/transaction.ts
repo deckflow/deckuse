@@ -1,3 +1,4 @@
+import { timed } from '../timing.js';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ const paths = [
   '.deckuse/manifest.json',
   '.deckuse/index.json',
   '.deckuse/operations.jsonl',
+  '.deckuse/receipts',
   '.git/index',
   '.git/index.lock',
   '.git/HEAD.lock',
@@ -59,7 +61,10 @@ interface Journal {
   previousCommit?: string;
   backupHash?: string;
 }
-export async function recoverTransaction(root: string): Promise<void> {
+export async function recoverTransaction(
+  root: string,
+  options?: { allowCommittedCleanupFailure?: boolean },
+): Promise<void> {
   const dir = directory(root);
   if (!(await exists(dir))) return;
   try {
@@ -94,7 +99,12 @@ export async function recoverTransaction(root: string): Promise<void> {
         }
       }
     }
-    await rm(dir, { recursive: true, force: true });
+    try {
+      await timed('cleanup-transaction-recovery', () => rm(dir, { recursive: true, force: true }));
+    } catch (cause) {
+      if (!committed || !options?.allowCommittedCleanupFailure) throw cause;
+      process.stderr.write(`deckuse: TRANSACTION_CLEANUP_FAILED (${dir}): ${String(cause)}\n`);
+    }
   } catch (cause) {
     throw new RecoveryRequiredError(
       `Workspace recovery required; preserve ${dir}: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -104,7 +114,7 @@ export async function recoverTransaction(root: string): Promise<void> {
 /** Caller holds the workspace lock. Back up actual working files, including dirty edits. */
 export async function withWorkspaceTransaction<T>(
   root: string,
-  action: (id: string, prepareCommit: () => Promise<void>) => Promise<T>,
+  action: (id: string, prepareCommit: () => Promise<void>, directory: string) => Promise<T>,
 ): Promise<T> {
   await recoverTransaction(root);
   const dir = directory(root);
@@ -138,11 +148,12 @@ export async function withWorkspaceTransaction<T>(
   };
   try {
     await ensureGitignore(root);
-    const result = await action(journal.id, prepareCommit);
+    const result = await action(journal.id, prepareCommit, dir);
     try {
-      await rm(dir, { recursive: true, force: true });
-    } catch {
-      /* The commit succeeded; retry journal cleanup on the next locked access. */
+      await timed('cleanup-transaction', () => rm(dir, { recursive: true, force: true }));
+    } catch (cause) {
+      // The commit succeeded. A later locked access can retry journal cleanup.
+      process.stderr.write(`deckuse: TRANSACTION_CLEANUP_FAILED (${dir}): ${String(cause)}\n`);
     }
     return result;
   } catch (e) {

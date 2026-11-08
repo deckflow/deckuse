@@ -97,7 +97,7 @@ export async function agentContext(options: {
         : scenario === 'edit' || scenario === 'populate-template'
           ? ['setText', 'setProperties', 'replacePicture', 'duplicate', 'validate', 'export']
           : ['addSlide', 'addShape', 'remove', 'setText', 'setProperties', 'validate', 'export'];
-  if (format === 'pptx' && scenario !== 'audit' && scenario !== 'preview-export')
+  if (format === 'pptx' && !['create', 'audit', 'preview-export'].includes(scenario))
     types.push(
       'groupShapes',
       'ungroupShapes',
@@ -183,7 +183,10 @@ export async function agentContext(options: {
         'apply --input accepts a JSON array of write operations; JSON schemas below describe operations, not shell positionals',
       guards: 'Use --expect-revision with the current raw string revision',
       streams: 'Capture stdout JSON, stderr, exit code separately',
-      recovery: 'After response loss reconcile status/history/inventory before retry',
+      recovery:
+        format === 'pptx'
+          ? 'Use one --request-id per logical apply. After response loss, query status --request-id before retry.'
+          : 'After response loss reconcile status/history/inventory before retry',
       verification:
         'Validate after writes; HTML preview is approximate; native Office stays unverified',
     },
@@ -197,11 +200,16 @@ export async function agentContext(options: {
         'New document smoke recipe; use inventory and selected workflow for an existing-file task',
       operations: sample,
       cli: [
+        ...(format === 'pptx' ? ['deckuse render --preflight --probe-browser --json'] : []),
         `deckuse new ./ws${format === 'docx' ? ' --format docx' : ''} --json`,
         'Save recipe.operations as ./ops.json',
-        'deckuse apply --workspace ./ws --input ./ops.json --json',
+        format === 'pptx'
+          ? 'deckuse apply --workspace ./ws --input ./ops.json --request-id create-1 --expect-revision 1 --summary --json'
+          : 'deckuse apply --workspace ./ws --input ./ops.json --json',
         'deckuse validate --workspace ./ws --json',
-        'deckuse render --page 1 --workspace ./ws --output ./page-1.png --json',
+        format === 'pptx'
+          ? 'deckuse render --all --contact-sheet --workspace ./ws --output-dir ./review --json'
+          : 'deckuse render --page 1 --workspace ./ws --output ./page-1.png --json',
         `deckuse export ./output.${format} --workspace ./ws --json`,
       ],
     },

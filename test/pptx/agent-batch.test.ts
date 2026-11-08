@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { OpcArchive } from '../../src/opc/index.js';
+import { buildIndex } from '../../src/pptx/indexer.js';
 import { pptxAdapter } from '../../src/pptx/index.js';
 
 const e = new TextEncoder();
@@ -513,4 +514,18 @@ describe('agent batch UX', () => {
     const xml = await readFile(join(workspace, 'source', 'ppt', 'slides', 'slide1.xml'), 'utf8');
     expect(xml).toMatch(/<a:tr h="\d+"/);
   });
+});
+
+it('reuses unaffected page entries while matching a complete index rebuild', async () => {
+  const { workspace } = await initWs();
+  const archive = await OpcArchive.openDirectory(join(workspace, 'source'));
+  const part = '/ppt/slides/slide1.xml';
+  const initial = buildIndex(archive, workspace, '1');
+  const slide = archive.readXml(part);
+  const shape = slide.getElementsByTagName('p:cNvPr').item(1)!;
+  shape.setAttribute('name', 'Updated title');
+  archive.writeXml(part, slide);
+  const partial = buildIndex(archive, workspace, '1', { index: initial, dirty: new Set([part]) });
+  expect(partial).toEqual(buildIndex(archive, workspace, '1'));
+  expect(partial.elements.find((item) => item.name === 'Updated title')).toBeDefined();
 });
