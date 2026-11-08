@@ -59,7 +59,6 @@ export const convertWithConfiguredBinary: typeof deck2html.convert = async (inpu
   const args = [resolve(input), '-o', resolve(options.output)];
   for (const [key, flag] of [
     ['mode', '--mode'],
-    ['license', '--license'],
     ['fontService', '--font-service'],
     ['pages', '--pages'],
   ] as const) {

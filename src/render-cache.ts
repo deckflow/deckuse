@@ -63,7 +63,6 @@ export async function renderEnvironmentKey(binary?: string) {
     process.env['FONTCONFIG_FILE'],
     process.env['DECK2HTML_LICENSE'],
     join(homedir(), '.deckflow', 'deck2html.lic'),
-    join(homedir(), '.deckflow', 'deckuse.lic'),
     require.resolve('tailwindcss'),
     require.resolve('echarts/dist/echarts.min.js'),
     require.resolve('@fortawesome/fontawesome-free/css/all.min.css'),
