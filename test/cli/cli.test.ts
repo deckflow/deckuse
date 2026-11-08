@@ -803,15 +803,15 @@ describe('deckuse CLI', () => {
     expect(xml).toContain('Ops');
   });
 
-  it('rejects engine selection for single and batch rendering', async () => {
-    for (const selection of [['--page', '1'], ['--pages', '1,2'], ['--all']]) {
-      for (const engine of ['html', 'libreoffice']) {
-        const result = await run(['render', ...selection, '--engine', engine]);
-        expect(result.code).toBe(2);
-        expect(result.stderr).toContain('RENDER_ENGINE_REMOVED');
-        expect(result.stderr).toContain('Remove --engine');
-      }
-    }
+  it.each(
+    [['--page', '1'], ['--pages', '1,2'], ['--all']].flatMap((selection) =>
+      ['html', 'libreoffice'].map((engine) => ({ selection, engine })),
+    ),
+  )('rejects render engine $engine with selection $selection', async ({ selection, engine }) => {
+    const result = await run(['render', ...selection, '--engine', engine]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('RENDER_ENGINE_REMOVED');
+    expect(result.stderr).toContain('Remove --engine');
   });
 
   it('rejects render without a single page', async () => {

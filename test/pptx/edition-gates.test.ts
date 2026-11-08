@@ -396,7 +396,11 @@ describe('community edition write gates', () => {
   it('writeDenialReason stays denied until apply/write hooks exist', async () => {
     const archive = new OpcArchive();
     const master = {
-      ref: { documentId: 'd', elementId: 'master:slideMaster1', path: '/ppt/slideMasters/slideMaster1.xml' },
+      ref: {
+        documentId: 'd',
+        elementId: 'master:slideMaster1',
+        path: '/ppt/slideMasters/slideMaster1.xml',
+      },
       kind: 'master' as const,
       partUri: '/ppt/slideMasters/slideMaster1.xml',
     };

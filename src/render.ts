@@ -1,6 +1,12 @@
+import { requireDefined } from './required.js';
+import { readRenderCache, renderEnvironmentKey, writeRenderCache } from './render-cache.js';
+import { openPptxRenderSession, renderContactSheet } from './render-pptx-browser.js';
+import { readOperations } from './workspace/operations.js';
+import { buildIndex } from './pptx/indexer.js';
+import type { IndexFile } from './pptx/types.js';
 import { fontRiskReport, renderFontInventory } from './render-fonts.js';
 import { createRequire } from 'node:module';
-import { timed } from './timing.js';
+import { timed, timedSync } from './timing.js';
 import { createHash } from 'node:crypto';
 import { withWriteLock } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
@@ -32,11 +38,16 @@ export type ScreenshotFn = (options: {
   readonly indexHtmlPath: string;
   readonly outputPath: string;
   readonly scale?: number | undefined;
+  readonly slideIndex?: number;
   /** DOCX page in the paginated HTML (1-based). */
   readonly documentPage?: number;
   // Optional metadata preserves existing screenshot callbacks returning no value.
   // eslint-disable-next-line @typescript-eslint/no-invalid-void-type
-}) => Promise<void | { browserText: string; chartWarnings?: { id: string; message: string }[] }>;
+}) => Promise<void | {
+  browserText: string;
+  chartWarnings?: { id: string; message: string }[];
+  cjkOrphans?: { shapeId: string; sample: string }[];
+}>;
 
 export interface RenderDependencies {
   readonly convert?: ConvertFn;
@@ -66,6 +77,14 @@ export interface RenderResult {
   readonly output: string;
   readonly warnings: readonly string[];
   readonly diagnostics: readonly Diagnostic[];
+}
+
+async function cleanupRenderStaging(staging: string) {
+  try {
+    await timed('cleanup-render-staging', () => rm(staging, { recursive: true, force: true }));
+  } catch (cause) {
+    process.stderr.write(`deckuse: RENDER_CLEANUP_FAILED (${staging}): ${String(cause)}\n`);
+  }
 }
 
 const sleep = (milliseconds: number): Promise<void> =>
@@ -210,6 +229,14 @@ const defaultScreenshot: ScreenshotFn = async (options) => {
 const renderPageSnapshot = async (
   workspace: string,
   options: RenderOptions,
+  batch?: {
+    converted: Awaited<ReturnType<ConvertFn>>;
+    directory: string;
+    slideIndex: number;
+    archive: OpcArchive;
+    index: IndexFile;
+    sha: string;
+  },
 ): Promise<RenderResult> => {
   const page = options.page;
   if (!Number.isInteger(page) || page < 1) {
@@ -217,7 +244,7 @@ const renderPageSnapshot = async (
   }
 
   const absoluteWorkspace = resolve(workspace);
-  await ensureGitignore(absoluteWorkspace);
+  if (!batch) await ensureGitignore(absoluteWorkspace);
 
   let snapshot = PACKAGE_PPTX;
   let renderedRevision: string | undefined;
@@ -233,21 +260,52 @@ const renderPageSnapshot = async (
   const output = resolve(options.output ?? joinRenderDefault(absoluteWorkspace, page));
   const packagePath = resolve(absoluteWorkspace, snapshot);
   const converter = options.dependencies?.convert ?? convertWithConfiguredBinary;
-  const screenshot = options.dependencies?.screenshot ?? defaultScreenshot;
+  const offlineSingle =
+    snapshot === PACKAGE_PPTX &&
+    !batch &&
+    !options.dependencies?.screenshot &&
+    !options.dependencies?.convert;
+  const screenshot: ScreenshotFn =
+    options.dependencies?.screenshot ??
+    (offlineSingle
+      ? async ({ indexHtmlPath, outputPath, scale }) => {
+          const browser = await launchRenderBrowser();
+          try {
+            const session = await openPptxRenderSession(browser, indexHtmlPath, 1, scale);
+            try {
+              return await session.screenshot(0, outputPath);
+            } finally {
+              await session.close();
+            }
+          } finally {
+            await browser.close();
+          }
+        }
+      : defaultScreenshot);
+
   const diagnostics =
-    snapshot === PACKAGE_PPTX ? await inspectChartRenderFidelity(absoluteWorkspace, page) : [];
+    snapshot === PACKAGE_PPTX
+      ? batch
+        ? auditVisuals(batch.archive, page, batch.index).diagnostics
+        : await inspectChartRenderFidelity(absoluteWorkspace, page)
+      : [];
   const warnings = diagnostics.map((item) => `${item.code}: ${item.message}`);
 
-  if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
+  if (!batch && !options.dependencies?.convert) await ensureDeck2HtmlExecutable();
 
-  const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-'));
+  const staging = batch?.directory ?? (await mkdtemp(join(tmpdir(), 'deckuse-render-')));
   try {
-    const result = await timed('convert', () =>
-      converter(packagePath, {
-        output: staging,
-        ...(snapshot === PACKAGE_PPTX ? { pages: String(page) } : {}),
-      }),
-    );
+    const result =
+      batch?.converted ??
+      (await timed('convert', () =>
+        converter(packagePath, {
+          output: staging,
+          ...(snapshot === PACKAGE_PPTX ? { pages: String(page) } : {}),
+          ...(offlineSingle
+            ? { noPlayer: true, noLazySlides: true, includeHiddenSlides: true }
+            : {}),
+        }),
+      ));
     if (result.exitCode !== 0) {
       throw converterFailure(result.stderr || 'deck2html conversion failed');
     }
@@ -267,6 +325,7 @@ const renderPageSnapshot = async (
       screenshot({
         indexHtmlPath,
         outputPath: output,
+        ...(batch ? { slideIndex: batch.slideIndex } : {}),
         ...(snapshot === 'package.docx' ? { documentPage: page } : {}),
         ...(options.scale !== undefined ? { scale: options.scale } : {}),
       }),
@@ -294,12 +353,22 @@ const renderPageSnapshot = async (
       });
       warnings.push(`CHART_NUMBER_FORMAT_UNSUPPORTED: ${warning.message}`);
     }
+    for (const orphan of screenshotResult?.cjkOrphans ?? []) {
+      diagnostics.push({
+        severity: 'info',
+        code: 'CJK_ORPHAN_LINE',
+        message: 'A final wrapped line contains one CJK character; review the line break.',
+        details: { page, ...orphan, heuristic: true },
+      });
+    }
     let fontReport: ReturnType<typeof fontRiskReport>['report'] | undefined;
     try {
       const inventory = await renderFontInventory(
         packagePath,
         snapshot === PACKAGE_PPTX ? 'pptx' : 'docx',
         page,
+        batch?.archive,
+        batch?.index,
       );
       const fontResult = fontRiskReport(
         inventory,
@@ -339,14 +408,16 @@ const renderPageSnapshot = async (
           ),
         ) as { version: string }
       ).version,
-      inputSha256: createHash('sha256')
-        .update(await readFile(packagePath))
-        .digest('hex'),
+      inputSha256:
+        batch?.sha ??
+        createHash('sha256')
+          .update(await readFile(packagePath))
+          .digest('hex'),
       fontVerification: 'unknown',
       nativeVerification: 'unverified',
     };
   } finally {
-    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    if (!batch) await cleanupRenderStaging(staging);
   }
 };
 
@@ -386,7 +457,7 @@ export const renderPage = async (
       output: options.output ?? joinRenderDefault(root, options.page),
     });
   } finally {
-    await rm(staging, { recursive: true, force: true });
+    await cleanupRenderStaging(staging);
   }
 };
 
@@ -414,16 +485,68 @@ const joinRenderDefault = (workspace: string, page: number): string =>
 export interface RenderPagesOptions {
   readonly pages?: readonly number[] | undefined;
   readonly all?: boolean;
+  readonly sinceRevision?: string | undefined;
+  readonly contactSheet?: boolean;
+  readonly reviewNotes?: readonly RenderReviewNote[];
   readonly outputDir?: string | undefined;
   readonly scale?: number | undefined;
   readonly dependencies?: RenderDependencies;
 }
+export interface RenderReviewNote {
+  code: 'OBJECT_OUT_OF_BOUNDS' | 'CONTENT_OVERLAP_SUSPECTED';
+  targets: string[];
+  reason: string;
+}
+
+export function parseRenderReviewNotes(raw: string): RenderReviewNote[] {
+  const notes = JSON.parse(raw) as unknown;
+  if (!Array.isArray(notes)) throw new Error('Review notes must be a JSON array');
+  return notes.map((note: Partial<RenderReviewNote> | null) => {
+    if (
+      !note ||
+      !['OBJECT_OUT_OF_BOUNDS', 'CONTENT_OVERLAP_SUSPECTED'].includes(note.code ?? '') ||
+      !Array.isArray(note.targets) ||
+      !note.targets.every((target) => typeof target === 'string' && target) ||
+      note.targets.length !== (note.code === 'OBJECT_OUT_OF_BOUNDS' ? 1 : 2) ||
+      typeof note.reason !== 'string' ||
+      !note.reason.trim()
+    )
+      throw new Error('Each review note needs an exact diagnostic code, target(s), and reason');
+    return note as RenderReviewNote;
+  });
+}
+
+function annotateReview(result: RenderPageOutcome, notes: readonly RenderReviewNote[]) {
+  if (!result.result || !notes.length) return result;
+  return {
+    ...result,
+    result: {
+      ...result.result,
+      diagnostics: result.result.diagnostics.map((diagnostic) => {
+        const raw = diagnostic.details?.['targets'] ?? [diagnostic.details?.['target']];
+        const targets = Array.isArray(raw) ? raw : [];
+        const note = notes.find(
+          (note) =>
+            note.code === diagnostic.code &&
+            targets.length === note.targets.length &&
+            note.targets.every((target) => targets.includes(target)),
+        );
+        return note
+          ? { ...diagnostic, details: { ...diagnostic.details, reviewReason: note.reason } }
+          : diagnostic;
+      }),
+    },
+  };
+}
+
 export interface RenderPageOutcome {
   readonly page: number;
   readonly ok: boolean;
   readonly result?: RenderResult;
   readonly error?: string;
   readonly errorCode?: string;
+  readonly reusedFromRevision?: string;
+  readonly errorDetails?: unknown;
 }
 export interface RenderPagesResult {
   readonly ok: boolean;
@@ -431,7 +554,19 @@ export interface RenderPagesResult {
   readonly revision: string;
   readonly inputSha256: string;
   readonly results: readonly RenderPageOutcome[];
+  readonly contactSheet?: string;
 }
+function renderPageError(page: number, cause: unknown): RenderPageOutcome {
+  return {
+    page,
+    ok: false,
+    error: cause instanceof Error ? cause.message : String(cause),
+    ...(cause instanceof RenderFailure
+      ? { errorCode: cause.code, errorDetails: cause.details }
+      : { errorCode: 'RENDER_FAILED' }),
+  };
+}
+
 export function parsePageSelection(raw: string): number[] {
   const pages = new Set<number>();
   for (const token of raw.split(',')) {
@@ -456,11 +591,11 @@ export async function renderPages(
   workspace: string,
   options: RenderPagesOptions,
 ): Promise<RenderPagesResult> {
-  if (Boolean(options.all) === Boolean(options.pages?.length))
+  if ([options.all, options.pages?.length, options.sinceRevision].filter(Boolean).length !== 1)
     throw new Error('Choose pages or all');
   if (options.scale !== undefined && (!Number.isFinite(options.scale) || options.scale <= 0))
     throw new Error('Invalid render scale');
-  if (!options.dependencies?.convert) await converterPreflight();
+  const preflight = !options.dependencies?.convert ? await converterPreflight() : undefined;
   const root = resolve(workspace);
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-batch-'));
   let browser: Browser | undefined;
@@ -473,7 +608,8 @@ export async function renderPages(
       };
       if (!['pptx', 'docx'].includes(manifest.format)) throw new Error('Unsupported render format');
       const bytes = await readFile(join(root, `package.${manifest.format}`));
-      return { manifest, bytes };
+      const history = options.sinceRevision ? await readOperations(root) : [];
+      return { manifest, bytes, history };
     });
     const { manifest, bytes } = snapshot;
     const sha = createHash('sha256').update(bytes).digest('hex');
@@ -482,6 +618,9 @@ export async function renderPages(
     await writeFile(join(staging, `package.${manifest.format}`), bytes);
     const outputDir = resolve(options.outputDir ?? join(root, '.deckuse/render'));
     let count: number;
+    let archive: OpcArchive | undefined;
+    if (options.sinceRevision && manifest.format !== 'pptx')
+      throw new Error('--since-revision requires a PPTX workspace');
     if (manifest.format === 'docx') {
       // Word's page count is determined by deck2html's browser pagination.
       if (!options.all) {
@@ -512,7 +651,7 @@ export async function renderPages(
         if (count === 0) throw new Error('No document pages found');
       }
     } else {
-      const archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
+      archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
       count = archive
         .readXml('/ppt/presentation.xml')
         .getElementsByTagNameNS(
@@ -520,11 +659,162 @@ export async function renderPages(
           'sldId',
         ).length;
     }
-    const pages = options.all
-      ? Array.from({ length: count }, (_, i) => i + 1)
-      : [...new Set(options.pages)];
+    const pages =
+      options.all || options.sinceRevision
+        ? Array.from({ length: count }, (_, i) => i + 1)
+        : [...new Set(options.pages)];
     if (pages.some((p) => !Number.isInteger(p) || p < 1 || p > count))
       throw new Error('Requested page does not exist');
+    if (archive) {
+      const selected = [...pages].sort((a, b) => a - b);
+      const available = new Map<number, RenderPageOutcome>();
+      const index = buildIndex(archive, 'render', manifest.revision);
+      const slideParts = index.elements
+        .filter((item) => item.kind === 'slide')
+        .map((item) => item.partUri);
+      const shared = createHash('sha256');
+      shared.update(
+        JSON.stringify({
+          converter: preflight?.version,
+          scale: options.scale ?? 1,
+          environment: options.dependencies
+            ? 'injected'
+            : await renderEnvironmentKey(preflight?.binary),
+        }),
+      );
+      for (const [name, part] of [...archive.parts].sort(([a], [b]) => a.localeCompare(b))) {
+        if (!/^\/ppt\/(slides|notesSlides)\//.test(name))
+          shared.update(name).update(createHash('sha256').update(part.data).digest());
+      }
+      const keys = new Map(
+        selected.map((page) => {
+          const part = slideParts[page - 1] ?? '';
+          const rel = part.replace(/\/([^/]+)$/, '/_rels/$1.rels');
+          const key = shared.copy().update(part);
+          for (const name of [part, rel]) {
+            const bytes = archive.getPart(name)?.data;
+            if (bytes) key.update(createHash('sha256').update(bytes).digest());
+          }
+          return [page, key.digest('hex')];
+        }),
+      );
+      const base = options.sinceRevision;
+      const baseIndex = snapshot.history.findIndex((record) => record.revision === base);
+      const trustedBase =
+        base &&
+        (base === manifest.revision ||
+          ((base === '1' || baseIndex >= 0) &&
+            snapshot.history.slice(baseIndex + 1).every((record) => record.changedParts)));
+
+      if (trustedBase && !options.dependencies) {
+        for (const page of selected) {
+          const output = join(outputDir, `page-${String(page)}.png`);
+          const cached = await timed('render-cache-lookup', () =>
+            readRenderCache(output, keys.get(page)),
+          );
+          timedSync(cached ? 'render-cache-hit' : 'render-cache-miss', () => undefined);
+          if (cached)
+            available.set(page, {
+              page,
+              ok: true,
+              result: cached,
+              reusedFromRevision: cached.revision ?? 'unknown',
+            });
+        }
+      }
+      const pending = selected.filter((page) => !available.has(page));
+      if (pending.length) {
+        try {
+          const directory = join(staging, 'slides-html');
+          await mkdir(directory);
+          const converted = await timed('convert', () =>
+            (options.dependencies?.convert ?? convertWithConfiguredBinary)(
+              join(staging, PACKAGE_PPTX),
+              {
+                output: directory,
+                pages: pending.join(','),
+                noPlayer: true,
+                noLazySlides: true,
+                includeHiddenSlides: true,
+              },
+            ),
+          );
+          if (converted.exitCode !== 0)
+            throw converterFailure(converted.stderr || 'deck2html conversion failed');
+          const entry = resolve(converted.indexHtmlPath);
+          const relativeEntry = relative(directory, entry);
+          if (relativeEntry === '..' || relativeEntry.startsWith(`..${sep}`))
+            throw new Error('deck2html returned an output outside the staging directory');
+          if (!options.dependencies?.screenshot) browser = await launchRenderBrowser();
+          const session = browser
+            ? await openPptxRenderSession(browser, entry, pending.length, options.scale)
+            : undefined;
+          try {
+            for (const [slideIndex, page] of pending.entries()) {
+              const output = join(outputDir, `page-${String(page)}.png`);
+              try {
+                const result = await renderPageSnapshot(
+                  staging,
+                  {
+                    page,
+                    output,
+                    scale: options.scale,
+                    dependencies: {
+                      ...options.dependencies,
+                      screenshot:
+                        options.dependencies?.screenshot ??
+                        ((opts) => {
+                          if (!session) throw new Error('Render session unavailable');
+                          return session.screenshot(slideIndex, opts.outputPath);
+                        }),
+                    },
+                  },
+                  { converted, directory, slideIndex, archive, index, sha },
+                );
+                if (!options.dependencies)
+                  await writeRenderCache(result, keys.get(page)).catch((error: unknown) => {
+                    process.stderr.write(`deckuse: RENDER_CACHE_WRITE_FAILED: ${String(error)}\n`);
+                  });
+                available.set(page, { page, ok: true, result });
+              } catch (cause) {
+                available.set(page, renderPageError(page, cause));
+              }
+            }
+          } finally {
+            await session?.close();
+          }
+        } catch (cause) {
+          if (!available.size) throw cause;
+          for (const page of pending) {
+            if (!available.has(page)) available.set(page, renderPageError(page, cause));
+          }
+        }
+      }
+      const results = pages.map((page) =>
+        annotateReview(requireDefined(available.get(page)), options.reviewNotes ?? []),
+      );
+      const ok = results.every((result) => result.ok);
+      const contactSheet =
+        options.contactSheet && ok ? join(outputDir, 'contact-sheet.png') : undefined;
+      if (contactSheet) {
+        browser ??= await launchRenderBrowser();
+        await renderContactSheet(
+          browser,
+          results.map((item) => requireDefined(item.result).output),
+          contactSheet,
+        );
+      }
+      return {
+        ok,
+        engine: 'html',
+        revision: manifest.revision,
+        inputSha256: sha,
+        results,
+        ...(contactSheet ? { contactSheet } : {}),
+      };
+    }
+    if (options.contactSheet || options.reviewNotes)
+      throw new Error('Contact sheets and review notes require PPTX');
     if (!options.dependencies?.screenshot && !browser) browser = await launchRenderBrowser();
     const shared = browser;
     const results: RenderPageOutcome[] = [];
@@ -568,7 +858,10 @@ export async function renderPages(
       results,
     };
   } finally {
-    await browser?.close();
-    await rm(staging, { recursive: true, force: true });
+    try {
+      await browser?.close();
+    } finally {
+      await cleanupRenderStaging(staging);
+    }
   }
 }

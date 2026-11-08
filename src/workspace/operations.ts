@@ -6,6 +6,8 @@ import { deckuseDir, operationsPath } from './paths.js';
 export interface OperationRecord {
   readonly at: string;
   readonly revision: string;
+  readonly commitToken?: string;
+  readonly changedParts?: string[];
   readonly operation: unknown;
   readonly slides: number[];
 }

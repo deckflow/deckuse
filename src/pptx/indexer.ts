@@ -68,8 +68,23 @@ const transformOf = (node: Element): Record<string, number | boolean> | undefine
   if (rot !== undefined) result['rotation'] = Number(rot) / 60000;
   return result;
 };
-export function buildIndex(archive: OpcArchive, documentId: string, rev: string): IndexFile {
+export function buildIndex(
+  archive: OpcArchive,
+  documentId: string,
+  rev: string,
+  reuse?: { index: IndexFile; dirty: ReadonlySet<string> },
+): IndexFile {
   const elements: IndexedElement[] = [];
+  const bySlide = new Map<string, IndexedElement[]>();
+  const shared: IndexedElement[] = [];
+  for (const item of reuse?.index.elements ?? []) {
+    if (item.slideId === undefined) shared.push(item);
+    else {
+      const items = bySlide.get(item.slideId) ?? [];
+      items.push(item);
+      bySlide.set(item.slideId, items);
+    }
+  }
   const presentation = archive.readXml('/ppt/presentation.xml'),
     rels = archive.getRelationships('/ppt/presentation.xml');
   for (const sld of descendants(presentation, 'sldId')) {
@@ -85,6 +100,15 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
         path: partUri,
         revision: rev,
       };
+    const cached = bySlide.get(slideId);
+    if (
+      cached?.[0]?.partUri === partUri &&
+      !reuse?.dirty.has(partUri) &&
+      !cached.some((item) => reuse?.dirty.has(item.partUri))
+    ) {
+      elements.push(...cached);
+      continue;
+    }
     const slideName = archive
       .readXml(partUri)
       .getElementsByTagNameNS(NS.p, 'cSld')
@@ -269,6 +293,7 @@ export function buildIndex(archive: OpcArchive, documentId: string, rev: string)
       });
     }
   }
+  if (reuse) return { revision: rev, elements: [...elements, ...shared] };
   for (const [prefix, kind] of [
     ['/ppt/slideMasters/', 'master'],
     ['/ppt/slideLayouts/', 'layout'],

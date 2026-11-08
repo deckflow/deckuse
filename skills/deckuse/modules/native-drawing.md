@@ -4,14 +4,14 @@ Read for diagrams, data objects, editable reconstruction or explicit native-obje
 
 ## Choose the object before writing coordinates
 
-| Content | Prefer | Verify |
-| --- | --- | --- |
-| Titles, paragraphs and lists | Native text boxes and paragraph/bullet properties | Exact text, line breaks, font coverage, overflow; actual native text edit if Office is available |
-| Process nodes, badges and UI cards | Native rect/rounded-rect/ellipse or a supported preset | Named editable shapes, z-order, geometry, relevant grouping limits |
-| Flow lines | Native connector/line with supported stroke and arrowhead | `p:cxnSp`, arrow direction, endpoints; attachment is a separate check |
-| Quantitative charts | Native `chart` with explicit categories/series/units | Chart relationships, cached data, categories and values, chart-vs-workbook editability |
-| Tabular information | Native `table` with rows, column widths and typography | Actual table XML/cells, cell contents, wrapping and row fit |
-| Logos/photos/irreducible artwork | Separate picture assets with appropriate crop | Correct source, aspect ratio, no unrelated baked-in text; never a whole-slide screenshot replacing editable content |
+| Content                            | Prefer                                                    | Verify                                                                                                              |
+| ---------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Titles, paragraphs and lists       | Native text boxes and paragraph/bullet properties         | Exact text, line breaks, font coverage, overflow; actual native text edit if Office is available                    |
+| Process nodes, badges and UI cards | Native rect/rounded-rect/ellipse or a supported preset    | Named editable shapes, z-order, geometry, relevant grouping limits                                                  |
+| Flow lines                         | Native connector/line with supported stroke and arrowhead | `p:cxnSp`, arrow direction, endpoints; attachment is a separate check                                               |
+| Quantitative charts                | Native `chart` with explicit categories/series/units      | Chart relationships, cached data, categories and values, chart-vs-workbook editability                              |
+| Tabular information                | Native `table` with rows, column widths and typography    | Actual table XML/cells, cell contents, wrapping and row fit                                                         |
+| Logos/photos/irreducible artwork   | Separate picture assets with appropriate crop             | Correct source, aspect ratio, no unrelated baked-in text; never a whole-slide screenshot replacing editable content |
 
 Do not draw a statistical chart as arbitrary rectangles just to avoid learning the chart contract. If a chart requirement exceeds the supported surface, explain that limit and choose a user-appropriate alternative explicitly. Do not describe rasterized labels as editable text.
 

@@ -82,19 +82,26 @@ const context = cli([
 ]).data;
 const ops = join(root, context.resource.example);
 await access(ops);
+process.env.DECKUSE_BROWSER_EXECUTION = 'denied';
 const ws = join(staging, 'presentation');
-cli(['new', ws]);
-cli(['apply', '--workspace', ws, '--input', ops]);
+cli(['new', ws, '--blank']);
+cli([
+  'apply',
+  '--workspace',
+  ws,
+  '--input',
+  ops,
+  '--request-id',
+  'create-1',
+  '--expect-revision',
+  '1',
+]);
 const status = cli(['validate', '--workspace', ws]);
 if (!status.data.valid) throw new Error('Invalid packaged presentation');
-const shapes = cli(['list', 'shapes', '--slide', '1', '--workspace', ws]);
-if (
-  cli(['list', 'slides', '--workspace', ws]).data.total !== 1 &&
-  cli(['list', 'slides', '--workspace', ws]).data.items?.length !== 1
-)
-  throw new Error('Expected one slide');
-if (!JSON.stringify(shapes).includes('Preserve editable content'))
-  throw new Error('Recipe text missing');
+const slides = cli(['list', 'slides', '--workspace', ws]).data.items;
+if (slides.length !== 2) throw new Error('Expected two slides');
+const shapes = cli(['list', 'shapes', '--slide', '2', '--workspace', ws]);
+if (!JSON.stringify(shapes).includes('Editable details')) throw new Error('Recipe text missing');
 const exported = join(staging, 'out.pptx');
 cli(['export', exported, '--workspace', ws]);
 await access(exported);

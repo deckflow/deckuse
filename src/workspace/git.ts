@@ -11,6 +11,7 @@ const WORKSPACE_GITIGNORE = `package.*
 .deckuse/preview/
 .deckuse/preview.next/
 .deckuse/render/
+.deckuse/receipts/
 .deckuse/*.tmp
 .deckuse/transaction/
 .deckuse/transaction.*.tmp/
@@ -77,7 +78,11 @@ export const commitWorkspace = async (workspace: string, message: string): Promi
   return commit({ ...opts, message, author: GIT_AUTHOR });
 };
 
-export const resetGit = async (workspace: string, steps: number): Promise<void> => {
+export const resetGit = async (
+  workspace: string,
+  steps: number,
+  prepareRewind?: (head: string) => Promise<void>,
+): Promise<void> => {
   const dir = repoDir(workspace);
   const opts = repoOpts(workspace);
   const branch = await currentBranch(opts);
@@ -92,6 +97,7 @@ export const resetGit = async (workspace: string, steps: number): Promise<void> 
 
   const target = requireDefined(commits[commits.length - 1]);
   const gitdir = join(dir, '.git');
+  await prepareRewind?.(target.oid);
   await writeFile(join(gitdir, 'refs', 'heads', branch), `${target.oid}\n`);
 
   try {
@@ -108,7 +114,7 @@ export const resetGit = async (workspace: string, steps: number): Promise<void> 
   const matrix = await statusMatrix(opts);
   for (const [filepath, head, workdir, stage] of matrix) {
     // Untracked: absent in HEAD and STAGE, present in workdir.
-    if (head === 0 && workdir === 2 && stage === 0) {
+    if (filepath.startsWith('source/') && head === 0 && workdir === 2 && stage === 0) {
       await rm(join(dir, filepath), { force: true });
     }
   }

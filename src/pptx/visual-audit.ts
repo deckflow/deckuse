@@ -3,6 +3,7 @@ import { measureText } from '../core/measure.js';
 import type { OpcArchive } from '../opc/index.js';
 import { targetPathForItem } from './addressing.js';
 import { buildIndex } from './indexer.js';
+import type { IndexFile } from './types.js';
 import { nodeFor } from './node-for.js';
 import { readSlideSize } from './slide-size.js';
 import { chartRenderDiagnostics } from './render-fidelity.js';
@@ -21,8 +22,11 @@ export interface VisualAudit {
   nativeVerification: 'unverified';
 }
 /** Geometric facts and heuristic concerns stay explicitly distinguished. */
-export function auditVisuals(archive: OpcArchive, onlyPage?: number): VisualAudit {
-  const index = buildIndex(archive, 'audit', '0');
+export function auditVisuals(
+  archive: OpcArchive,
+  onlyPage?: number,
+  index: IndexFile = buildIndex(archive, 'audit', '0'),
+): VisualAudit {
   const size = readSlideSize(archive);
   const slides = index.elements.filter((e) => e.kind === 'slide');
   const diagnostics: Diagnostic[] = [];

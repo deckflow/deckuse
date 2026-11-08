@@ -1,4 +1,8 @@
 [
   { "type": "setText", "target": "slide:1/shape:Title", "value": "Updated introduction" },
-  { "type": "setProperties", "target": "slide:1/shape:Title", "properties": { "fontSize": 32, "textColor": "1D4ED8" } }
+  {
+    "type": "setProperties",
+    "target": "slide:1/shape:Title",
+    "properties": { "fontSize": 32, "textColor": "1D4ED8" }
+  }
 ]

@@ -43,3 +43,19 @@ it('returns a migration contract for removed render engines before workspace dis
     error: { code: 'RENDER_ENGINE_REMOVED' },
   });
 });
+
+it('probes a trivial page with bounded launch and closes the browser on page timeout', async () => {
+  const { probeRenderBrowser } = await import('../../src/render-browser.js');
+  vi.stubEnv('DECKUSE_BROWSER_CONTEXT', 'probe-test');
+  vi.stubEnv('DECKUSE_BROWSER_PROVIDER', 'headless-shell');
+  const goto = vi.fn().mockResolvedValue(null);
+  const close = vi.fn().mockResolvedValue(undefined);
+  const browser = { newPage: vi.fn().mockResolvedValue({ goto }), close };
+  const launch = vi.fn().mockResolvedValue(browser);
+  await probeRenderBrowser(launch);
+  expect(launch).toHaveBeenCalledWith(expect.objectContaining({ timeout: 5000 }));
+  expect(goto).toHaveBeenCalledWith(expect.stringMatching(/^data:text\/html/), { timeout: 5000 });
+  goto.mockRejectedValue(Object.assign(new Error('Timeout'), { name: 'TimeoutError' }));
+  await expect(probeRenderBrowser(launch)).rejects.toMatchObject({ code: 'BROWSER_PROBE_TIMEOUT' });
+  expect(close).toHaveBeenCalledTimes(2);
+});

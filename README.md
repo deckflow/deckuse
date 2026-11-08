@@ -26,10 +26,11 @@ Run this in a fresh directory with a writable npm cache. The installed binary an
 
 ```sh
 npm install --cache ./.npm-cache @deckflow/deckuse
+set -e
 deckuse_cli=./node_modules/.bin/deckuse
 "$deckuse_cli" agent-context --format pptx --scenario create --include-schema --json
-"$deckuse_cli" new ./example-workspace --json
-"$deckuse_cli" apply --workspace ./example-workspace --input ./node_modules/@deckflow/deckuse/skills/deckuse/examples/create-pptx.json --json
+"$deckuse_cli" new ./example-workspace --blank --json
+"$deckuse_cli" apply --workspace ./example-workspace --input ./node_modules/@deckflow/deckuse/skills/deckuse/examples/create-blank-pptx.json --request-id create-1 --expect-revision 1 --json
 "$deckuse_cli" validate --workspace ./example-workspace --json
 "$deckuse_cli" export ./example.pptx --workspace ./example-workspace --json
 ```

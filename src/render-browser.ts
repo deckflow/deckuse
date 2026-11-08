@@ -94,6 +94,7 @@ export async function browserPreflight() {
 }
 export async function launchRenderBrowser(
   launch: typeof chromium.launch = chromium.launch.bind(chromium),
+  timeout?: number,
 ): Promise<Browser> {
   const config = await browserPreflight();
   const key = JSON.stringify(config);
@@ -102,6 +103,7 @@ export async function launchRenderBrowser(
   try {
     return await launch({
       headless: true,
+      ...(timeout === undefined ? {} : { timeout }),
       ...(config.provider === 'executable'
         ? { executablePath: config.executablePath ?? '' }
         : config.provider === 'headless-shell'
@@ -110,6 +112,11 @@ export async function launchRenderBrowser(
     });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
+    if (cause instanceof Error && cause.name === 'TimeoutError')
+      throw new RenderFailure('BROWSER_PROBE_TIMEOUT', cause.message, {
+        stage: 'launch',
+        provider: config.provider,
+      });
     const missing =
       /Executable doesn't exist|executable.*does not exist|distribution.*not found/i.test(message);
     const registration =
@@ -149,4 +156,37 @@ export function renderFailurePayload(cause: unknown) {
     message: cause instanceof Error ? cause.message : String(cause),
     ...(cause instanceof RenderFailure ? { details: cause.details } : {}),
   };
+}
+
+/** Playwright owns the temporary profile and cancels launch on timeout. */
+export async function probeRenderBrowser(
+  launch: typeof chromium.launch = chromium.launch.bind(chromium),
+) {
+  const browser = await launchRenderBrowser(launch, 5000);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      (async () => {
+        const page = await browser.newPage();
+        await page.goto('data:text/html,<title>Deckuse browser probe</title>', { timeout: 5000 });
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            Object.assign(new Error('Browser smoke page timed out'), { name: 'TimeoutError' }),
+          );
+        }, 5000);
+      }),
+    ]);
+  } catch (cause) {
+    const timeout = cause instanceof Error && cause.name === 'TimeoutError';
+    throw new RenderFailure(
+      timeout ? 'BROWSER_PROBE_TIMEOUT' : 'BROWSER_PROBE_FAILED',
+      cause instanceof Error ? cause.message : String(cause),
+      { stage: 'probe-page' },
+    );
+  } finally {
+    clearTimeout(timer);
+    await browser.close();
+  }
 }

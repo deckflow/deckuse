@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -29,9 +29,11 @@ describe('workspace write lock', () => {
     expect(await isWriteLockHeld(workspace)).toBe(false);
   });
 
-  it('reclaims empty and invalid lock files immediately', async () => {
+  it('allows an initializing lock and reclaims stale or invalid lock files', async () => {
     const workspace = await workspaceFixture();
     await writeFile(lockPath(workspace), '');
+    expect(await isWriteLockHeld(workspace)).toBe(true);
+    await utimes(lockPath(workspace), new Date(0), new Date(0));
     expect(await isWriteLockHeld(workspace)).toBe(false);
     await expect(access(lockPath(workspace))).rejects.toMatchObject({ code: 'ENOENT' });
 

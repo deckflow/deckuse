@@ -97,7 +97,7 @@ export async function agentContext(options: {
         : scenario === 'edit' || scenario === 'populate-template'
           ? ['setText', 'setProperties', 'replacePicture', 'duplicate', 'validate', 'export']
           : ['addSlide', 'addShape', 'remove', 'setText', 'setProperties', 'validate', 'export'];
-  if (format === 'pptx' && scenario !== 'audit' && scenario !== 'preview-export')
+  if (format === 'pptx' && !['create', 'audit', 'preview-export'].includes(scenario))
     types.push(
       'groupShapes',
       'ungroupShapes',
@@ -135,23 +135,10 @@ export async function agentContext(options: {
     const error = renderFailurePayload(cause);
     browser = { available: false, code: error.code, message: error.message, launch: 'not-probed' };
   }
+  const example = 'skills/deckuse/examples/create-blank-pptx.json';
   const sample =
     format === 'pptx'
-      ? [
-          { type: 'addSlide', layout: 'Blank', name: 'Introduction' },
-          { type: 'remove', target: 'slide:1' },
-          {
-            type: 'addShape',
-            slide: 1,
-            shapeType: 'text',
-            name: 'Title',
-            x: '5%',
-            y: '5%',
-            width: '90%',
-            height: '80px',
-            text: 'Introduction',
-          },
-        ]
+      ? (JSON.parse(await readFile(new URL('../' + example, import.meta.url), 'utf8')) as unknown)
       : [{ type: 'addParagraph', blocks: [{ text: 'Introduction', fontSize: 18, bold: true }] }];
   return {
     ...identity,
@@ -164,9 +151,7 @@ export async function agentContext(options: {
       minimumCliVersion: manifest.minimumCliVersion,
       scenario: manifest.formatOverrides[format]?.[scenario] ?? workflow.resource,
       modules: manifest.modules,
-      ...(format === 'pptx' && scenario === 'create'
-        ? { example: 'skills/deckuse/examples/create-pptx.json' }
-        : {}),
+      ...(format === 'pptx' && scenario === 'create' ? { example } : {}),
     },
     cache: {
       staticKey: [version, PROTOCOL_VERSION, EDITION, format, scenario, fingerprint],
@@ -183,7 +168,10 @@ export async function agentContext(options: {
         'apply --input accepts a JSON array of write operations; JSON schemas below describe operations, not shell positionals',
       guards: 'Use --expect-revision with the current raw string revision',
       streams: 'Capture stdout JSON, stderr, exit code separately',
-      recovery: 'After response loss reconcile status/history/inventory before retry',
+      recovery:
+        format === 'pptx'
+          ? 'Use one --request-id per logical apply. After response loss, query status --request-id before retry.'
+          : 'After response loss reconcile status/history/inventory before retry',
       verification:
         'Validate after writes; HTML preview is approximate; native Office stays unverified',
     },
@@ -196,12 +184,17 @@ export async function agentContext(options: {
       scope:
         'New document smoke recipe; use inventory and selected workflow for an existing-file task',
       operations: sample,
+      optionalPreview: [
+        'deckuse render --preflight --probe-browser --json',
+        'deckuse render --page 1 --workspace ./ws --json',
+      ],
       cli: [
-        `deckuse new ./ws${format === 'docx' ? ' --format docx' : ''} --json`,
+        `deckuse new ./ws${format === 'docx' ? ' --format docx' : ' --blank'} --json`,
         'Save recipe.operations as ./ops.json',
-        'deckuse apply --workspace ./ws --input ./ops.json --json',
+        format === 'pptx'
+          ? 'deckuse apply --workspace ./ws --input ./ops.json --request-id create-1 --expect-revision 1 --summary --json'
+          : 'deckuse apply --workspace ./ws --input ./ops.json --json',
         'deckuse validate --workspace ./ws --json',
-        'deckuse render --page 1 --workspace ./ws --output ./page-1.png --json',
         `deckuse export ./output.${format} --workspace ./ws --json`,
       ],
     },

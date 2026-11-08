@@ -5,7 +5,7 @@ import { recordCliStartup, timed, timedSync } from './timing.js';
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
-import { access, open, readFile, realpath, stat } from 'node:fs/promises';
+import { access, open, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -29,8 +29,8 @@ import {
   monitorStopAll,
   runMonitorForeground,
 } from './monitor-daemon.js';
-import { renderPage, renderPages, parsePageSelection } from './render.js';
-import { browserPreflight, renderFailurePayload } from './render-browser.js';
+import { renderPage, renderPages, parsePageSelection, parseRenderReviewNotes } from './render.js';
+import { browserPreflight, probeRenderBrowser, renderFailurePayload } from './render-browser.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
 
@@ -58,7 +58,20 @@ const workspaceOpt = takeOption(args, '--workspace');
 const revisionOpt = takeOption(args, '--revision');
 const expectRevisionOpt = takeOption(args, '--expect-revision');
 const reasonOpt = takeOption(args, '--reason');
+const requestIdPresent = args.includes('--request-id');
+const requestIdOpt = takeOption(args, '--request-id');
+const summaryOpt = args[0] === 'apply' && takeFlag(args, '--summary');
+const reportPresent = args[0] === 'apply' && args.includes('--report');
+const reportOpt = reportPresent ? takeOption(args, '--report') : undefined;
 const clean = args;
+
+process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code !== 'EPIPE') throw error;
+  process.stderr.write(
+    'deckuse: response pipe closed; for apply, query status with the request ID.\n',
+  );
+  process.exitCode = 1;
+});
 
 const findWorkspace = async (start?: string): Promise<string> => {
   if (start) return resolve(start);
@@ -212,8 +225,66 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
       return false;
     }
   }
+  const format =
+    requestIdOpt && isRecord(command) && typeof command['workspaceId'] === 'string'
+      ? (
+          JSON.parse(
+            await readFile(join(command['workspaceId'], '.deckuse', 'manifest.json'), 'utf8'),
+          ) as { format?: string }
+        ).format
+      : undefined;
+  if (format && format !== 'pptx') {
+    outputEnvelope({
+      ok: false,
+      command: commandLabel,
+      error: {
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: 'Apply receipts are supported for PPTX workspaces only',
+      },
+    });
+    return false;
+  }
   const result = await runCommand(command);
-  outputEnvelope(toEnvelope(commandLabel, result));
+  const envelope = toEnvelope(commandLabel, result);
+  let reportPath: string | undefined;
+  if (reportOpt) {
+    try {
+      await writeFile(resolve(reportOpt), JSON.stringify(envelope) + '\n', { flag: 'wx' });
+      reportPath = resolve(reportOpt);
+    } catch (cause) {
+      // Reporting happens after the transaction. Preserve the actual outcome.
+      process.stderr.write(`deckuse: could not write report: ${String(cause)}\n`);
+    }
+  }
+  if (summaryOpt) {
+    const data = envelope.data as Record<string, unknown> | undefined;
+    const pages = Array.isArray(data?.['affectedSlides']) ? data['affectedSlides'] : [];
+    outputEnvelope({
+      ok: envelope.ok,
+      command: commandLabel,
+      ...(envelope.revision === undefined ? {} : { revision: envelope.revision }),
+      ...(envelope.error
+        ? {
+            error: {
+              code: envelope.error.code,
+              message: envelope.error.message.slice(0, 512),
+            },
+          }
+        : {}),
+      data: {
+        requestId: requestIdOpt?.slice(0, 256),
+        revision: data?.['revision'],
+        dryRun: data?.['dryRun'],
+        replayed: data?.['replayed'],
+        operationCount: Array.isArray(data?.['results']) ? data['results'].length : data ? 1 : 0,
+        affectedSlides: pages.slice(0, 256),
+        affectedSlideCount: pages.length,
+        diagnosticCount: result.diagnostics.length,
+        reportPath: reportPath?.slice(0, 1024),
+        reportFailed: reportOpt && !reportPath ? true : undefined,
+      },
+    });
+  } else outputEnvelope(envelope);
   return result.ok;
 };
 
@@ -373,6 +444,13 @@ const classifyApplyOps = (
 
 const main = async (): Promise<void> => {
   try {
+    if (
+      requestIdPresent &&
+      (!requestIdOpt?.trim() || requestIdOpt.startsWith('--') || requestIdOpt.length > 256)
+    )
+      throw new Error('--request-id requires a non-empty ID of at most 256 characters');
+    if (reportPresent && (!reportOpt || reportOpt.startsWith('--')))
+      throw new Error('--report requires a path');
     if (clean.length === 0) {
       const payload = await readStdin();
       const parsed = JSON.parse(payload) as unknown;
@@ -389,6 +467,9 @@ const main = async (): Promise<void> => {
 
       const action = requireDefined(clean[0]);
       let ok = true;
+      if (requestIdOpt !== undefined && !['apply', 'status'].includes(action))
+        throw new Error('--request-id requires apply or status');
+      if (requestIdOpt && revisionOpt) throw new Error('--request-id requires the live workspace');
 
       if (action === 'agent-context') {
         for (const flag of ['--format', '--scenario'])
@@ -673,6 +754,7 @@ const main = async (): Promise<void> => {
           version: PROTOCOL_VERSION,
           type: 'status',
           workspaceId: workspace,
+          ...(requestIdOpt ? { requestId: requestIdOpt } : {}),
         });
       } else if (action === 'list') {
         const resource = clean[1];
@@ -1152,7 +1234,10 @@ const main = async (): Promise<void> => {
           );
         }
 
-        const extras = await mutationExtras(workspace);
+        const extras = {
+          ...(await mutationExtras(workspace)),
+          ...(requestIdOpt ? { requestId: requestIdOpt } : {}),
+        };
         const runHighLevelBatch = async (list: unknown[]): Promise<boolean> => {
           const commands = list.map((value) => {
             if (!isRecord(value)) throw new Error('apply input must contain command objects');
@@ -1168,7 +1253,7 @@ const main = async (): Promise<void> => {
             };
           });
           const payload =
-            commands.length === 1 && commands[0]?.['type'] !== 'batch'
+            !requestIdOpt && commands.length === 1 && commands[0]?.['type'] !== 'batch'
               ? commands[0]
               : {
                   ...extras,
@@ -1468,17 +1553,36 @@ const main = async (): Promise<void> => {
         return;
       } else if (action === 'render') {
         if (clean.includes('--preflight')) {
+          const probe = clean.includes('--probe-browser');
+          let converter: Awaited<ReturnType<typeof converterPreflight>> | undefined;
+          let state: Awaited<ReturnType<typeof browserPreflight>> | undefined;
           try {
+            converter = await converterPreflight();
+            state = await browserPreflight();
+            if (probe) await probeRenderBrowser();
             outputEnvelope({
               ok: true,
               command: 'deckuse render',
-              data: { ...(await browserPreflight()), converter: await converterPreflight() },
+              data: { ...state, ...(probe ? { launch: 'available' } : {}), converter },
             });
           } catch (cause) {
+            const error = renderFailurePayload(cause);
             outputEnvelope({
               ok: false,
               command: 'deckuse render',
-              error: renderFailurePayload(cause),
+              error,
+              data: {
+                ...state,
+                converter,
+                launch:
+                  error.code === 'BROWSER_HOST_DENIED'
+                    ? 'denied'
+                    : error.code === 'BROWSER_PROBE_TIMEOUT'
+                      ? 'timeout'
+                      : state && probe
+                        ? 'failed'
+                        : 'not-probed',
+              },
             });
             process.exitCode = 1;
           }
@@ -1500,7 +1604,12 @@ const main = async (): Promise<void> => {
         const pageRaw = optionFrom(clean, '--page');
         const pagesRaw = optionFrom(clean, '--pages');
         const all = clean.includes('--all');
-        if (pagesRaw !== undefined || all) {
+        const sinceRevision = optionFrom(clean, '--since-revision');
+        const contactSheet = clean.includes('--contact-sheet');
+        const reviewNotesPath = optionFrom(clean, '--review-notes');
+        if (clean.includes('--review-notes') && !reviewNotesPath)
+          throw new Error('--review-notes requires a JSON file path');
+        if (pagesRaw !== undefined || all || sinceRevision) {
           if (pageRaw || optionFrom(clean, '--output') || (pagesRaw !== undefined && all))
             throw new Error(
               'Use --pages or --all with --output-dir; do not combine with --page/--output',
@@ -1510,6 +1619,15 @@ const main = async (): Promise<void> => {
           try {
             const rendered = await renderPages(workspace, {
               all,
+              sinceRevision,
+              contactSheet,
+              ...(reviewNotesPath
+                ? {
+                    reviewNotes: parseRenderReviewNotes(
+                      await readFile(resolve(reviewNotesPath), 'utf8'),
+                    ),
+                  }
+                : {}),
               pages: selection,
               outputDir: optionFrom(clean, '--output-dir'),
               scale: optionFrom(clean, '--scale')
@@ -1528,7 +1646,7 @@ const main = async (): Promise<void> => {
           }
           return;
         }
-        if (optionFrom(clean, '--output-dir'))
+        if (optionFrom(clean, '--output-dir') || contactSheet || reviewNotesPath)
           throw new Error('--output-dir requires --pages or --all');
         if (!pageRaw)
           throw new Error('Usage: deckuse render --page <n> [--output <file.png>] [--scale <n>]');

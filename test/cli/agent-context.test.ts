@@ -59,7 +59,7 @@ it('executes the returned new/apply/validate/export recipe and reads workspace r
   expect(await readdir(root)).toEqual([]);
   expect(response.data.contracts).toBeDefined();
   const ws = join(root, 'ws');
-  cli('new', ws);
+  cli('new', ws, '--blank');
   const ops = join(root, 'ops.json');
   await writeFile(ops, JSON.stringify(response.data.recipe.operations));
   cli('apply', '--workspace', ws, '--input', ops);

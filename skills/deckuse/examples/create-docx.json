@@ -1,4 +1,15 @@
 [
-  { "type": "addParagraph", "after": "body/p:1", "style": "Heading1", "name": "Overview", "blocks": [{ "text": "Overview" }] },
-  { "type": "addParagraph", "after": "bookmark:Overview", "style": "Normal", "blocks": [{ "text": "This document retains native paragraphs and semantic headings." }] }
+  {
+    "type": "addParagraph",
+    "after": "body/p:1",
+    "style": "Heading1",
+    "name": "Overview",
+    "blocks": [{ "text": "Overview" }]
+  },
+  {
+    "type": "addParagraph",
+    "after": "bookmark:Overview",
+    "style": "Normal",
+    "blocks": [{ "text": "This document retains native paragraphs and semantic headings." }]
+  }
 ]
