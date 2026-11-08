@@ -36,9 +36,14 @@ Resume the first incomplete phase, not the whole pipeline. For example, successf
 
 Finish with the output file, completed checks, known limitations and any unresolved user action. Keep operation files, streams and a small evidence index with the task; avoid credentials and unrelated private file content in shareable reports.
 
-
 ### Recover a PPTX apply response
 
 Give each logical apply a stable `--request-id` and the inspected `--expect-revision`. Save the result to a fresh report file. If the process times out, stdout closes, or a shell command loses the response, run `deckuse status --workspace ./ws --request-id <id> --json`. A committed receipt reports its original revision, and `current` reports whether it still matches the current write history. Reuse the ID and the same input for a retry only when continuing that request. Treat stale receipts and conflicting inputs as a reason to inspect the current state before making another write.
 
 If a render logs `RENDER_CLEANUP_FAILED`, check the screenshot result and the reported temporary directory separately. Preserve successful PNGs. A denied cleanup path does not require another apply or conversion. If the converter itself reports `RENDER_CONVERTER_EXTRACTION_FAILED`, use `render --preflight` with an allowed writable extraction directory, then resume rendering.
+
+A `not-committed` receipt records a definite rejection. Use a new request ID for
+corrected input. A `reverted` receipt identifies a write undone in this workspace.
+An `unknown` result has no receipt, so reconcile status, history and the current
+revision before any guarded retry. A later successful write does not erase the
+original receipt of an earlier commit that remains in history.

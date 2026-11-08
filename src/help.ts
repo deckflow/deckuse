@@ -842,7 +842,7 @@ Examples:
 Options:
   --pages <1,3-5>          Render several pages from one snapshot (use --output-dir)
   --preflight              Check converter and browser configuration without a workspace
-  --probe-browser           With --preflight, also verify browser launch
+  --probe-browser           With --preflight, launch the selected browser and load a trivial page
   --all                    Render all pages from one snapshot
   --since-revision <rev>   PPTX: reuse verified PNGs in the same output directory
   --contact-sheet         PPTX batch: also save contact-sheet.png

@@ -59,6 +59,7 @@ interface Journal {
   present: string[];
   target?: string;
   previousCommit?: string;
+  rewindTo?: string;
   backupHash?: string;
 }
 export async function recoverTransaction(
@@ -73,18 +74,21 @@ export async function recoverTransaction(
       throw new Error('Invalid transaction backup');
     let committed = false;
     let changedHead = false;
+    let expectedRewind = false;
     try {
       const history = await log({ fs, dir: root, depth: 1 });
       changedHead = Boolean(journal.previousCommit && history[0]?.oid !== journal.previousCommit);
+      expectedRewind = Boolean(journal.rewindTo && history[0]?.oid === journal.rewindTo);
       committed = Boolean(
         journal.target &&
-        history[0]?.commit.message.includes(`Deckuse-Transaction: ${journal.id}`) &&
+        (expectedRewind ||
+          history[0]?.commit.message.includes(`Deckuse-Transaction: ${journal.id}`)) &&
         (await digest(root)) === journal.target,
       );
     } catch {
       /* Restore the backup when commit cannot be verified. */
     }
-    if (!committed && changedHead)
+    if (!committed && changedHead && !expectedRewind)
       throw new Error('Git HEAD changed and the target digest cannot be verified');
     if (!committed) {
       if (!journal.backupHash || (await digest(join(dir, 'backup'), true)) !== journal.backupHash)
@@ -114,7 +118,12 @@ export async function recoverTransaction(
 /** Caller holds the workspace lock. Back up actual working files, including dirty edits. */
 export async function withWorkspaceTransaction<T>(
   root: string,
-  action: (id: string, prepareCommit: () => Promise<void>, directory: string) => Promise<T>,
+  action: (
+    id: string,
+    prepareCommit: () => Promise<void>,
+    directory: string,
+    prepareRewind: (head: string) => Promise<void>,
+  ) => Promise<T>,
 ): Promise<T> {
   await recoverTransaction(root);
   const dir = directory(root);
@@ -141,14 +150,21 @@ export async function withWorkspaceTransaction<T>(
     await rm(staging, { recursive: true, force: true });
     throw e;
   }
-  const prepareCommit = async () => {
-    journal.target = await digest(root);
+  const writeJournal = async () => {
     await writeFile(join(dir, 'journal.next'), JSON.stringify(journal));
     await rename(join(dir, 'journal.next'), join(dir, 'journal.json'));
   };
+  const prepareCommit = async () => {
+    journal.target = await digest(root);
+    await writeJournal();
+  };
+  const prepareRewind = async (head: string) => {
+    journal.rewindTo = head;
+    await writeJournal();
+  };
   try {
     await ensureGitignore(root);
-    const result = await action(journal.id, prepareCommit, dir);
+    const result = await action(journal.id, prepareCommit, dir, prepareRewind);
     try {
       await timed('cleanup-transaction', () => rm(dir, { recursive: true, force: true }));
     } catch (cause) {

@@ -93,8 +93,13 @@ it('records one commit for concurrent requests, keeps dry-run pure, and refuses 
     await writeFile(input, '[{"type":"addSlide","name":"Different","layout":"Blank"}]');
     expect((await cli(apply)).body.error.code).toBe('TRANSACTION_CONFLICT');
     await writeFile(input, original);
-    expect((await cli(['undo', '--workspace', ws])).code).toBe(0);
-    expect((await cli(status)).body.data.current).toBe(false);
+    const other = join(root, 'other.json');
+    await writeFile(other, '[{"type":"addSlide","layout":"Blank","name":"Third"}]');
+    expect((await cli(['apply', ws, '--input', other, '--expect-revision', '2'])).code).toBe(0);
+    expect((await cli(apply)).body.data).toMatchObject({ replayed: true, revision: '2' });
+    expect((await cli(['status', ws])).body.data.revision).toBe('3');
+    expect((await cli(['undo', '--workspace', ws, '--steps', '2'])).code).toBe(0);
+    expect((await cli(status)).body.data).toMatchObject({ state: 'reverted', current: false });
     expect((await cli(apply)).body.error.message).toMatch(/stale/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -207,3 +212,70 @@ it('keeps a successful commit when the receiving side closes stdout', async () =
     await rm(root, { recursive: true, force: true });
   }
 }, 20_000);
+
+it('records a known rejection and preserves the workspace after ambiguous slide names', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-receipt-rejected-'));
+  const ws = join(root, 'ws');
+  const input = join(root, 'ops.json');
+  expect((await cli(['new', ws, '--blank'])).code).toBe(0);
+  expect((await cli(['new', ws, '--blank'])).body.error.code).toBe('WORKSPACE_NOT_EMPTY');
+  await writeFile(
+    input,
+    JSON.stringify([
+      { type: 'addSlide', layout: 'Blank', name: 'Same' },
+      { type: 'addSlide', layout: 'Blank', name: 'Same' },
+      { type: 'addShape', slide: 'Same', shapeType: 'text', text: 'Do not write' },
+    ]),
+  );
+  const apply = [
+    'apply',
+    ws,
+    '--input',
+    input,
+    '--request-id',
+    'rejected',
+    '--expect-revision',
+    '1',
+  ];
+  expect((await cli(apply)).body.error.message).toMatch(/ambiguous/);
+  expect((await cli(['status', ws, '--request-id', 'rejected'])).body.data).toMatchObject({
+    state: 'not-committed',
+    revision: '1',
+  });
+  expect((await cli(['list', 'slides', '--workspace', ws])).body.data.items).toHaveLength(1);
+  expect((await cli(apply)).body.error.message).toMatch(/ambiguous/);
+}, 30_000);
+
+it('restores the current revision when undo fails after changing Git HEAD', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-undo-fault-'));
+  const ws = join(root, 'ws');
+  const input = join(root, 'ops.json');
+  const preload = join(root, 'undo-fault.mjs');
+  expect((await cli(['new', ws, '--blank'])).code).toBe(0);
+  await writeFile(input, '[{"type":"addSlide","layout":"Blank","name":"Retain"}]');
+  expect((await cli(['apply', ws, '--input', input, '--request-id', 'retain'])).code).toBe(0);
+  const original = await readFile(join(ws, 'package.pptx'));
+  await writeFile(join(ws, 'user-note.txt'), 'Keep this note');
+  await writeFile(
+    preload,
+    `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const write = fs.promises.writeFile;
+    fs.promises.writeFile = async (path, ...args) => {
+      if (/package\\.pptx\\..+\\.tmp$/.test(String(path))) throw new Error('Injected undo packaging error');
+      return write(path, ...args);
+    };
+    syncBuiltinESMExports();
+  `,
+  );
+  expect((await cli(['undo', '--workspace', ws], preload)).body.error.message).toContain(
+    'Injected undo packaging error',
+  );
+  expect((await cli(['status', ws])).body.data.revision).toBe('2');
+  expect((await cli(['list', 'slides', '--workspace', ws])).body.data.items).toHaveLength(2);
+  expect(await readFile(join(ws, 'package.pptx'))).toEqual(original);
+  expect(await readFile(join(ws, 'user-note.txt'), 'utf8')).toBe('Keep this note');
+  expect((await cli(['undo', '--workspace', ws])).body.data.revision).toBe('1');
+  expect(await readFile(join(ws, 'user-note.txt'), 'utf8')).toBe('Keep this note');
+}, 30_000);

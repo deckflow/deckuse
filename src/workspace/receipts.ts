@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Diagnostic } from '../core/index.js';
+import type { DeckuseError, Diagnostic } from '../core/index.js';
 import { readOperations } from './operations.js';
 
 export interface ApplyReceipt {
@@ -12,6 +12,7 @@ export interface ApplyReceipt {
   commitToken: string;
   result: Record<string, unknown>;
   diagnostics: Diagnostic[];
+  rejection?: Pick<DeckuseError, 'code' | 'message'>;
 }
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -54,8 +55,12 @@ export function operationDigest(command: {
 export async function readApplyReceipt(root: string, id: string) {
   try {
     const receipt = JSON.parse(await readFile(pathFor(root, id), 'utf8')) as ApplyReceipt;
-    const latest = (await readOperations(root)).at(-1);
-    return { receipt, current: latest?.commitToken === receipt.commitToken };
+    const history = await readOperations(root);
+    return {
+      receipt,
+      active: history.some((record) => record.commitToken === receipt.commitToken),
+      current: history.at(-1)?.commitToken === receipt.commitToken,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
@@ -64,5 +69,8 @@ export async function readApplyReceipt(root: string, id: string) {
 
 export async function writeApplyReceipt(root: string, receipt: ApplyReceipt) {
   await mkdir(directory(root), { recursive: true });
-  await writeFile(pathFor(root, receipt.requestId), JSON.stringify(receipt));
+  const destination = pathFor(root, receipt.requestId);
+  const staging = destination + '.' + randomUUID() + '.tmp';
+  await writeFile(staging, JSON.stringify(receipt), { flag: 'wx' });
+  await rename(staging, destination);
 }

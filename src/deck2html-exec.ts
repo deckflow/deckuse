@@ -1,6 +1,6 @@
 import { RenderFailure } from './render-browser.js';
-import { access, chmod, constants, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { access, chmod, constants, lstat, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import deck2html from '@deckflow/deck2html';
 
@@ -24,7 +24,8 @@ export const ensureDeck2HtmlExecutable = async (): Promise<void> => {
   }
 };
 
-const defaultExtractionBase = () => join(homedir(), '.cache', 'deckuse', 'dotnet');
+const defaultExtractionBase = () =>
+  join(tmpdir(), `deckuse-dotnet-${String(process.getuid?.() ?? 'user')}`);
 const extractionBase = () =>
   process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] ?? defaultExtractionBase();
 
@@ -33,6 +34,15 @@ async function converterEnvironment() {
   if (!process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR']) {
     try {
       await mkdir(base, { recursive: true, mode: 0o700 });
+      const info = await lstat(base);
+      const uid = process.getuid?.();
+      if (
+        !info.isDirectory() ||
+        (uid !== undefined && (info.uid !== uid || (info.mode & 0o022) !== 0))
+      )
+        throw new Error(
+          'Default extraction cache must be a directory owned by the current user and protected from other writers',
+        );
     } catch (error) {
       throw converterFailure(`Failed to create extraction directory ${base}: ${String(error)}`);
     }
@@ -140,6 +150,6 @@ export async function converterPreflight() {
     binary,
     version,
     extractionBase: extractionBase(),
-    extractionSource: process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] ? 'explicit' : 'deckuse-cache',
+    extractionSource: process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'] ? 'explicit' : 'deckuse-temp',
   };
 }

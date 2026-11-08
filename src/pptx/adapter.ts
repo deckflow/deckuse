@@ -1,4 +1,4 @@
-import { operationDigest, readApplyReceipt } from '../workspace/receipts.js';
+import { operationDigest, readApplyReceipt, writeApplyReceipt } from '../workspace/receipts.js';
 import { exportDigest } from './export-recovery.js';
 import { tableMergeDiagnostics } from './table.js';
 import { assertChartProperties } from './properties.js';
@@ -831,7 +831,7 @@ export const pptxAdapter: FormatAdapter = {
               return ok(result);
             } catch (cause) {
               return err(
-                'VALIDATION_FAILED',
+                cause instanceof RecoveryRequiredError ? 'RECOVERY_REQUIRED' : 'VALIDATION_FAILED',
                 cause instanceof Error ? cause.message : 'Undo failed',
               );
             }
@@ -849,7 +849,12 @@ export const pptxAdapter: FormatAdapter = {
             operationSha256,
             previousRevision,
             revision,
-            state: 'committed',
+            state: found.receipt.rejection
+              ? 'not-committed'
+              : found.active
+                ? 'committed'
+                : 'reverted',
+            ...(found.receipt.rejection ? { rejection: found.receipt.rejection } : {}),
             current: found.current && !(await isPackageStale(workspace)),
             operationCount: Array.isArray(result['results']) ? result['results'].length : 0,
             affectedSlides: affectedSlides.slice(0, 256),
@@ -1340,11 +1345,11 @@ export const pptxAdapter: FormatAdapter = {
                   'TRANSACTION_CONFLICT',
                   'Request ID was already used for different operations',
                 );
-              if (
-                !existing.current ||
-                existing.receipt.revision !== currentManifest.revision ||
-                (await isPackageStale(workspace, currentManifest))
-              )
+              if (existing.receipt.rejection) {
+                const { code, message } = existing.receipt.rejection;
+                return err(code, message, existing.receipt.diagnostics);
+              }
+              if (!existing.active || (await isPackageStale(workspace, currentManifest)))
                 return err(
                   'TRANSACTION_CONFLICT',
                   'Request receipt is stale; query status before continuing',
@@ -1403,6 +1408,28 @@ export const pptxAdapter: FormatAdapter = {
             dryRun: boolean | undefined,
             operation: unknown,
           ) => {
+            const recordRejection = async <T>(result: Result<T>): Promise<Result<T>> => {
+              if (!result.ok && requestId && digest && !dryRun) {
+                const { code, message } = result.error;
+                try {
+                  await writeApplyReceipt(workspace, {
+                    requestId,
+                    operationSha256: digest,
+                    previousRevision: currentManifest.revision,
+                    revision: currentManifest.revision,
+                    commitToken: '',
+                    result: {},
+                    diagnostics: result.diagnostics,
+                    rejection: { code, message },
+                  });
+                } catch (cause) {
+                  process.stderr.write(
+                    `deckuse: could not record rejected apply: ${String(cause)}\n`,
+                  );
+                }
+              }
+              return result;
+            };
             const results: unknown[] = [];
             const diagnostics: Diagnostic[] = [];
             const slidePages: number[] = [];
@@ -1412,14 +1439,14 @@ export const pptxAdapter: FormatAdapter = {
             for (const nested of nestedCommands) {
               if (REVIEW_WRITES.has(nested.type)) {
                 const conflict = assertExpectRevision(nested, currentManifest.revision);
-                if (conflict) return conflict;
+                if (conflict) return recordRejection(conflict);
               }
               working.markClean();
               const result = await timed('mutation', () => applyMutation(nested));
               const dirty = working.getDirtyParts();
               for (const part of dirty) batchDirty.add(part);
               diagnostics.push(...result.diagnostics);
-              if (!result.ok) return result;
+              if (!result.ok) return recordRejection(result);
               results.push(result.value);
               slidePages.push(...slidesFromOutcome(result.value));
               const currentSlides = currentIndex.elements.filter((item) => item.kind === 'slide');
@@ -1481,11 +1508,13 @@ export const pptxAdapter: FormatAdapter = {
             const changedParts = [...new Set([...batchDirty, ...working.getDirtyParts()])].sort();
             const validation = validateArchive(working, workspace);
             if (validation.some((d) => d.severity === 'error'))
-              return err(
-                'VALIDATION_FAILED',
-                'PPTX validation failed',
-                validation,
-                notesRepairHintExtra(workspace, validation),
+              return recordRejection(
+                err(
+                  'VALIDATION_FAILED',
+                  'PPTX validation failed',
+                  validation,
+                  notesRepairHintExtra(workspace, validation),
+                ),
               );
             if (dryRun)
               return ok(

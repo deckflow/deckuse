@@ -724,63 +724,70 @@ export async function renderPages(
       }
       const pending = selected.filter((page) => !available.has(page));
       if (pending.length) {
-        const directory = join(staging, 'slides-html');
-        await mkdir(directory);
-        const converted = await timed('convert', () =>
-          (options.dependencies?.convert ?? convertWithConfiguredBinary)(
-            join(staging, PACKAGE_PPTX),
-            {
-              output: directory,
-              pages: pending.join(','),
-              noPlayer: true,
-              noLazySlides: true,
-              includeHiddenSlides: true,
-            },
-          ),
-        );
-        if (converted.exitCode !== 0)
-          throw converterFailure(converted.stderr || 'deck2html conversion failed');
-        const entry = resolve(converted.indexHtmlPath);
-        const relativeEntry = relative(directory, entry);
-        if (relativeEntry === '..' || relativeEntry.startsWith(`..${sep}`))
-          throw new Error('deck2html returned an output outside the staging directory');
-        if (!options.dependencies?.screenshot) browser = await launchRenderBrowser();
-        const session = browser
-          ? await openPptxRenderSession(browser, entry, pending.length, options.scale)
-          : undefined;
         try {
-          for (const [slideIndex, page] of pending.entries()) {
-            const output = join(outputDir, `page-${String(page)}.png`);
-            try {
-              const result = await renderPageSnapshot(
-                staging,
-                {
-                  page,
-                  output,
-                  scale: options.scale,
-                  dependencies: {
-                    ...options.dependencies,
-                    screenshot:
-                      options.dependencies?.screenshot ??
-                      ((opts) => {
-                        if (!session) throw new Error('Render session unavailable');
-                        return session.screenshot(slideIndex, opts.outputPath);
-                      }),
+          const directory = join(staging, 'slides-html');
+          await mkdir(directory);
+          const converted = await timed('convert', () =>
+            (options.dependencies?.convert ?? convertWithConfiguredBinary)(
+              join(staging, PACKAGE_PPTX),
+              {
+                output: directory,
+                pages: pending.join(','),
+                noPlayer: true,
+                noLazySlides: true,
+                includeHiddenSlides: true,
+              },
+            ),
+          );
+          if (converted.exitCode !== 0)
+            throw converterFailure(converted.stderr || 'deck2html conversion failed');
+          const entry = resolve(converted.indexHtmlPath);
+          const relativeEntry = relative(directory, entry);
+          if (relativeEntry === '..' || relativeEntry.startsWith(`..${sep}`))
+            throw new Error('deck2html returned an output outside the staging directory');
+          if (!options.dependencies?.screenshot) browser = await launchRenderBrowser();
+          const session = browser
+            ? await openPptxRenderSession(browser, entry, pending.length, options.scale)
+            : undefined;
+          try {
+            for (const [slideIndex, page] of pending.entries()) {
+              const output = join(outputDir, `page-${String(page)}.png`);
+              try {
+                const result = await renderPageSnapshot(
+                  staging,
+                  {
+                    page,
+                    output,
+                    scale: options.scale,
+                    dependencies: {
+                      ...options.dependencies,
+                      screenshot:
+                        options.dependencies?.screenshot ??
+                        ((opts) => {
+                          if (!session) throw new Error('Render session unavailable');
+                          return session.screenshot(slideIndex, opts.outputPath);
+                        }),
+                    },
                   },
-                },
-                { converted, directory, slideIndex, archive, index, sha },
-              );
-              if (!options.dependencies)
-                await writeRenderCache(result, keys.get(page)).catch((error: unknown) => {
-                  process.stderr.write(`deckuse: RENDER_CACHE_WRITE_FAILED: ${String(error)}\n`);
-                });
-              available.set(page, { page, ok: true, result });
-            } catch (cause) {
-              available.set(page, renderPageError(page, cause));
+                  { converted, directory, slideIndex, archive, index, sha },
+                );
+                if (!options.dependencies)
+                  await writeRenderCache(result, keys.get(page)).catch((error: unknown) => {
+                    process.stderr.write(`deckuse: RENDER_CACHE_WRITE_FAILED: ${String(error)}\n`);
+                  });
+                available.set(page, { page, ok: true, result });
+              } catch (cause) {
+                available.set(page, renderPageError(page, cause));
+              }
             }
+          } finally {
+            await session?.close();
           }
-        } finally {
-          await session?.close();
+        } catch (cause) {
+          if (!available.size) throw cause;
+          for (const page of pending) {
+            if (!available.has(page)) available.set(page, renderPageError(page, cause));
+          }
         }
       }
       const results = pages.map((page) =>

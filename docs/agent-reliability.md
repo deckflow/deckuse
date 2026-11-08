@@ -260,3 +260,32 @@ three process-cold runs, with separate context, creation, validation, first expo
 and incremental export wall times. Set `DECKUSE_TIMINGS_FILE` to a writable JSONL
 path to collect nested CLI phase spans without changing stdout. Phase spans can
 overlap, and local measurements exclude host scheduling and visual review.
+
+## Carry a PPTX review forward after a local patch
+
+Start from the installed [two-slide starter](../skills/deckuse/examples/create-blank-pptx.json).
+Create with `new --blank` and retain the original operation file. Render the baseline
+with `render --all --workspace ./ws --output-dir ./review --json > baseline.json`.
+Review both pages. Record the reported revision and keep the PNGs and sidecars in
+the same directory.
+
+Save an ordered patch, for example:
+
+```json
+[{ "type": "setText", "target": "slide:2/shape:Title", "value": "Reviewed details" }]
+```
+
+Apply it with `--request-id review-1 --expect-revision 2` and retain the response.
+Run one `render --since-revision 2 --workspace ./ws --output-dir ./review --json > review.json`.
+The batch maps the changed visual inputs to the pages that need fresh screenshots.
+Each reused page includes `reusedFromRevision`. Failed pages remain explicit and
+a failed render exits nonzero. Shared package changes, slide ordering changes and
+missing or replaced PNGs invalidate the corresponding cache entries. Review fresh
+screenshots and check the exported revision against the new inventory.
+
+Replay by applying the original operations and the same ordered patches to a
+fresh blank workspace, using the preceding revision as each guard. Compare slide
+order, editable shape text, and validation results. Package bytes can differ
+because the workspaces record independent build metadata.
+
+For host-level wall-time trials see the [managed PPTX benchmark](managed-pptx-benchmark.md).

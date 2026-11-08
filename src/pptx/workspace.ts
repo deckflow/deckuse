@@ -225,14 +225,17 @@ export async function undoWrites(
     throw new Error(
       `Cannot undo ${String(steps)} step(s); only ${String(records.length)} available`,
     );
-  await resetGit(root, steps);
-  const manifest = await readManifest(root);
-  const archive = await OpcArchive.openDirectory(sourceDir(root));
-  const index = await loadIndex(root, archive, manifest, { persist: true });
-  const packed = await packPackage(root, archive, {
-    ...manifest,
-    updatedAt: new Date().toISOString(),
+  return withWorkspaceTransaction(root, async (_id, prepareCommit, _directory, prepareRewind) => {
+    await resetGit(root, steps, prepareRewind);
+    const manifest = await readManifest(root);
+    const archive = await OpcArchive.openDirectory(sourceDir(root));
+    const index = await loadIndex(root, archive, manifest, { persist: true });
+    const packed = await packPackage(root, archive, {
+      ...manifest,
+      updatedAt: new Date().toISOString(),
+    });
+    await writeMetadata(root, packed, index);
+    await prepareCommit();
+    return { undone: steps, revision: index.revision };
   });
-  await writeMetadata(root, packed, index);
-  return { undone: steps, revision: index.revision };
 }

@@ -30,7 +30,7 @@ import {
   runMonitorForeground,
 } from './monitor-daemon.js';
 import { renderPage, renderPages, parsePageSelection, parseRenderReviewNotes } from './render.js';
-import { browserPreflight, launchRenderBrowser, renderFailurePayload } from './render-browser.js';
+import { browserPreflight, probeRenderBrowser, renderFailurePayload } from './render-browser.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
 
@@ -1553,24 +1553,36 @@ const main = async (): Promise<void> => {
         return;
       } else if (action === 'render') {
         if (clean.includes('--preflight')) {
+          const probe = clean.includes('--probe-browser');
+          let converter: Awaited<ReturnType<typeof converterPreflight>> | undefined;
+          let state: Awaited<ReturnType<typeof browserPreflight>> | undefined;
           try {
-            const state = await browserPreflight();
-            const converter = await converterPreflight();
-            const probe = clean.includes('--probe-browser');
-            if (probe) {
-              const browser = await launchRenderBrowser();
-              await browser.close();
-            }
+            converter = await converterPreflight();
+            state = await browserPreflight();
+            if (probe) await probeRenderBrowser();
             outputEnvelope({
               ok: true,
               command: 'deckuse render',
               data: { ...state, ...(probe ? { launch: 'available' } : {}), converter },
             });
           } catch (cause) {
+            const error = renderFailurePayload(cause);
             outputEnvelope({
               ok: false,
               command: 'deckuse render',
-              error: renderFailurePayload(cause),
+              error,
+              data: {
+                ...state,
+                converter,
+                launch:
+                  error.code === 'BROWSER_HOST_DENIED'
+                    ? 'denied'
+                    : error.code === 'BROWSER_PROBE_TIMEOUT'
+                      ? 'timeout'
+                      : state && probe
+                        ? 'failed'
+                        : 'not-probed',
+              },
             });
             process.exitCode = 1;
           }
