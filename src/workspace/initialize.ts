@@ -1,3 +1,4 @@
+import { retireOwnedPath } from './cleanup.js';
 import { mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
@@ -96,7 +97,7 @@ export async function withInitialization<T>(
   } finally {
     try {
       await lock.close();
-      if (!preserveMarker) await rm(marker, { force: true });
+      if (!preserveMarker) await retireOwnedPath(root, marker);
     } catch (cause) {
       onCleanupWarning?.(marker, cause);
     }

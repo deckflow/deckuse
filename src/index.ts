@@ -1,3 +1,5 @@
+import { collectCleanupWarnings } from './workspace/cleanup.js';
+import type { Diagnostic } from './core/index.js';
 import { initializationState } from './workspace/initialize.js';
 import { withWriteLock } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
@@ -43,8 +45,17 @@ export const createDefaultExecutor = (): Executor =>
       },
     },
   );
-export const runCommand = async (input: unknown): Promise<Result<unknown>> =>
-  createDefaultExecutor().execute(input);
+export const runCommand = async (input: unknown): Promise<Result<unknown>> => {
+  const warnings: Diagnostic[] = [];
+  const result = await collectCleanupWarnings(warnings, () =>
+    createDefaultExecutor().execute(input),
+  );
+  if (!warnings.length) return result;
+  const diagnostics = [...result.diagnostics, ...warnings];
+  if (result.ok && result.value && typeof result.value === 'object' && !Array.isArray(result.value))
+    return { ...result, diagnostics, value: { ...result.value, cleanupWarnings: warnings } };
+  return { ...result, diagnostics };
+};
 
 export { startMonitor, type MonitorHandle, type MonitorOptions } from './monitor.js';
 export {

@@ -3,7 +3,7 @@ import { timed } from '../timing.js';
 import { withWorkspaceTransaction } from '../workspace/transaction.js';
 import { withInitialization } from '../workspace/initialize.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, readdir, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { WorkspaceManifest } from '../core/index.js';
 import { OpcArchive, snapshotArchive, type OpcArchive as OpcArchiveType } from '../opc/index.js';
@@ -180,7 +180,8 @@ export async function persistWrite(
   const sourceTmp = `${source}.${randomUUID()}.tmp`;
   return withWorkspaceTransaction(root, async (transactionId, prepareCommit, journal) => {
     try {
-      await archive.writeDirectory(sourceTmp);
+      await mkdir(sourceTmp);
+      await archive.writeDirectoryContents(sourceTmp);
       await timed('source-swap', async () => {
         // Keep the outgoing source inside the journal until the commit is durable.
         await rename(source, join(journal, 'retired-source'));
