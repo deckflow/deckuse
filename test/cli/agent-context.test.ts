@@ -77,3 +77,24 @@ it('executes the returned new/apply/validate/export recipe and reads workspace r
   );
   expect(JSON.parse(invalid.stdout).ok).toBe(false);
 }, 30_000);
+
+it('indexes v2 contracts by operation without running browser preflight', async () => {
+  vi.stubEnv('DECKUSE_BROWSER_PROVIDER', 'executable');
+  vi.stubEnv('PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH', '/missing/deckuse-context-browser');
+  try {
+    const summary = await agentContext({ format: 'pptx', scenario: 'create' });
+    const full = await agentContext({ format: 'pptx', scenario: 'create', includeSchema: true });
+    expect(summary.contextSchemaVersion).toBe(2);
+    expect(summary.contracts).toBeUndefined();
+    expect(summary.dependencies.browser).toMatchObject({
+      executableStatus: 'unknown',
+      launch: 'not-probed',
+    });
+    expect(Object.keys(summary.operationFields)).toEqual(summary.operationTypes);
+    for (const [i, type] of full.operationTypes.entries()) {
+      expect(full.operationFields[type]).toMatchObject({ contract: `#/contracts/anyOf/${i}` });
+    }
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

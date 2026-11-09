@@ -1,6 +1,6 @@
 import { retireOwnedPath, warnCleanup } from './cleanup.js';
 import { timed } from '../timing.js';
-import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import fs from 'node:fs';
@@ -97,7 +97,9 @@ export async function recoverTransaction(
       for (const path of journal.present)
         if (!(await exists(join(dir, 'backup', path)))) throw new Error(`Missing backup: ${path}`);
       for (const path of paths) {
-        await rm(join(root, path), { recursive: true, force: true });
+        const current = join(root, path);
+        if (await exists(current))
+          await timed('cleanup-transaction-rollback', () => retireOwnedPath(root, current, true));
         if (journal.present.includes(path)) {
           await mkdir(join(root, path, '..'), { recursive: true });
           await cp(join(dir, 'backup', path), join(root, path), { recursive: true });

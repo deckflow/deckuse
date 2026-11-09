@@ -98,6 +98,37 @@ cli([
 ]);
 const expectedNames = join(staging, 'expected-slide-names.json');
 await writeFile(expectedNames, JSON.stringify(['Blank starter', 'Details']));
+const generated = JSON.parse(
+  execFileSync(
+    process.execPath,
+    [join(root, 'scripts/rebuild-generation.mjs'), staging, ops, expectedNames],
+    { encoding: 'utf8' },
+  ),
+);
+if (generated.state !== 'structural-only' || !generated.sha256)
+  throw new Error('Packaged generation runner did not verify an export');
+await access(generated.output);
+await access(join(root, 'scripts/managed-bootstrap.sh'));
+await access(join(root, 'scripts/benchmark-managed-replay.mjs'));
+const loaded = JSON.parse(
+  execFileSync(
+    'python3',
+    [
+      join(skillRoot, 'scripts/load_context.py'),
+      '--scenario',
+      'create',
+      '--format',
+      'pptx',
+      '--cache-dir',
+      join(staging, 'context'),
+      '--binary',
+      join(staging, 'node_modules/.bin/deckuse'),
+    ],
+    { encoding: 'utf8' },
+  ),
+);
+if (!loaded.contractReady || !loaded.capabilityFingerprint)
+  throw new Error('Packaged context helper did not load v2');
 const status = cli([
   'validate',
   '--workspace',
@@ -143,6 +174,8 @@ console.log(
       'skill links',
       'command discovery',
       'atomic blank recipe',
+      'packaged generation runner',
+      'packaged v2 context loader',
       'pptx export',
       'docx write/export',
     ],

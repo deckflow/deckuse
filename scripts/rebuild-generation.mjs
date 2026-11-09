@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { OpcArchive } from '../dist/opc/index.js';
+import { buildIndex } from '../dist/pptx/indexer.js';
 import { fileURLToPath } from 'node:url';
 
 const [root, operations, names, preview] = process.argv.slice(2);
@@ -38,21 +40,66 @@ await writeFile(join(generation, 'expected-slide-names.json'), JSON.stringify(ex
 });
 let phase = 'new';
 let revision;
-let exported = false;
+let artifact;
+const runId = process.env.DECKUSE_RUN_ID ?? requestId;
+const reportPath = join(generation, 'run.json');
 async function cli(args) {
-  const result = spawnSync(process.execPath, [binary, ...args, '--json'], {
+  const startedAt = Date.now();
+  const argv = [binary, ...args, '--json'];
+  const commandId = phase;
+  const result = spawnSync(process.execPath, argv, {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
-    env: { ...process.env, DECKUSE_CLEANUP_MODE: 'retire' },
+    env: {
+      ...process.env,
+      DECKUSE_CLEANUP_MODE: 'retire',
+      DECKUSE_RUN_ID: runId,
+      DECKUSE_COMMAND_ID: commandId,
+    },
   });
-  if (result.stderr) process.stderr.write(result.stderr);
+  const durationMs = Date.now() - startedAt;
+  await writeFile(
+    join(generation, phase + '.process.json'),
+    JSON.stringify({
+      argv,
+      runId,
+      commandId,
+      startedAt,
+      durationMs,
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
+    }),
+    { flag: 'wx' },
+  );
+  await writeFile(join(generation, phase + '.stderr.txt'), result.stderr ?? '', { flag: 'wx' });
   await writeFile(join(generation, phase + '.json'), result.stdout ?? '', { flag: 'wx' });
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
+  if (!result.stdout?.trim()) throw new Error(phase + ' returned empty stdout');
   const envelope = JSON.parse(result.stdout);
-  if (result.status !== 0 || !envelope.ok || envelope.data?.valid === false)
-    throw new Error(envelope.error?.message ?? phase + ' failed');
+  if (
+    result.status !== 0 ||
+    envelope?.ok !== true ||
+    (['validate', 'export'].includes(phase) && envelope.data?.valid !== true)
+  )
+    throw new Error(envelope?.error?.message ?? phase + ' failed');
   return envelope.data;
 }
+async function report(result) {
+  const data = {
+    runId,
+    generation,
+    workspace,
+    phase,
+    revision,
+    visualReview: 'not-performed',
+    ...result,
+  };
+  await writeFile(reportPath, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
+  console.log(JSON.stringify({ ...data, report: reportPath }));
+}
+
 try {
   await cli(['new', workspace, '--blank']);
   phase = 'apply';
@@ -87,8 +134,29 @@ try {
     join(generation, 'expected-slide-names.json'),
   ]);
   phase = 'export';
-  await cli(['export', output, '--workspace', workspace, '--revision', revision, '--from-package']);
-  exported = true;
+  const exported = await cli([
+    'export',
+    output,
+    '--workspace',
+    workspace,
+    '--revision',
+    revision,
+    '--from-package',
+  ]);
+  if (exported.revision !== revision) throw new Error('Export revision does not match validation');
+  const bytes = await readFile(output);
+  if (!bytes.length) throw new Error('Export is empty');
+  const archive = await OpcArchive.open(bytes);
+  const names = buildIndex(archive, workspace, revision)
+    .elements.filter((item) => item.kind === 'slide')
+    .map((item) => item.name);
+  if (names.length !== expected.length || expected.some((name, i) => name !== names[i]))
+    throw new Error('Export slide inventory does not match the expected order');
+  artifact = {
+    output,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    slides: names.length,
+  };
   if (preview) {
     phase = 'preview';
     const result = await cli([
@@ -101,6 +169,7 @@ try {
     ]);
     if (
       result.revision !== revision ||
+      result.inputSha256 !== artifact.sha256 ||
       result.results.length !== expected.length ||
       result.results.some(
         (page, i) => !page.ok || page.page !== i + 1 || page.result?.revision !== revision,
@@ -108,28 +177,18 @@ try {
     )
       throw new Error('Preview does not match the replacement generation');
   }
-  console.log(
-    JSON.stringify({
-      ok: true,
-      generation,
-      workspace,
-      output,
-      revision,
-      slides: expected.length,
-      ...(preview ? { previewInventory: join(generation, 'preview.json') } : {}),
-    }),
-  );
+  await report({
+    ok: true,
+    ...artifact,
+    state: preview ? 'preview-ready' : 'structural-only',
+    ...(preview ? { previewInventory: join(generation, 'preview.json') } : {}),
+  });
 } catch (cause) {
-  console.log(
-    JSON.stringify({
-      ok: false,
-      generation,
-      workspace,
-      phase,
-      revision,
-      ...(exported ? { output, state: 'structural-only' } : {}),
-      error: cause instanceof Error ? cause.message : String(cause),
-    }),
-  );
   process.exitCode = 1;
+  await report({
+    ok: false,
+    ...artifact,
+    state: artifact && phase === 'preview' ? 'preview-blocked' : 'failed',
+    error: cause instanceof Error ? cause.message : String(cause),
+  });
 }

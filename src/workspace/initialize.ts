@@ -1,5 +1,5 @@
 import { managedRetirement, retireOwnedPath } from './cleanup.js';
-import { mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 export class WorkspaceNotEmptyError extends Error {
@@ -42,6 +42,7 @@ export async function withInitialization<T>(
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new WorkspaceNotEmptyError();
     throw error;
   }
+  const markerIdentity = await lock.stat();
   const owned: string[] = [];
   const reserve: ReserveEntry = async (name, kind) => {
     if (
@@ -83,7 +84,7 @@ export async function withInitialization<T>(
   } catch (error) {
     for (const path of owned.reverse()) {
       try {
-        await rm(path, { recursive: true, force: true });
+        await retireOwnedPath(root, path, true, 'initialization-rollback');
       } catch (cause) {
         preserveMarker = true;
         onCleanupWarning?.(path, cause);
@@ -98,7 +99,16 @@ export async function withInitialization<T>(
   } finally {
     try {
       await lock.close();
-      if (!preserveMarker) await retireOwnedPath(root, marker);
+      if (!preserveMarker) {
+        const current = await lstat(marker);
+        if (current.dev === markerIdentity.dev && current.ino === markerIdentity.ino)
+          await retireOwnedPath(root, marker);
+        else
+          onCleanupWarning?.(
+            marker,
+            new Error('Workspace initialization marker ownership changed'),
+          );
+      }
     } catch (cause) {
       onCleanupWarning?.(marker, cause);
     }

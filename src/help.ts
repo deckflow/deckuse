@@ -127,6 +127,7 @@ Notes:
     details: `Options:
   --workspace <path>        Workspace root (default: nearest .deckuse)
   --revision <rev>          Read a historical revision
+  --read-only               Observe live state without locks, recovery, or cleanup
   --request-id <id>         Query a PPTX apply receipt in the live workspace
   --json                    Machine-readable envelope`,
   },

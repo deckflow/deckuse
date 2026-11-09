@@ -2,6 +2,7 @@
 import { recoverPptxExport } from './pptx/export-recovery.js';
 import { converterPreflight } from './deck2html-exec.js';
 import { recordCliStartup, timed, timedSync } from './timing.js';
+import { readOnlyStatus } from './workspace/status-read-only.js';
 import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
@@ -761,7 +762,17 @@ const main = async (): Promise<void> => {
           type,
         });
       } else if (action === 'status') {
+        const readOnly = takeFlag(clean, '--read-only');
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
+        if (readOnly) {
+          if (revisionOpt) throw new Error('--read-only requires the live workspace');
+          outputEnvelope({
+            ok: true,
+            command: 'deckuse status',
+            data: await readOnlyStatus(workspace, requestIdOpt),
+          });
+          return;
+        }
         ok = await execute('deckuse status', {
           version: PROTOCOL_VERSION,
           type: 'status',
@@ -1785,4 +1796,7 @@ const main = async (): Promise<void> => {
 };
 
 recordCliStartup();
-void main();
+void timed(
+  clean[0] === 'new' || clean[0] === 'init' ? 'initialization' : (clean[0] ?? 'cli'),
+  main,
+);

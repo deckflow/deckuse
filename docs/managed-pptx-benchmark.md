@@ -73,3 +73,30 @@ Run one additional trial with `DECKUSE_BROWSER_EXECUTION=denied`. Complete new,
 apply, validate and export, attach the artifact, and record `preview-blocked` with
 no visual-review timestamp. The trial passes the classification check if it
 records a usable structural artifact and does not count as reviewed handoff.
+
+## Local 9-slide control replay
+
+Run the same generated inputs through two built CLIs:
+
+```sh
+DECKUSE_BROWSER_PROVIDER=chrome node scripts/benchmark-managed-replay.mjs \
+  /path/to/baseline/dist/bin.js /path/to/candidate/dist/bin.js /new/report.json --preview
+```
+
+The replay uses 199 operations and 189 editable text boxes, then patches one
+page in the same workspace. It verifies page order, export digest, preview
+revision, and reuse of the eight unchanged pages. Omit `--preview` to
+measure the structural workflow alone. The report retains failed trials and
+CLI traces. The uncovered time is host/model time without finer attribution
+when measured in a real host. In this replay it is local runner overhead.
+
+| Build | Trial 1 | Trial 2 | Trial 3 | Median | Preview ready |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1.9.4 release commit `d6ca3bf` | 17.29 s | 11.13 s | 12.45 s | 12.45 s | 3/3 |
+| Candidate based on `b6982e0` | 11.82 s | 11.17 s | 20.42 s | 11.82 s | 3/3 |
+
+Local macOS, Node 24.14.1 and system Chrome. Builds used the same installed
+dependencies. The spread across three trials does not establish a speedup.
+The replay measures CLI work and local previews. WorkBuddy cold and warm
+production trials, model latency, and the five-minute reviewed handoff
+target remain unverified.

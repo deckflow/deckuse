@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, rename, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { lstat, mkdir, realpath, rename, rm } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { Diagnostic } from '../core/index.js';
 
 export function managedRetirement(): boolean {
@@ -39,6 +39,13 @@ export async function retireOwnedPath(
     await rm(path, { recursive, force: true });
     return;
   }
+  const relativeParent = relative(await realpath(root), await realpath(dirname(path)));
+  if (
+    isAbsolute(relativeParent) ||
+    relativeParent === '..' ||
+    relativeParent.startsWith('..' + sep)
+  )
+    throw new Error('Retirement target is outside the workspace');
   const trash = await workspaceTrash(root);
   const retiredPath = join(trash, randomUUID() + '-' + basename(path));
   await rename(path, retiredPath);

@@ -141,3 +141,27 @@ describe('direct workspace initialization rollback', () => {
     expect(await readFile(join(root, '.git', 'HEAD'), 'utf8')).toContain('refs/heads/main');
   });
 });
+
+it('retires only reserved paths and the marker when initialization rolls back', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-init-retire-'));
+  vi.stubEnv('DECKUSE_CLEANUP_MODE', 'retire');
+  try {
+    await expect(
+      withInitialization(root, async (_destination, reserve) => {
+        await writeFile(await reserve('partial', 'file'), 'owned');
+        await writeFile(join(root, 'user-file'), 'keep');
+        throw new Error('injected failure');
+      }),
+    ).rejects.toThrow('injected failure');
+    const trash = join(root, '.deckuse-trash');
+    const entries = await readdir(trash);
+    expect(entries).toHaveLength(2);
+    const retired = entries.find((name) => name.endsWith('-partial'));
+    expect(retired).toBeDefined();
+    expect(await readFile(join(trash, retired!), 'utf8')).toBe('owned');
+    expect(await readFile(join(root, 'user-file'), 'utf8')).toBe('keep');
+    expect(await readdir(root)).toEqual(['.deckuse-trash', 'user-file']);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});

@@ -153,7 +153,9 @@ def main():
                 if file.is_file():
                     identity[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
             break
-    key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    required_types = scenario['schemaTypes']
+    requested = list(dict.fromkeys(required_types + args.types))
+    key = hashlib.sha256(json.dumps([identity, args.scenario, args.format, requested], sort_keys=True).encode()).hexdigest()
     snapshot_path = cache / (key + '.snapshot.json')
     hit, data = False, None
     if snapshot_path.exists() and not args.refresh:
@@ -166,16 +168,32 @@ def main():
         except (ValueError, KeyError, TypeError):
             data = None
     if data is None:
-        raw = invoke(str(binary), ['schema', '--json'], logs, 'schema')
-        envelope = json.loads(raw)
-        if not envelope.get('ok'):
-            raise ValueError('Schema command returned an unsuccessful envelope')
-        data = envelope['data']
+        context = {}
+        try:
+            response = json.loads(invoke(str(binary), [
+                'agent-context', '--scenario', args.scenario, '--format', args.format,
+                '--include-schema', '--json'
+            ], logs, 'agent-context'))
+            if response.get('ok'):
+                context = response['data']
+        except ValueError:
+            # Older CLIs may lack agent-context. Keep the failure in process logs.
+            pass
+        fields = context.get('operationFields', {})
+        if context.get('contextSchemaVersion') == 2 and all(typ in fields for typ in requested):
+            contracts = context['contracts']
+            data = {
+                **context,
+                'schema': {'oneOf': contracts['anyOf'], '$defs': contracts['$defs']},
+            }
+        else:
+            envelope = json.loads(invoke(str(binary), ['schema', '--json'], logs, 'schema'))
+            if not envelope.get('ok'):
+                raise ValueError('Schema command returned an unsuccessful envelope')
+            data = envelope['data']
         validate_data(data, version)
         write_json(snapshot_path, {'identity': identity, 'data': data, 'collectedAt': datetime.now(timezone.utc).isoformat()})
     commands = command_map(data['schema'])
-    required_types = scenario['schemaTypes']
-    requested = list(dict.fromkeys(required_types + args.types))
     present = [typ for typ in requested if typ in commands]
     missing = [typ for typ in requested if typ not in commands]
     sliced = slice_schema(data['schema'], [commands[typ] for typ in present])
@@ -187,6 +205,12 @@ def main():
     summary['extraTypesMissing'] = [typ for typ in args.types if typ not in commands and typ not in required_types]
     summary['contractReady'] = not summary['requiredTypesMissing']
     summary['operationFields'] = operation_fields(commands, present)
+    if data.get('contextSchemaVersion') == 2:
+        for index, typ in enumerate(present):
+            summary['operationFields'][typ] = {
+                **data['operationFields'][typ], 'contract': f'#/schema/oneOf/{index}'
+            }
+        summary['capabilityFingerprint'] = data['capabilityFingerprint']
     write_json(cache / (selection_key + '.context.json'), summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
