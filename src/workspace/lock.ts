@@ -116,6 +116,7 @@ export const isWriteLockHeld = async (workspace: string): Promise<boolean> => {
 };
 
 export const acquireWriteLock = async (workspace: string): Promise<() => Promise<void>> => {
+  managedRetirement();
   await mkdir(deckuseDir(workspace), { recursive: true });
   const path = lockPath(workspace);
   const deadline = Date.now() + LOCK_WAIT_MS;

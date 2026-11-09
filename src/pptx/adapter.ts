@@ -1,5 +1,12 @@
+import fs from 'node:fs';
+import { resolveRef } from 'isomorphic-git';
 import { managedRetirement } from '../workspace/cleanup.js';
-import { operationDigest, readApplyReceipt, writeApplyReceipt } from '../workspace/receipts.js';
+import {
+  operationDigest,
+  readApplyReceipt,
+  writeApplyReceipt,
+  type ApplyReceipt,
+} from '../workspace/receipts.js';
 import { exportDigest } from './export-recovery.js';
 import { tableMergeDiagnostics } from './table.js';
 import { assertChartProperties } from './properties.js';
@@ -36,12 +43,7 @@ import { rankFind } from '../find/rank.js';
 import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addressing.js';
 import { collectPptxFindCandidates } from './find-candidates.js';
 import { editionCapabilities, editionMetadata } from './edition.js';
-import {
-  buildIndex as buildIndexImpl,
-  findIndexed,
-  matchesSelector,
-  mergeSlides,
-} from './indexer.js';
+import { buildIndex as buildIndexImpl, findIndexed, pptxSelector, mergeSlides } from './indexer.js';
 import { loadIndex } from './index-sync.js';
 import {
   layoutDisplayName,
@@ -59,6 +61,7 @@ import {
 } from './slides.js';
 import {
   initializeWorkspace,
+  hashSourceTree,
   isPackageStale,
   packagePath,
   persistWrite,
@@ -289,6 +292,64 @@ export const pptxCapabilities = {
 
 const openWorkspaceArchive = async (workspace: string): Promise<OpcArchive> =>
   OpcArchive.openDirectory(sourceDir(workspace));
+
+async function noOpBase(workspace: string) {
+  const commit = await resolveRef({ fs, dir: workspace, ref: 'HEAD' });
+  return { commit, contentHash: await hashSourceTree(workspace) };
+}
+
+async function isNoOpCurrent(workspace: string, revision: string, receipt: ApplyReceipt) {
+  if (!receipt.noOpBase || revision !== receipt.revision) return false;
+  const current = await noOpBase(workspace);
+  return (
+    current.commit === receipt.noOpBase.commit &&
+    current.contentHash === receipt.noOpBase.contentHash
+  );
+}
+
+function partChanges(archive: OpcArchive) {
+  const original = new Map(archive.parts);
+  const types = () =>
+    JSON.stringify([
+      [...archive.contentTypes.defaults].sort(),
+      [...archive.contentTypes.overrides].sort(),
+    ]);
+  const originalTypes = types();
+  return () => {
+    const names = new Set([...original.keys(), ...archive.parts.keys()]);
+    const changed = [...names].filter((name) => {
+      const before = original.get(name);
+      const after = archive.parts.get(name);
+      if (before === after) return false;
+      if (!before || !after) return true;
+      return (
+        before.mediaType !== after.mediaType ||
+        !Buffer.from(before.data.buffer, before.data.byteOffset, before.data.byteLength).equals(
+          after.data,
+        )
+      );
+    });
+    if (types() !== originalTypes) changed.push('/[Content_Types].xml');
+    return [...new Set(changed)].sort();
+  };
+}
+
+function noOpReason(diagnostics: Diagnostic[], results: unknown[]) {
+  if (diagnostics.some((item) => item.code === 'NO_TEXT_MATCH')) return 'no-text-match';
+  if (
+    results.some(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        'matchedTargets' in item &&
+        item.matchedTargets &&
+        'matched' in item &&
+        item.matched === 0,
+    )
+  )
+    return 'identical-replacement';
+  return 'unchanged-content';
+}
 
 const chartDataDiagnostics = (
   items: Awaited<ReturnType<typeof verifyChartData>>,
@@ -850,13 +911,21 @@ export const pptxAdapter: FormatAdapter = {
             operationSha256,
             previousRevision,
             revision,
-            state: found.receipt.rejection
-              ? 'not-committed'
-              : found.active
-                ? 'committed'
-                : 'reverted',
+            state: found.receipt.noOpBase
+              ? 'no-op'
+              : found.receipt.rejection
+                ? 'not-committed'
+                : found.active
+                  ? 'committed'
+                  : 'reverted',
             ...(found.receipt.rejection ? { rejection: found.receipt.rejection } : {}),
-            current: found.current && !(await isPackageStale(workspace)),
+            current: found.receipt.noOpBase
+              ? await isNoOpCurrent(
+                  workspace,
+                  (await readManifest(workspace)).revision,
+                  found.receipt,
+                )
+              : found.current && !(await isPackageStale(workspace)),
             operationCount: Array.isArray(result['results']) ? result['results'].length : 0,
             affectedSlides: affectedSlides.slice(0, 256),
             affectedSlideCount: affectedSlides.length,
@@ -1072,7 +1141,12 @@ export const pptxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'query') {
-          const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+          let matched: typeof index.elements;
+          try {
+            matched = index.elements.filter(pptxSelector(command.selector, index));
+          } catch (cause) {
+            return err('INVALID_COMMAND', String(cause));
+          }
           return ok({
             items: matched.slice(0, command.limit),
             total: matched.length,
@@ -1386,7 +1460,10 @@ export const pptxAdapter: FormatAdapter = {
                 const { code, message } = existing.receipt.rejection;
                 return err(code, message, existing.receipt.diagnostics);
               }
-              if (!existing.active || (await isPackageStale(workspace, currentManifest)))
+              const validReceipt = existing.receipt.noOpBase
+                ? await isNoOpCurrent(workspace, currentManifest.revision, existing.receipt)
+                : existing.active && !(await isPackageStale(workspace, currentManifest));
+              if (!validReceipt)
                 return err(
                   'TRANSACTION_CONFLICT',
                   'Request receipt is stale; query status before continuing',
@@ -1401,6 +1478,7 @@ export const pptxAdapter: FormatAdapter = {
           if (locked) return locked;
 
           const working = await openWorkspaceArchive(workspace);
+          const changedSinceStart = partChanges(working);
           let currentIndex = await loadIndex(workspace, working, currentManifest);
           const applyMutation = async (input: AtomicCommand) => {
             if (!REVIEW_WRITES.has(input.type)) {
@@ -1472,7 +1550,7 @@ export const pptxAdapter: FormatAdapter = {
             const slidePages: number[] = [];
             const touchedParts = new Set<string>();
             const changedTargets: string[] = [];
-            const batchDirty = new Set<string>();
+            let hadEdits = false;
             for (const nested of nestedCommands) {
               if (REVIEW_WRITES.has(nested.type)) {
                 const conflict = assertExpectRevision(nested, currentManifest.revision);
@@ -1481,7 +1559,7 @@ export const pptxAdapter: FormatAdapter = {
               working.markClean();
               const result = await timed('mutation', () => applyMutation(nested));
               const dirty = working.getDirtyParts();
-              for (const part of dirty) batchDirty.add(part);
+              hadEdits ||= dirty.length > 0;
               diagnostics.push(...result.diagnostics);
               if (!result.ok) return recordRejection(result);
               results.push(result.value);
@@ -1542,7 +1620,7 @@ export const pptxAdapter: FormatAdapter = {
             }
             // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
             syncAppSlideCounts(working);
-            const changedParts = [...new Set([...batchDirty, ...working.getDirtyParts()])].sort();
+            const changedParts = changedSinceStart();
             const validation = validateArchive(working, workspace);
             if (validation.some((d) => d.severity === 'error'))
               return recordRejection(
@@ -1553,29 +1631,49 @@ export const pptxAdapter: FormatAdapter = {
                   notesRepairHintExtra(workspace, validation),
                 ),
               );
-            if (dryRun)
-              return ok(
-                {
-                  results,
-                  revision: currentManifest.revision,
-                  dryRun: true,
-                  ...(requestId ? { requestId } : {}),
-                  changedTargets: [...new Set(changedTargets)],
-                  changedParts,
-                  affectedSlides: mergeSlides(slidePages),
-                },
-                diagnostics,
-              );
-            const rev = nextRevision(currentManifest.revision);
-            const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
+            const noOp = changedParts.length === 0;
+            const rev =
+              dryRun || noOp ? currentManifest.revision : nextRevision(currentManifest.revision);
             const value = {
               results,
               revision: rev,
-              changedTargets: [...new Set(changedTargets)],
+              changedTargets: noOp ? [] : [...new Set(changedTargets)],
               changedParts,
-              affectedSlides: mergeSlides(slidePages),
+              affectedSlides: noOp ? [] : mergeSlides(slidePages),
               ...(requestId ? { requestId } : {}),
+              ...(dryRun ? { dryRun: true } : {}),
+              ...(noOp
+                ? {
+                    noOp: true,
+                    noOpReason: hadEdits ? 'unchanged-content' : noOpReason(diagnostics, results),
+                  }
+                : {}),
             };
+            if (dryRun) return ok(value, diagnostics);
+            if (noOp) {
+              if (requestId && digest) {
+                try {
+                  await writeApplyReceipt(workspace, {
+                    requestId,
+                    operationSha256: digest,
+                    previousRevision: rev,
+                    revision: rev,
+                    commitToken: '',
+                    noOpBase: await noOpBase(workspace),
+                    result: value,
+                    diagnostics,
+                  });
+                } catch (cause) {
+                  return err(
+                    'IO_ERROR',
+                    `Could not record no-op receipt: ${String(cause)}`,
+                    diagnostics,
+                  );
+                }
+              }
+              return ok(value, diagnostics);
+            }
+            const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
             await persistWrite(
               workspace,
               working,
@@ -1634,18 +1732,21 @@ export const pptxAdapter: FormatAdapter = {
           }
           // Heal pre-existing app.xml drift (and Notes) before the integrity gate.
           syncAppSlideCounts(working);
-          const changedParts = working.getDirtyParts();
+          const changedParts = changedSinceStart();
           const validation = validateArchive(working);
           if (validation.some((d) => d.severity === 'error'))
             return err('VALIDATION_FAILED', 'PPTX validation failed', validation);
-          if (command.dryRun)
+          if (command.dryRun || !changedParts.length)
             return ok(
               {
                 ...result.value,
                 revision: currentManifest.revision,
-                dryRun: true,
+                ...(command.dryRun ? { dryRun: true } : {}),
+                ...(!changedParts.length
+                  ? { noOp: true, noOpReason: noOpReason(result.diagnostics, [result.value]) }
+                  : {}),
                 changedParts,
-                affectedSlides: slidesFromOutcome(result.value),
+                affectedSlides: changedParts.length ? slidesFromOutcome(result.value) : [],
               },
               result.diagnostics,
             );

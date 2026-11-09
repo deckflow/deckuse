@@ -245,6 +245,13 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
     return false;
   }
   const result = await runCommand(command);
+  if (commandLabel === 'deckuse apply' && !requestIdOpt && !dryRun)
+    result.diagnostics.push({
+      severity: 'warning',
+      code: 'REQUEST_ID_MISSING',
+      message:
+        'Apply without --request-id cannot guarantee idempotency when the host reruns the command.',
+    });
   const envelope = toEnvelope(commandLabel, result);
   let reportPath: string | undefined;
   if (reportOpt) {
@@ -271,7 +278,11 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
             },
           }
         : {}),
+      warnings: envelope.warnings?.slice(0, 16) ?? [],
       data: {
+        noOp: data?.['noOp'],
+        noOpReason: data?.['noOpReason'],
+        cleanupRetirements: data?.['cleanupRetirements'],
         requestId: requestIdOpt?.slice(0, 256),
         revision: data?.['revision'],
         dryRun: data?.['dryRun'],

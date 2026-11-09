@@ -42,6 +42,9 @@ Give each logical apply a stable `--request-id` and the inspected `--expect-revi
 
 If a render logs `RENDER_CLEANUP_FAILED`, check the screenshot result and the reported temporary directory separately. Preserve successful PNGs. A denied cleanup path does not require another apply or conversion. If the converter itself reports `RENDER_CONVERTER_EXTRACTION_FAILED`, use `render --preflight` with an allowed writable extraction directory, then resume rendering.
 
+A `no-op` receipt records a successful request with no content commit or revision advance.
+It can be replayed only while its base commit, revision and source content still match.
+
 A `not-committed` receipt records a definite rejection. Use a new request ID for
 corrected input. A `reverted` receipt identifies a write undone in this workspace.
 An `unknown` result has no receipt, so reconcile status, history and the current
@@ -66,6 +69,7 @@ For a host that approves moving Deckuse-owned internal artifacts, set
 `DECKUSE_CLEANUP_MODE=retire` before authoring. Routine lock and journal release
 then moves retired entries into the workspace's `.deckuse-trash/` without a
 delete attempt. This leaves an auditable directory that can grow over time.
+Successful moves are listed in `cleanupRetirements` with both paths and a category.
 If release fails, keep the committed response and its cleanup warnings.
 Leave unknown or live locks in place. A claim left by interrupted stale-lock
 retirement can require host intervention, so preserve it and report the state.

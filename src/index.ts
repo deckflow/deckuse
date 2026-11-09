@@ -1,11 +1,16 @@
-import { collectCleanupWarnings } from './workspace/cleanup.js';
+import {
+  collectCleanupRetirements,
+  collectCleanupWarnings,
+  managedRetirement,
+  type CleanupRetirement,
+} from './workspace/cleanup.js';
 import type { Diagnostic } from './core/index.js';
 import { initializationState } from './workspace/initialize.js';
 import { withWriteLock } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
 import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { AdapterRegistry, Executor, type Result } from './core/index.js';
+import { AdapterRegistry, Executor, err, type Result } from './core/index.js';
 import { pptxAdapter } from './pptx/index.js';
 import { docxAdapter } from './docx/index.js';
 import { xlsxAdapter } from './xlsx/index.js';
@@ -46,15 +51,40 @@ export const createDefaultExecutor = (): Executor =>
     },
   );
 export const runCommand = async (input: unknown): Promise<Result<unknown>> => {
+  try {
+    managedRetirement();
+  } catch (cause) {
+    return err('INVALID_COMMAND', String(cause));
+  }
   const warnings: Diagnostic[] = [];
-  const result = await collectCleanupWarnings(warnings, () =>
-    createDefaultExecutor().execute(input),
+  const retirements: CleanupRetirement[] = [];
+  const result = await collectCleanupRetirements(retirements, () =>
+    collectCleanupWarnings(warnings, () => createDefaultExecutor().execute(input)),
   );
-  if (!warnings.length) return result;
+  if (!warnings.length && !retirements.length) return result;
   const diagnostics = [...result.diagnostics, ...warnings];
   if (result.ok && result.value && typeof result.value === 'object' && !Array.isArray(result.value))
-    return { ...result, diagnostics, value: { ...result.value, cleanupWarnings: warnings } };
-  return { ...result, diagnostics };
+    return {
+      ...result,
+      diagnostics,
+      value: {
+        ...result.value,
+        ...(warnings.length ? { cleanupWarnings: warnings } : {}),
+        ...(retirements.length ? { cleanupRetirements: retirements } : {}),
+      },
+    };
+  return {
+    ...result,
+    diagnostics: [
+      ...diagnostics,
+      ...retirements.map((item): Diagnostic => ({
+        severity: 'info',
+        code: 'CLEANUP_RETIRED',
+        message: `Moved ${item.originalPath} to ${item.retiredPath}`,
+        details: { ...item },
+      })),
+    ],
+  };
 };
 
 export { startMonitor, type MonitorHandle, type MonitorOptions } from './monitor.js';

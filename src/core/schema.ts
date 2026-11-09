@@ -160,6 +160,7 @@ const selectorObjectSchema = z
     textRegex: z.string().min(1).optional(),
     id: z.string().min(1).optional(),
     slide: z.string().min(1).optional(),
+    page: z.number().int().positive().optional(),
     hasText: z.boolean().optional(),
   })
   .strict();

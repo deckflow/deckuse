@@ -1,3 +1,4 @@
+import { planTextReplacement } from './text-replacement.js';
 import { bindConnector, refreshConnectors, affectedShapeIds } from './connectors.js';
 import { structuralMutation } from './structure.js';
 import { requireDefined } from '../required.js';
@@ -27,7 +28,7 @@ import {
   updateChart,
 } from './elements.js';
 import { harveyBallPieAdj, isStShapeType } from './shape-presets.js';
-import { findIndexed, matchesSelector, mergeSlides, slidesForItem } from './indexer.js';
+import { findIndexed, pptxSelector, mergeSlides, slidesForItem } from './indexer.js';
 import { detachPictureAndCleanup, loadPictureBytes, replacePictureMedia } from './picture.js';
 import { detachMediaAndCleanup } from './media.js';
 import { applyShapeProperties, assertChartProperties, setSlideBackground } from './properties.js';
@@ -442,20 +443,21 @@ const writeText = async (
   return ok(undefined, diagnostics);
 };
 
-const isDescendantOf = (item: IndexedElement, ancestorId: string): boolean => {
-  if (item.parentId === ancestorId) return true;
-  const elementId = item.ref.elementId;
-  return Boolean(elementId?.startsWith(`${ancestorId}.`));
-};
-
-/** Without a selector, skip ancestor elements whose text aggregates descendant matches. */
-const narrowReplaceTextCandidates = (candidates: IndexedElement[]): IndexedElement[] => {
-  if (candidates.length <= 1) return candidates;
-  return candidates.filter((item) => {
-    const id = item.ref.elementId;
-    if (!id) return true;
-    return !candidates.some((other) => other.ref.elementId !== id && isDescendantOf(other, id));
-  });
+/** Suppress matching aggregate elements even when the selector excludes their leaves. */
+const narrowReplaceTextCandidates = (
+  candidates: IndexedElement[],
+  index: IndexFile,
+): IndexedElement[] => {
+  const byId = new Map(index.elements.map((item) => [item.ref.elementId, item]));
+  const ancestors = new Set<string>();
+  for (const item of candidates) {
+    let id = item.parentId;
+    while (id && !ancestors.has(id)) {
+      ancestors.add(id);
+      id = byId.get(id)?.parentId;
+    }
+  }
+  return candidates.filter((item) => !ancestors.has(item.ref.elementId ?? ''));
 };
 
 const applyReplaceText = async (
@@ -463,46 +465,87 @@ const applyReplaceText = async (
   archive: OpcArchive,
   index: IndexFile,
 ): Promise<Result<MutationOutcome>> => {
-  if (command.regex) {
-    try {
-      new RegExp(command.find, 'u');
-    } catch (cause) {
-      return err(
-        'INVALID_COMMAND',
-        cause instanceof Error ? cause.message : 'Invalid replaceText regex',
-      );
-    }
+  let pattern: RegExp;
+  let matchesScope: (item: IndexedElement) => boolean;
+  try {
+    const find = command.regex ? command.find : command.find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    pattern = new RegExp(find, 'gu');
+    matchesScope = command.selector ? pptxSelector(command.selector, index) : () => true;
+  } catch (cause) {
+    return err('INVALID_COMMAND', String(cause));
   }
-  const matches = (text: string): boolean =>
-    command.regex ? new RegExp(command.find, 'u').test(text) : text.includes(command.find);
-  const replaced = (text: string): string =>
-    command.regex
-      ? text.replace(new RegExp(command.find, 'gu'), command.replace)
-      : text.split(command.find).join(command.replace);
-  let candidates = index.elements.filter(
-    (item) =>
-      Boolean(item.text?.length) &&
-      (!command.selector || matchesSelector(item, command.selector)) &&
-      matches(item.text ?? ''),
-  );
-  if (!command.selector) candidates = narrowReplaceTextCandidates(candidates);
+  const matches = index.elements.filter((item) => {
+    pattern.lastIndex = 0;
+    return Boolean(item.text?.length) && pattern.test(item.text ?? '');
+  });
+  const candidates = narrowReplaceTextCandidates(matches, index).filter(matchesScope);
+  pattern.lastIndex = 0;
   const limit = command.limit ?? 1000;
   const selected = candidates.slice(0, limit);
   const diagnostics: Diagnostic[] = [];
   const refs: ElementRef[] = [];
   const slidePages: number[] = [];
+  const documents = new Map<string, Document>();
+  const edits: (() => void)[] = [];
+  const legacy: { item: IndexedElement; text: string }[] = [];
   for (const item of selected) {
-    const next = replaced(item.text ?? '');
-    if (next === item.text) continue;
-    const written = await writeText(archive, item, next, diagnostics);
-    if (!written.ok) return written;
+    const original = item.text ?? '';
+    const next = command.regex
+      ? original.replace(pattern, command.replace)
+      : original.replace(pattern, () => command.replace);
+    if (next === original) continue;
+    try {
+      guardCommentMutation(archive, item, 'replaceText');
+      if (
+        command.formatPolicy !== 'firstRun' &&
+        (item.kind === 'chart' || editionGatedWriteKind(item, archive))
+      )
+        throw new Error('Use the native object editing interface for this target');
+      const doc = documents.get(item.partUri) ?? archive.readXml(item.partUri);
+      const node = nodeFor(doc, item);
+      if (!node) throw new Error('Writable text node not found');
+      if (command.formatPolicy === 'firstRun') {
+        if (descendants(node, 'fld').length) throw new Error('Target contains a protected field');
+        legacy.push({ item, text: next });
+      } else {
+        edits.push(
+          planTextReplacement(node, original, pattern, command.replace, command.regex ?? false),
+        );
+        documents.set(item.partUri, doc);
+      }
+    } catch (cause) {
+      return err(
+        'UNSUPPORTED_CAPABILITY',
+        `Cannot replace text in ${item.ref.elementId ?? item.partUri}: ${String(cause)}`,
+      );
+    }
     refs.push(item.ref);
     slidePages.push(...slidesForItem(index, item));
   }
+  for (const edit of edits) edit();
+  for (const [part, doc] of documents)
+    archive.writeXml(part, doc, archive.getPart(part)?.mediaType);
+  if (legacy.length)
+    diagnostics.push({
+      severity: 'warning',
+      code: 'TEXT_FORMAT_INHERITED',
+      message: 'firstRun rewrites each target using the first run formatting.',
+    });
+  for (const { item, text } of legacy) {
+    const written = await writeText(archive, item, text, diagnostics);
+    if (!written.ok) return written;
+  }
+  if (!selected.length)
+    diagnostics.push({
+      severity: 'warning',
+      code: 'NO_TEXT_MATCH',
+      message: 'No text matched the search within the selected scope.',
+    });
   return ok(
     {
       changed: refs.length > 0,
       matched: refs.length,
+      matchedTargets: selected.length,
       refs,
       slides: mergeSlides(slidePages),
       diagnostics,
@@ -819,8 +862,6 @@ export async function mutate(
   )
     return structuralMutation(command, archive, index);
   let tableLayout: TableFrameLayout | undefined;
-  if (command.type === 'replaceText' && command.formatPolicy !== undefined)
-    return err('UNSUPPORTED_CAPABILITY', 'formatPolicy is DOCX-only');
   if (command.type === 'replaceText') return applyReplaceText(command, archive, index);
 
   if (command.type === 'addSlide') {

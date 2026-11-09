@@ -136,8 +136,10 @@ export async function withWorkspaceTransaction<T>(
   } catch {
     /* Missing Git will fail the commit and restore the working files. */
   }
-  await mkdir(join(staging, 'backup'), { recursive: true });
+  await mkdir(join(root, '.deckuse'), { recursive: true });
+  await mkdir(staging);
   try {
+    await mkdir(join(staging, 'backup'));
     for (const path of paths)
       if (await exists(join(root, path))) {
         journal.present.push(path);
@@ -148,7 +150,11 @@ export async function withWorkspaceTransaction<T>(
     await writeFile(join(staging, 'journal.json'), JSON.stringify(journal));
     await rename(staging, dir);
   } catch (e) {
-    await rm(staging, { recursive: true, force: true });
+    try {
+      await retireOwnedPath(root, staging, true, 'transaction-staging');
+    } catch (cause) {
+      warnCleanup('TRANSACTION_STAGING_CLEANUP_FAILED', staging, cause);
+    }
     throw e;
   }
   const writeJournal = async () => {

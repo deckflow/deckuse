@@ -12,6 +12,7 @@ export interface ApplyReceipt {
   commitToken: string;
   result: Record<string, unknown>;
   diagnostics: Diagnostic[];
+  noOpBase?: { commit: string; contentHash: string };
   rejection?: Pick<DeckuseError, 'code' | 'message'>;
 }
 

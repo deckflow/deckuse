@@ -454,6 +454,7 @@ describe('pptx adapter', () => {
         transactionId: rev,
         find: 'Hello',
         replace: 'Bonjour',
+        formatPolicy: 'firstRun',
         selector: 'kind=textbox',
       },
       {},

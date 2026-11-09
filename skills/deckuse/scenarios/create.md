@@ -7,17 +7,27 @@ Required modules: [CLI context](../modules/cli-context.md), [Typography/layout](
 1. Establish audience, purpose, inputs, output location and approximate length from context. Ask only for a missing decision that matters. Separate sourced product facts from assumptions; retain references for claims and numbers.
 2. Outline the story and decide slide dimensions, grid, palette, typography and content density once. If a template was supplied, inspect it; use the existing-file preservation workflow rather than inventing its brand.
 3. Run `deckuse agent-context --format pptx --scenario create --include-schema --json` once. When a host request selects Deckuse, use this installed workflow and its operation contract.
-4. Copy or adapt the installed [two-slide starter](../examples/create-blank-pptx.json) to `ops.json`. Start in an absent or empty workspace and stop after any failed command.
+4. If the delivery needs a visual review, run `deckuse render --preflight --probe-browser --json` before authoring. A static preflight does not prove the browser can launch. Use an explicitly configured browser in the host-approved execution context.
 
-```sh
-set -e
-deckuse new ./ws --blank --json
-deckuse apply --workspace ./ws --input ./ops.json --request-id create-1 --expect-revision 1 --summary --json
-deckuse validate --workspace ./ws --json
-deckuse export ./presentation.pptx --workspace ./ws --json
-```
+   Copy or adapt the installed [two-slide starter](../examples/create-blank-pptx.json) to `ops.json`. Save the operation file, request ID and expected revision together before the first apply. Run each command separately and check its response before continuing.
 
-The blank slide is named `Blank starter`. Give new slides unique names and reference them by name. Preview is optional for structural export. When visual review is available, run `render --preflight --probe-browser` and `render --all` after obtaining the first artifact.
+   ```sh
+   deckuse new ./ws --blank --json
+   ```
+
+   ```sh
+   deckuse apply --workspace ./ws --input ./ops.json --request-id create-1 --expect-revision 1 --summary --json
+   ```
+
+   ```sh
+   deckuse validate --workspace ./ws --expect-revision 2 --json
+   ```
+
+   ```sh
+   deckuse export ./presentation.pptx --workspace ./ws --revision 2 --json
+   ```
+
+   The blank slide is named `Blank starter`. Give new slides unique names and reference them by name. The commands assume the initial apply changed the deck and returned revision 2. Use the actual returned revision for validation and export.
 
 5. For diagrams, quantitative charts and tables, load [Native drawing](../modules/native-drawing.md). Use targeted schema queries only for operations missing from the create context.
 6. Check page count, titles, native object inventory and all first-pass renderings using [Quality review](../modules/quality-review.md). Collect defects before editing. Write one patch batch with stable targets, such as the following JSON array, using the revision returned by the original apply.
@@ -28,9 +38,19 @@ The blank slide is named `Blank starter`. Give new slides unique names and refer
 
 ```sh
 deckuse apply --workspace ./ws --input ./patch.json --request-id polish-1 --expect-revision 2 --summary --report ./polish-attempt-1.json --json
+```
+
+Run validation and render after checking the apply response.
+
+```sh
 deckuse validate --workspace ./ws --json
 deckuse render --since-revision 2 --contact-sheet --workspace ./ws --output-dir ./review --json
-deckuse export ./presentation.pptx --workspace ./ws --json
+```
+
+Export after reviewing the preview. Use the returned revision in place of `3` if it differs.
+
+```sh
+deckuse export ./presentation.pptx --workspace ./ws --revision 3 --json
 ```
 
 Keep the same output directory to reuse unchanged pages. Review newly rendered pages and use the combined contact sheet for context. Verify Chinese line breaks and any suspected clipping at readable size. A CJK orphan-line note is a heuristic, not a blocker on its own. For intentional geometry, pass `--review-notes ./notes.json` with entries such as `{"code":"OBJECT_OUT_OF_BOUNDS","targets":["slide:1/shape:5"],"reason":"Intentional full-bleed background"}`. This adds a reason to the matching diagnostic while retaining the visual evidence. A reused page identifies its original revision. If the apply response is missing, query `deckuse status --workspace ./ws --request-id polish-1 --json` before another write. Reuse the ID and exact input only when recovering that same request, and stop on conflicts.

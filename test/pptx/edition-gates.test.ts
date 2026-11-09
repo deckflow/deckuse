@@ -508,6 +508,7 @@ describe('community edition write gates', () => {
           type: 'replaceText',
           workspaceId: workspace,
           transactionId: rev,
+          formatPolicy: 'firstRun',
           find: 'MasterText',
           replace: 'ViaWriteHook',
         },

@@ -386,6 +386,46 @@ export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement |
             ref.path.split('#').at(-1)?.split(':').at(-1)?.split('.').at(-1),
       )
     : undefined);
+const selectorKeys = new Set([
+  'kind',
+  'name',
+  'text',
+  'textRegex',
+  'text~',
+  'id',
+  'slide',
+  'page',
+  'hasText',
+]);
+
+export function pptxSelector(
+  selector: import('../core/schema.js').Selector,
+  index: IndexFile,
+): (item: IndexedElement) => boolean {
+  const spec =
+    typeof selector === 'string' && selector.includes('=')
+      ? Object.fromEntries(
+          selector
+            .trim()
+            .split(/\s+/)
+            .map((entry) => {
+              const [, key, value] = /^([^=]+)=(.+)$/.exec(entry) ?? [];
+              if (!key || value === undefined || !selectorKeys.has(key))
+                throw new Error(`Invalid PPTX selector term: ${entry}`);
+              return [key, value];
+            }),
+        )
+      : selector;
+  if (typeof spec !== 'object' || !('page' in spec) || spec.page === undefined)
+    return (item) => matchesSelector(item, spec);
+  const page = String(spec.page);
+  const slide = /^[1-9]\d*$/.test(page)
+    ? index.elements.filter((item) => item.kind === 'slide')[Number(page) - 1]
+    : undefined;
+  if (!slide?.slideId) throw new Error(`Invalid PPTX page: ${page}`);
+  return (item) => item.slideId === slide.slideId && matchesSelector(item, spec);
+}
+
 export function matchesSelector(
   item: IndexedElement,
   selector:

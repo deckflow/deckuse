@@ -1,4 +1,4 @@
-import { retireOwnedPath } from './cleanup.js';
+import { managedRetirement, retireOwnedPath } from './cleanup.js';
 import { mkdir, open, readFile, readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
@@ -32,6 +32,7 @@ export async function withInitialization<T>(
   initialize: (root: string, reserve: ReserveEntry) => Promise<T>,
   onCleanupWarning?: (path: string, cause: unknown) => void,
 ): Promise<T> {
+  managedRetirement();
   await mkdir(root, { recursive: true });
   const marker = join(root, '.deckuse-init.lock');
   let lock;

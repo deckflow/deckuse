@@ -4,7 +4,21 @@ import { lstat, mkdir, rename, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Diagnostic } from '../core/index.js';
 
-export const managedRetirement = () => process.env['DECKUSE_CLEANUP_MODE'] === 'retire';
+export function managedRetirement(): boolean {
+  const mode = process.env['DECKUSE_CLEANUP_MODE'];
+  if (mode === undefined || mode === 'delete') return false;
+  if (mode === 'retire') return true;
+  throw new Error('DECKUSE_CLEANUP_MODE must be delete or retire');
+}
+
+export interface CleanupRetirement {
+  originalPath: string;
+  retiredPath: string;
+  category: string;
+}
+
+const cleanupReports = new AsyncLocalStorage<CleanupRetirement[]>();
+export const collectCleanupRetirements = cleanupReports.run.bind(cleanupReports);
 
 export async function workspaceTrash(root: string): Promise<string> {
   const trash = join(root, '.deckuse-trash');
@@ -19,13 +33,16 @@ export async function retireOwnedPath(
   root: string,
   path: string,
   recursive = false,
+  category = basename(path),
 ): Promise<void> {
   if (!managedRetirement()) {
     await rm(path, { recursive, force: true });
     return;
   }
   const trash = await workspaceTrash(root);
-  await rename(path, join(trash, randomUUID() + '-' + basename(path)));
+  const retiredPath = join(trash, randomUUID() + '-' + basename(path));
+  await rename(path, retiredPath);
+  cleanupReports.getStore()?.push({ originalPath: path, retiredPath, category });
 }
 
 const cleanupWarnings = new AsyncLocalStorage<Diagnostic[]>();

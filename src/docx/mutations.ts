@@ -175,6 +175,11 @@ export function mutate(
   }
 
   if (command.type === 'replaceText') {
+    if (
+      (typeof command.selector === 'object' && command.selector.page !== undefined) ||
+      (typeof command.selector === 'string' && /(?:^|\s)page=/.test(command.selector))
+    )
+      return err('INVALID_COMMAND', 'The page selector is PPTX-only');
     const loaded = requireDocument(archive);
     if (!loaded.ok) return loaded;
     const doc = loaded.value;

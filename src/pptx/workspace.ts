@@ -1,9 +1,10 @@
+import { retireOwnedPath, warnCleanup } from '../workspace/cleanup.js';
 import { writeApplyReceipt, type ApplyReceipt } from '../workspace/receipts.js';
 import { timed } from '../timing.js';
 import { withWorkspaceTransaction } from '../workspace/transaction.js';
 import { withInitialization } from '../workspace/initialize.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { WorkspaceManifest } from '../core/index.js';
 import { OpcArchive, snapshotArchive, type OpcArchive as OpcArchiveType } from '../opc/index.js';
@@ -179,13 +180,16 @@ export async function persistWrite(
   const source = sourceDir(root);
   const sourceTmp = `${source}.${randomUUID()}.tmp`;
   return withWorkspaceTransaction(root, async (transactionId, prepareCommit, journal) => {
+    let ownsStaging = false;
     try {
       await mkdir(sourceTmp);
+      ownsStaging = true;
       await archive.writeDirectoryContents(sourceTmp);
       await timed('source-swap', async () => {
         // Keep the outgoing source inside the journal until the commit is durable.
         await rename(source, join(journal, 'retired-source'));
         await rename(sourceTmp, source);
+        ownsStaging = false;
       });
       const next: WorkspaceManifest = {
         ...manifest,
@@ -210,7 +214,13 @@ export async function persistWrite(
       );
       return packed;
     } catch (error) {
-      await rm(sourceTmp, { recursive: true, force: true });
+      if (ownsStaging) {
+        try {
+          await retireOwnedPath(root, sourceTmp, true, 'source-staging');
+        } catch (cause) {
+          warnCleanup('SOURCE_STAGING_CLEANUP_FAILED', sourceTmp, cause);
+        }
+      }
       throw error;
     }
   });

@@ -478,6 +478,11 @@ export const docxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'query') {
+          if (
+            (typeof command.selector === 'object' && command.selector.page !== undefined) ||
+            (typeof command.selector === 'string' && /(?:^|\s)page=/.test(command.selector))
+          )
+            return err('INVALID_COMMAND', 'The page selector is PPTX-only');
           const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
           return ok({
             items: matched.slice(0, command.limit).map(summary),

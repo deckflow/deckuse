@@ -255,6 +255,16 @@ and inspect the updated slide. A warning may describe intentional geometry.
 ## Measure packed PPTX creation
 
 After building, run `node scripts/benchmark-packed-pptx.mjs ./packed-benchmark.json 8`.
+
+Use `6` for the audit fixture with a five-block card and a page-scoped text edit.
+Configure the Playwright browser before running this fixture. It probes browser
+launch before authoring, checks the no-op receipt, and verifies that all six
+preview pages refer to the same revision and SHA-256 as the exported PPTX.
+The report includes npm package integrity, source commit, dirty-worktree status
+and timings for install, operation generation, apply, export and render. Host
+authorization wait and model time are unmeasured in this local benchmark.
+Treat five minutes as an observation target for a fixed environment.
+
 Use `12` for the larger fixture. The benchmark records a fresh-cache install and
 three process-cold runs, with separate context, creation, validation, first export
 and incremental export wall times. Set `DECKUSE_TIMINGS_FILE` to a writable JSONL
