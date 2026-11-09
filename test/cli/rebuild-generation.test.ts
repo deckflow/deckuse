@@ -137,3 +137,151 @@ it.each(['intact', 'empty', 'corrupt'])(
   },
   20_000,
 );
+
+it('resumes a committed apply after stdout loss without replay and rejects changed inputs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-resume-'));
+  const names = join(root, 'names.json');
+  const hook = join(root, 'lose-response.mjs');
+  await writeFile(names, '["Blank starter","Details"]');
+  await writeFile(
+    hook,
+    `if (process.argv[1]?.endsWith('/dist/bin.js') && process.argv[2] === 'apply') process.stdout.write = () => true;`,
+  );
+  const first = spawnSync(
+    process.execPath,
+    [generationRunner, root, resolve('skills/deckuse/examples/create-blank-pptx.json'), names],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_OPTIONS: `--import=${hook}` },
+    },
+  );
+  expect(first.status).toBe(1);
+  const failed = JSON.parse(first.stdout);
+  expect(failed).toMatchObject({ phase: 'apply', failureKind: 'no-cli-envelope' });
+  const resumed = spawnSync(process.execPath, [generationRunner, '--resume', failed.generation], {
+    encoding: 'utf8',
+  });
+  expect(resumed.status, resumed.stderr + resumed.stdout).toBe(0);
+  const result = JSON.parse(resumed.stdout);
+  expect(result).toMatchObject({ revision: '2', slides: 2, state: 'structural-only' });
+  const { readdir } = await import('node:fs/promises');
+  expect(
+    (await readdir(failed.generation)).filter((name) => /^apply.*started.json$/.test(name)),
+  ).toEqual(['apply.started.json']);
+  expect(await readFile(failed.report, 'utf8')).toContain('no-cli-envelope');
+  await writeFile(join(failed.generation, 'ops.json'), '[]');
+  const changed = spawnSync(process.execPath, [generationRunner, '--resume', failed.generation], {
+    encoding: 'utf8',
+  });
+  expect(changed.status).toBe(1);
+  expect(JSON.parse(changed.stdout).error).toContain('inputs changed');
+  expect((await readFile(result.output)).length).toBeGreaterThan(0);
+}, 30000);
+
+it('times out an uncommitted apply and refuses to guess a replay', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-resume-timeout-'));
+  const names = join(root, 'names.json'),
+    hook = join(root, 'hang.mjs');
+  await writeFile(names, '["Blank starter","Details"]');
+  await writeFile(
+    hook,
+    `if (process.argv[1]?.endsWith('/dist/bin.js') && process.argv[2] === 'apply') await new Promise(() => { setInterval(() => {}, 1000); });`,
+  );
+  const first = spawnSync(
+    process.execPath,
+    [
+      generationRunner,
+      root,
+      resolve('skills/deckuse/examples/create-blank-pptx.json'),
+      names,
+      '--timeout-ms',
+      '3000',
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_OPTIONS: `--import=${hook}` },
+    },
+  );
+  const failed = JSON.parse(first.stdout);
+  expect(failed).toMatchObject({ phase: 'apply', failureKind: 'timeout' });
+  const resumed = spawnSync(process.execPath, [generationRunner, '--resume', failed.generation], {
+    encoding: 'utf8',
+  });
+  expect(resumed.status).toBe(1);
+  expect(JSON.parse(resumed.stdout).error).toContain('unknown');
+}, 20000);
+
+it('retains exported bytes and avoids repeating a blocked preview in the same context', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-resume-preview-'));
+  const names = join(root, 'names.json');
+  await writeFile(names, '["Blank starter","Details"]');
+  const env = { ...process.env, DECKUSE_BROWSER_EXECUTION: 'denied' };
+  const first = spawnSync(
+    process.execPath,
+    [
+      generationRunner,
+      root,
+      resolve('skills/deckuse/examples/create-blank-pptx.json'),
+      names,
+      '--preview',
+    ],
+    { encoding: 'utf8', env },
+  );
+  const failed = JSON.parse(first.stdout);
+  expect(failed.state).toBe('preview-blocked');
+  const before = await readFile(failed.output);
+  const resumed = spawnSync(process.execPath, [generationRunner, '--resume', failed.generation], {
+    encoding: 'utf8',
+    env,
+  });
+  expect(resumed.status).toBe(1);
+  expect(JSON.parse(resumed.stdout).error).toContain('previously blocked');
+  expect(await readFile(failed.output)).toEqual(before);
+  const { readdir } = await import('node:fs/promises');
+  expect(
+    (await readdir(failed.generation)).filter((name) => /^preview.*started.json$/.test(name)),
+  ).toHaveLength(1);
+}, 30000);
+
+it('refuses an external revision change without replacing the prior artifact', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-resume-external-'));
+  const names = join(root, 'names.json');
+  await writeFile(names, '["Blank starter","Details"]');
+  const first = spawnSync(
+    process.execPath,
+    [generationRunner, root, resolve('skills/deckuse/examples/create-blank-pptx.json'), names],
+    { encoding: 'utf8' },
+  );
+  expect(first.status).toBe(0);
+  const result = JSON.parse(first.stdout);
+  const original = await readFile(result.output);
+  const patch = join(root, 'patch.json');
+  await writeFile(
+    patch,
+    JSON.stringify([{ type: 'setText', target: 'slide:2/shape:Title', value: 'External edit' }]),
+  );
+  const edited = spawnSync(
+    process.execPath,
+    [
+      resolve('dist/bin.js'),
+      'apply',
+      '--workspace',
+      result.workspace,
+      '--input',
+      patch,
+      '--request-id',
+      'external-edit',
+      '--expect-revision',
+      '2',
+      '--json',
+    ],
+    { encoding: 'utf8' },
+  );
+  expect(edited.status, edited.stdout).toBe(0);
+  const resumed = spawnSync(process.execPath, [generationRunner, '--resume', result.generation], {
+    encoding: 'utf8',
+  });
+  expect(resumed.status).toBe(1);
+  expect(JSON.parse(resumed.stdout).error).toContain('stale');
+  expect(await readFile(result.output)).toEqual(original);
+}, 30000);

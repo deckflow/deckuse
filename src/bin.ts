@@ -61,8 +61,8 @@ const expectRevisionOpt = takeOption(args, '--expect-revision');
 const reasonOpt = takeOption(args, '--reason');
 const requestIdPresent = args.includes('--request-id');
 const requestIdOpt = takeOption(args, '--request-id');
-const summaryOpt = args[0] === 'apply' && takeFlag(args, '--summary');
-const reportPresent = args[0] === 'apply' && args.includes('--report');
+const summaryOpt = ['apply', 'validate'].includes(args[0] ?? '') && takeFlag(args, '--summary');
+const reportPresent = ['apply', 'validate'].includes(args[0] ?? '') && args.includes('--report');
 const reportOpt = reportPresent ? takeOption(args, '--report') : undefined;
 const clean = args;
 
@@ -263,6 +263,26 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
       // Reporting happens after the transaction. Preserve the actual outcome.
       process.stderr.write(`deckuse: could not write report: ${String(cause)}\n`);
     }
+  }
+  if (commandLabel === 'deckuse validate' && (summaryOpt || reportOpt)) {
+    const data = envelope.data as Record<string, unknown> | undefined;
+    outputEnvelope({
+      ...envelope,
+      data: {
+        ...(summaryOpt
+          ? {
+              valid: data?.['valid'] === true,
+              revision: data?.['revision'],
+              inspection: data?.['inspection'],
+              diagnosticCount: result.diagnostics.length,
+              diagnostics: envelope.ok ? undefined : result.diagnostics,
+            }
+          : data),
+        reportPath,
+        reportFailed: Boolean(reportOpt && !reportPath),
+      },
+    });
+    return result.ok && !(reportOpt && !reportPath);
   }
   if (summaryOpt) {
     const data = envelope.data as Record<string, unknown> | undefined;
@@ -1336,6 +1356,7 @@ const main = async (): Promise<void> => {
                 ) as unknown,
               }
             : {}),
+          ...(summaryOpt || reportOpt ? { summary: true } : {}),
           render: clean.includes('--render'),
           package: clean.includes('--package'),
           relationships: clean.includes('--relationships'),

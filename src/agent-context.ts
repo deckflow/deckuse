@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commandJsonSchema, PROTOCOL_VERSION } from './core/schema.js';
@@ -149,7 +149,7 @@ export async function agentContext(options: {
     format === 'pptx'
       ? (JSON.parse(await readFile(new URL('../' + example, import.meta.url), 'utf8')) as unknown)
       : [{ type: 'addParagraph', blocks: [{ text: 'Introduction', fontSize: 18, bold: true }] }];
-  return {
+  const context = {
     ...identity,
     capabilityFingerprint: fingerprint,
     scenario,
@@ -190,6 +190,19 @@ export async function agentContext(options: {
         'bundled dependency; executable availability is checked during render; not actively probed here',
     },
     recipe: {
+      ...(format === 'pptx'
+        ? {
+            deliveryRunner: {
+              resource: 'scripts/rebuild-generation.mjs',
+              create:
+                'node <package>/scripts/rebuild-generation.mjs ./job ./ops.json ./expected-slide-names.json --preview',
+              resume:
+                'node <package>/scripts/rebuild-generation.mjs --resume <generation-directory>',
+              cleanup:
+                'Set DECKUSE_CLEANUP_MODE=retire only when the host permits internal retirement moves.',
+            },
+          }
+        : {}),
       scope:
         'New document smoke recipe; use inventory and selected workflow for an existing-file task',
       operations: sample,
@@ -203,7 +216,9 @@ export async function agentContext(options: {
         format === 'pptx'
           ? 'deckuse apply --workspace ./ws --input ./ops.json --request-id create-1 --expect-revision 1 --summary --json'
           : 'deckuse apply --workspace ./ws --input ./ops.json --json',
-        'deckuse validate --workspace ./ws --json',
+        format === 'pptx'
+          ? 'deckuse validate --workspace ./ws --summary --render --report ./validation.json --json'
+          : 'deckuse validate --workspace ./ws --json',
         `deckuse export ./output.${format} --workspace ./ws --json`,
       ],
     },
@@ -267,4 +282,38 @@ export async function agentContext(options: {
     ...(options.includeSchema ? { contracts } : {}),
     ...(dynamic ? { dynamic } : {}),
   };
+  // Recipes and installed guidance can change without a package version bump.
+  const resources: Record<string, string> = {};
+  const packageRoot = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+  async function digestResources(relative: string): Promise<void> {
+    for (const entry of (await readdir(join(packageRoot, relative), { withFileTypes: true })).sort(
+      (a, b) => a.name.localeCompare(b.name),
+    )) {
+      const path = join(relative, entry.name);
+      if (entry.isDirectory()) await digestResources(path);
+      else
+        resources[path] = createHash('sha256')
+          .update(await readFile(join(packageRoot, path)))
+          .digest('hex');
+    }
+  }
+  await digestResources('skills/deckuse');
+  const runner = 'scripts/rebuild-generation.mjs';
+  resources[runner] = createHash('sha256')
+    .update(await readFile(join(packageRoot, runner)))
+    .digest('hex');
+  const executionFingerprint = createHash('sha256')
+    .update(
+      JSON.stringify({
+        fingerprint,
+        resources,
+        recipe: context.recipe,
+        conventions: context.conventions,
+        applyContract: context.applyContract,
+      }),
+    )
+    .digest('hex');
+  context.capabilityFingerprint = executionFingerprint;
+  context.cache.staticKey[context.cache.staticKey.length - 1] = executionFingerprint;
+  return context;
 }

@@ -3,6 +3,22 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+if (process.argv[2] === '--agent-log') {
+  const { analyzeAgentLog } = await import('./agent-log-analysis.mjs');
+  const input = process.argv[3];
+  if (!input)
+    throw new Error(
+      'Usage: summarize-agent-benchmark.mjs --agent-log <events.jsonl> [new-report.json]',
+    );
+  const events = (await readFile(input, 'utf8'))
+    .split('\n')
+    .filter((line) => line.trim())
+    .map(JSON.parse);
+  const output = JSON.stringify(analyzeAgentLog(events), null, 2) + '\n';
+  if (process.argv[4]) await writeFile(process.argv[4], output, { flag: 'wx' });
+  else process.stdout.write(output);
+  process.exit(0);
+}
 const file = process.argv[2];
 const report = JSON.parse(await readFile(file, 'utf8'));
 const roots = (await readdir(tmpdir()))

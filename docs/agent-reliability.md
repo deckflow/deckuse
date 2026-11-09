@@ -323,3 +323,53 @@ package as structural-only. Recheck the digest before handing it off under a
 new filename. An empty, corrupt or mismatched package yields a failed result
 without a recoverable path. A preview failure after verified publication is
 recorded separately as `preview-blocked`.
+
+## Compact validation and resumable delivery
+
+`validate --summary --render --report ./validation.json --json` returns ordered
+PPTX slide inventory, editable text targets, object counts, package SHA-256 and
+snapshot staleness. The digest identifies `package.pptx`; validation reads current
+source state, so a stale snapshot is not the validated source artifact. Export
+from source before delivery in that case. Slide targets are valid at the returned
+revision; refresh after reordering. `--render` here enables existing geometry
+heuristics, not screenshots. Structure, preview, visual review and native review
+are independent states. Full reports retain diagnostics; existing report paths
+are never overwritten. A report write failure exits nonzero without changing the
+validation outcome. Default validate output remains unchanged. The optional
+protocol `summary` field only requests the additional PPTX inspection data.
+
+Use the installed generation runner with saved operations and an ordered unique
+slide-name array. It records each process and timeout, a stable request ID, input
+hashes and immutable checkpoints. Reuse the confirmed absolute CLI/package path
+rather than copying dependencies. The runner preserves host environment policy;
+it no longer implicitly selects a cleanup mode. Set `DECKUSE_CLEANUP_MODE=retire`
+only when the host permits moving owned internal artifacts.
+
+```sh
+node <package>/scripts/rebuild-generation.mjs ./job ./ops.json ./names.json --preview
+node <package>/scripts/rebuild-generation.mjs --resume ./job/deckuse-generation-xxxx
+```
+
+The output root must exist. Defaults are 60000 ms per structural process and
+180000 ms for preview. Override with `--timeout-ms` and `--preview-timeout-ms`.
+Continuation checks inputs, live health/revision, the original apply receipt,
+validated snapshot and exported bytes. Unknown/rejected/stale apply outcomes
+stop rather than replay. Changed inputs or external edits require inspection;
+they are not silently adopted. Earlier generations without `generation.json`
+are retained but cannot use this continuation mode.
+
+Every attempt retains its own stdout/stderr/process files. The first report is
+`run.json`; subsequent results are `run.attempt-N.json`. Re-read the report path
+returned by each invocation. Successful exports are retained after preview
+failure. Failed publication retries use a new filename. Only verified snapshot
+candidates are reported for manual recovery; the runner never labels them as
+visually reviewed. After a non-retryable preview failure, unchanged configuration
+is not relaunched on resume. Fix the environment and pass `--retry-preview` to
+explicitly retry after remediation. Do not use it to override a host denial.
+A resumed preview reuses the same output directory and `--since-revision` cache;
+all resulting pages and the contact sheet still require inspection.
+
+The creation context fingerprints installed skill resources, examples, recipe
+and runner in addition to capabilities and schemas. Cache identity therefore
+changes when same-version execution guidance changes. Dynamic state and host
+permission are never cached as part of that static contract.

@@ -17,7 +17,7 @@ execFileSync(
     '--no-audit',
     '--no-fund',
     '--cache',
-    join(staging, 'npm-cache'),
+    process.env.DECKUSE_PACKAGE_TEST_CACHE ?? join(staging, 'npm-cache'),
     join(staging, packed.filename),
   ],
   { cwd: staging, stdio: 'inherit' },
@@ -29,6 +29,10 @@ for (const asset of [
   'schema/command.schema.json',
   'skills/deckuse/SKILL.md',
   'docs/agent-reliability.md',
+  'scripts/rebuild-generation.mjs',
+  'scripts/managed-bootstrap.sh',
+  'scripts/agent-log-analysis.mjs',
+  'scripts/summarize-agent-benchmark.mjs',
 ])
   await access(join(root, asset));
 async function references(dir) {
@@ -167,6 +171,7 @@ const firstPage = cli(['list', 'shapes', '--slide', '1', '--workspace', compactD
 if (!JSON.stringify(firstPage).includes('产品 Overview'))
   throw new Error('Rich text was not preserved');
 
+await access(join(root, context.recipe.deliveryRunner.resource));
 const ops = join(root, context.resource.example);
 await access(ops);
 process.env.DECKUSE_BROWSER_EXECUTION = 'denied';
@@ -228,6 +233,28 @@ const status = cli([
   expectedNames,
 ]);
 if (!status.data.valid) throw new Error('Invalid packaged presentation');
+const summary = cli([
+  'validate',
+  '--workspace',
+  ws,
+  '--summary',
+  '--render',
+  '--report',
+  join(staging, 'validation-report.json'),
+]);
+if (
+  summary.data.inspection.slideCount !== 2 ||
+  summary.data.inspection.verification.visualReview !== 'not-performed'
+)
+  throw Error('Invalid validation summary');
+const continuation = JSON.parse(
+  execFileSync(
+    process.execPath,
+    [join(root, 'scripts/rebuild-generation.mjs'), '--resume', generated.generation],
+    { encoding: 'utf8' },
+  ),
+);
+if (continuation.sha256 !== generated.sha256) throw Error('Continuation changed output');
 const slides = cli(['list', 'slides', '--workspace', ws]).data.items;
 if (slides.length !== 2) throw new Error('Expected two slides');
 const shapes = cli(['list', 'shapes', '--slide', '2', '--workspace', ws]);

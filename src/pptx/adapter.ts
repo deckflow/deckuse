@@ -1233,6 +1233,48 @@ export const pptxAdapter: FormatAdapter = {
                 {
                   valid: true,
                   revision: index.revision,
+                  ...(command.summary
+                    ? {
+                        inspection: {
+                          packageSha256: exportDigest(await readFile(packagePath(workspace))),
+                          packageStale: await isPackageStale(workspace),
+                          slideCount: index.elements.filter((item) => item.kind === 'slide').length,
+                          slides: index.elements
+                            .filter((item) => item.kind === 'slide')
+                            .map((slide, i) => {
+                              const objects = index.elements.filter(
+                                (item) =>
+                                  item.slideId === slide.slideId &&
+                                  !['slide', 'notes', 'tableCell'].includes(item.kind),
+                              );
+                              return {
+                                page: i + 1,
+                                name: slide.name,
+                                target: targetPathForItem(index, slide),
+                                uid: uidForItem(slide),
+                                partUri: slide.partUri,
+                                objectCount: objects.length,
+                                text: objects
+                                  .filter((item) => item.text)
+                                  .map((item) => ({
+                                    target: targetPathForItem(index, item),
+                                    text: item.text,
+                                  })),
+                              };
+                            }),
+                          layout: {
+                            state: command.render ? 'heuristic-only' : 'not-requested',
+                            diagnostics: command.render ? visual.diagnostics : [],
+                          },
+                          verification: {
+                            structure: 'valid',
+                            preview: 'not-performed',
+                            visualReview: 'not-performed',
+                            nativeReview: 'not-performed',
+                          },
+                        },
+                      }
+                    : {}),
                   capabilities: pptxCapabilities,
                   chartData,
                   visual,

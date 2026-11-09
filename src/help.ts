@@ -709,7 +709,9 @@ Notes:
 Options:
   --level <level>           Validation level (default: full)
   --profile <mode>          structure (default) or delivery (strict data verification)
-  --render                  Include visual geometry and heuristic diagnostics
+  --summary                 Include ordered PPTX inventory and compact verification states
+  --report <path>           Save full validation envelope to a new file
+  --render                  Include visual geometry and heuristic diagnostics (not screenshots)
   --package                 Include package checks
   --relationships           Include relationship graph checks
   --slide <n>               Limit to one slide when supported

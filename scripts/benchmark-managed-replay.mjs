@@ -5,7 +5,19 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const [baseline, candidate, report, preview] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const take = (name) => {
+  const i = args.indexOf(name);
+  if (i < 0) return undefined;
+  const value = args[i + 1];
+  if (!value || value.startsWith('--')) throw Error('Missing ' + name);
+  args.splice(i, 2);
+  return value;
+};
+const scenario = take('--scenario') ?? 'nine-slide';
+if (!['nine-slide', 'ten-slide'].includes(scenario)) throw Error('Unknown scenario');
+const reference = take('--reference-cli');
+const [baseline, candidate, report, preview] = args;
 if (!baseline || !candidate || !report || (preview && preview !== '--preview'))
   throw new Error(
     'Usage: benchmark-managed-replay.mjs <baseline-cli> <candidate-cli> <new-report.json> [--preview]',
@@ -14,15 +26,17 @@ if (!baseline || !candidate || !report || (preview && preview !== '--preview'))
 const root = await mkdtemp(join(tmpdir(), 'deckuse-managed-replay-'));
 const input = join(root, 'create.json');
 const patch = join(root, 'patch.json');
-const names = Array.from({ length: 9 }, (_, i) => `Page ${i + 1}`);
+const pageCount = scenario === 'ten-slide' ? 10 : 9;
+const objectsPerPage = scenario === 'ten-slide' ? 26 : 21;
+const names = Array.from({ length: pageCount }, (_, i) => `Page ${i + 1}`);
 const shapes = names.flatMap((slide, page) =>
-  Array.from({ length: 21 }, (_, i) => ({
+  Array.from({ length: objectsPerPage }, (_, i) => ({
     type: 'addShape',
     slide,
     name: `Text-${i}`,
     shapeType: 'text',
     x: `${50 + (i % 3) * 400}px`,
-    y: `${60 + Math.floor(i / 3) * 85}px`,
+    y: `${60 + Math.floor(i / 3) * (pageCount === 10 ? 68 : 85)}px`,
     width: '365px',
     height: '52px',
     blocks: [
@@ -54,6 +68,7 @@ const rows = [];
 for (let trial = 1; trial <= 3; trial++) {
   for (const [label, executable] of [
     ['baseline', baseline],
+    ...(reference ? [['reference', reference]] : []),
     ['candidate', candidate],
   ]) {
     const cli = resolve(executable);
@@ -66,7 +81,17 @@ for (let trial = 1; trial <= 3; trial++) {
     const commands = [];
     const started = performance.now();
     let phase;
-    const row = { label, trial, commands, trace, outcome: 'failed' };
+    const row = {
+      label,
+      trial,
+      executable: cli,
+      entrypointSha256: createHash('sha256')
+        .update(await readFile(cli))
+        .digest('hex'),
+      commands,
+      trace,
+      outcome: 'failed',
+    };
     function run(name, args, valid = false) {
       phase = name;
       const at = performance.now();
@@ -148,7 +173,7 @@ for (let trial = 1; trial <= 3; trial++) {
         if (
           rendered.revision !== '3' ||
           rendered.inputSha256 !== sha256 ||
-          rendered.results.length !== 9 ||
+          rendered.results.length !== pageCount ||
           rendered.results.some((page, i) => !page.ok || page.page !== i + 1) ||
           rendered.results[0]?.reusedFromRevision ||
           rendered.results.slice(1).some((page) => page.reusedFromRevision !== '2')
@@ -170,7 +195,7 @@ for (let trial = 1; trial <= 3; trial++) {
   }
 }
 const summary = Object.fromEntries(
-  ['baseline', 'candidate'].map((label) => {
+  ['baseline', ...(reference ? ['reference'] : []), 'candidate'].map((label) => {
     const trials = rows.filter((row) => row.label === label);
     const elapsed = trials.map((row) => row.elapsedMs).sort((a, b) => a - b);
     return [label, { medianMs: elapsed[1], outcomes: trials.map((row) => row.outcome) }];
@@ -179,7 +204,17 @@ const summary = Object.fromEntries(
 await writeFile(
   report,
   JSON.stringify(
-    { root, operations: operations.length, shapes: shapes.length, summary, rows },
+    {
+      root,
+      environment: { node: process.version, platform: process.platform, arch: process.arch },
+      scenario,
+      mode: 'control-replay',
+      condition: 'process-cold',
+      operations: operations.length,
+      shapes: shapes.length,
+      summary,
+      rows,
+    },
     null,
     2,
   ) + '\n',

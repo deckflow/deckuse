@@ -34,7 +34,9 @@
     "docs/verification-agent-reliability.md",
     "docs/review.md",
     "docs/review-implementation-status.md",
-    "docs/native-capabilities.md"
+    "docs/native-capabilities.md",
+    "scripts/agent-log-analysis.mjs",
+    "scripts/summarize-agent-benchmark.mjs"
   ],
   "bin": {
     "deckuse": "./dist/bin.js"

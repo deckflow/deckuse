@@ -1010,6 +1010,9 @@
           "type": "string",
           "minLength": 1
         },
+        "summary": {
+          "type": "boolean"
+        },
         "expectedSlides": {
           "type": "integer",
           "exclusiveMinimum": 0,

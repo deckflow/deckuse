@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "deckuse",
-  "targetCli": "1.9.0 community",
+  "targetCli": "installed package / community",
   "entry": "SKILL.md",
   "scenarios": {
     "create": {

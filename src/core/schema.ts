@@ -945,6 +945,7 @@ const validateCommandSchema = z
     ids: z.boolean().optional(),
     render: z.boolean().optional(),
     expectRevision: z.string().min(1).optional(),
+    summary: z.boolean().optional(),
     expectedSlides: z.number().int().positive().optional(),
     expectedSlideNames: z.array(z.string().min(1)).min(1).optional(),
     slide: z.number().int().positive().optional(),

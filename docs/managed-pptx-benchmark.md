@@ -100,3 +100,92 @@ dependencies. The spread across three trials does not establish a speedup.
 The replay measures CLI work and local previews. WorkBuddy cold and warm
 production trials, model latency, and the five-minute reviewed handoff
 target remain unverified.
+
+## Ten-slide workflow comparison
+
+Use three builds: release commit `d6ca3bf`, pre-change commit `901f931`, and the
+candidate commit (record dirty status if uncommitted). Version 1.9.4 alone does
+not identify the build. For each build run at least three cold-install and three
+warm-installed production trials **per brief type**, with the same named host,
+model, permissions, browser, fonts and quality criteria:
+
+- Fixed facts: create ten editable bilingual slides for the fictional Harbor Desk
+  product using the facts in the fixed brief above. Split intake and escalation
+  into two pages each to make ten pages. Include about 260 native objects, including editable text and diagrams.
+  Use supplied facts only; do not browse. Record actual object count rather than
+  adding meaningless decoration solely to reach the target.
+- Research: create ten editable slides explaining a named product or topic using
+  primary sources. Fix the same topic, evaluation date and source requirements
+  across builds. Keep fact verification and citations in every condition. Record
+  source availability and research time separately; do not compare a medical
+  research task with a supplied-facts task as if they were equivalent.
+
+For each condition report all samples, failure fraction, tool calls, median time
+and verification state. The target is at least 30% lower median warm end-to-end
+latency at equal quality/verification, not a guaranteed five-minute result. Three
+samples do not establish a reliable P95. A blocked preview never counts as a
+reviewed handoff. Retain failed trials in the denominator.
+
+For a deterministic control (three process-cold replays per build, **not** actual
+cold installs or production model trials):
+
+```sh
+node scripts/benchmark-managed-replay.mjs /release/dist/bin.js /candidate/dist/bin.js \
+  /new/ten-slide-report.json --reference-cli /pre-change/dist/bin.js --scenario ten-slide
+```
+
+Add `--preview` only with the configured, permitted browser. This fixture has ten
+pages and 260 editable text objects; it isolates CLI throughput rather than design
+quality or research. It does not satisfy the production trial requirements above.
+
+Analyze a WorkBuddy JSONL trace without copying private payloads into the repository:
+
+```sh
+node scripts/summarize-agent-benchmark.mjs --agent-log /private/session.jsonl /new/timeline.json
+```
+
+The result contains task boundaries, interval unions, incomplete calls and
+attempt milestones. It does not infer success from a shell exit or mark visual
+review from prose. Summaries and background notifications do not start tasks.
+Unattributed wall time includes unknown model/host contributions. Simultaneous
+result timestamps are marked batch-ambiguous and cannot identify the slow tool.
+
+### Implementation verification — 2026-11-09
+
+Local macOS arm64, Node 24.14.1, matched Playwright headless shell, deck2html 0.6.2.
+Archived source trees for the two baseline commits shared the current installed
+dependencies. Candidate means the implementation working tree during this task,
+not a released package. Package installation was running concurrently, so these
+are not isolated-machine latency samples. Later documentation, formatting and
+context/summary refinements were covered by the final tests below.
+
+| Build                  |  Trial 1 |  Trial 2 |  Trial 3 |   Median | Preview ready |
+| ---------------------- | -------: | -------: | -------: | -------: | ------------: |
+| Release `d6ca3bf`      | 10.620 s | 10.318 s | 10.233 s | 10.318 s |           3/3 |
+| Pre-change `901f931`   | 10.265 s | 10.315 s | 10.233 s | 10.265 s |           3/3 |
+| Candidate working tree | 10.318 s | 10.283 s | 10.443 s | 10.318 s |           3/3 |
+
+The ten-slide control used 271 operations and 260 editable objects, followed by
+one local text patch. All runs verified the exported package and incremental
+preview inventory, including reuse of the nine unchanged pages. No meaningful
+CLI throughput improvement is established by these samples; the intended gain
+is fewer agent round trips and less recovery work.
+
+Final verification completed:
+
+- Build/type checking, changed-source ESLint, formatting and diff whitespace checks.
+- Full Vitest suite: 64 files, 441 tests passed.
+- Tarball install/resource/link checks, PPTX/DOCX smoke, compact validation and
+  generation continuation passed. A second packaging run reused the first run's
+  npm download cache; this is package validation, not a cold-install benchmark.
+- Real-browser continuation: initially denied preview retained the export;
+  after the execution context changed, resume produced two previews and a contact
+  sheet without changing PPTX bytes. A further resume reused both page images.
+- Private log analysis reproduced the warm task's 743826 ms elapsed time,
+  19 tool calls, 122259 ms interval union and 621567 ms unattributed time. The
+  private trace is not included in this repository.
+
+WorkBuddy/CodeBuddy command entry points were unavailable in this environment.
+The required real-host cold/warm production trials and the 30% reduction target
+remain **unverified**. Preview generation in these checks is not human visual
+approval or native Office verification.

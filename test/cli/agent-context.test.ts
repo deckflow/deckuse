@@ -98,3 +98,42 @@ it('indexes v2 contracts by operation without running browser preflight', async 
     vi.unstubAllEnvs();
   }
 });
+
+it('invalidates the same-version fingerprint when installed examples or guidance change', async () => {
+  const { cp, mkdir, symlink } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'deckuse-context-fingerprint-'));
+  await cp(resolve('dist'), join(root, 'dist'), { recursive: true });
+  await cp(resolve('skills'), join(root, 'skills'), { recursive: true });
+  await mkdir(join(root, 'scripts'));
+  await cp(resolve('scripts/rebuild-generation.mjs'), join(root, 'scripts/rebuild-generation.mjs'));
+  await cp(resolve('package.json'), join(root, 'package.json'));
+  await symlink(resolve('node_modules'), join(root, 'node_modules'), 'dir');
+  const query = () =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          join(root, 'dist/bin.js'),
+          'agent-context',
+          '--format',
+          'pptx',
+          '--scenario',
+          'create',
+          '--json',
+        ],
+        { encoding: 'utf8' },
+      ),
+    ).data;
+  const first = query();
+  const example = join(root, 'skills/deckuse/examples/create-blank-pptx.json');
+  const { readFile } = await import('node:fs/promises');
+  await writeFile(example, (await readFile(example, 'utf8')) + '\n');
+  const second = query();
+  expect(second.cliVersion).toBe(first.cliVersion);
+  expect(second.capabilityFingerprint).not.toBe(first.capabilityFingerprint);
+  const skill = join(root, 'skills/deckuse/scenarios/create.md');
+  await writeFile(skill, (await readFile(skill, 'utf8')) + '\nUpdated execution guidance.\n');
+  const third = query();
+  expect(third.capabilityFingerprint).not.toBe(second.capabilityFingerprint);
+  expect(third.cache.staticKey.at(-1)).toBe(third.capabilityFingerprint);
+}, 30000);
