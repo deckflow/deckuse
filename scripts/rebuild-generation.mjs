@@ -41,6 +41,8 @@ await writeFile(join(generation, 'expected-slide-names.json'), JSON.stringify(ex
 let phase = 'new';
 let revision;
 let artifact;
+let validatedSnapshot;
+let failureKind;
 const runId = process.env.DECKUSE_RUN_ID ?? requestId;
 const reportPath = join(generation, 'run.json');
 async function cli(args) {
@@ -76,7 +78,10 @@ async function cli(args) {
   await writeFile(join(generation, phase + '.json'), result.stdout ?? '', { flag: 'wx' });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  if (!result.stdout?.trim()) throw new Error(phase + ' returned empty stdout');
+  if (!result.stdout?.trim()) {
+    failureKind = 'no-cli-envelope';
+    throw new Error(phase + ' returned empty stdout');
+  }
   const envelope = JSON.parse(result.stdout);
   if (
     result.status !== 0 ||
@@ -98,6 +103,36 @@ async function report(result) {
   };
   await writeFile(reportPath, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ ...data, report: reportPath }));
+}
+
+async function inspectPptx(path) {
+  const bytes = await readFile(path);
+  if (!bytes.length) throw new Error('PPTX is empty');
+  const archive = await OpcArchive.open(bytes);
+  const names = buildIndex(archive, workspace, revision)
+    .elements.filter((item) => item.kind === 'slide')
+    .map((item) => item.name);
+  if (names.length !== expected.length || expected.some((name, i) => name !== names[i]))
+    throw new Error('PPTX slide inventory does not match the expected order');
+  return { sha256: createHash('sha256').update(bytes).digest('hex'), slides: names.length };
+}
+
+async function inspectSnapshot() {
+  const metadataPath = join(workspace, '.deckuse', 'manifest.json');
+  const before = await readFile(metadataPath, 'utf8');
+  const manifest = JSON.parse(before);
+  const path = join(workspace, 'package.pptx');
+  const inspected = await inspectPptx(path);
+  if (
+    manifest.format !== 'pptx' ||
+    manifest.revision !== revision ||
+    !manifest.files?.some(
+      (file) => file.path === 'package.pptx' && file.checksum === inspected.sha256,
+    ) ||
+    before !== (await readFile(metadataPath, 'utf8'))
+  )
+    throw new Error('Snapshot no longer matches the validated workspace revision');
+  return { path, revision, slideNames: expected, ...inspected };
 }
 
 try {
@@ -134,6 +169,7 @@ try {
     join(generation, 'expected-slide-names.json'),
   ]);
   phase = 'export';
+  validatedSnapshot = await inspectSnapshot();
   const exported = await cli([
     'export',
     output,
@@ -144,19 +180,10 @@ try {
     '--from-package',
   ]);
   if (exported.revision !== revision) throw new Error('Export revision does not match validation');
-  const bytes = await readFile(output);
-  if (!bytes.length) throw new Error('Export is empty');
-  const archive = await OpcArchive.open(bytes);
-  const names = buildIndex(archive, workspace, revision)
-    .elements.filter((item) => item.kind === 'slide')
-    .map((item) => item.name);
-  if (names.length !== expected.length || expected.some((name, i) => name !== names[i]))
-    throw new Error('Export slide inventory does not match the expected order');
-  artifact = {
-    output,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-    slides: names.length,
-  };
+  const delivered = await inspectPptx(output);
+  if (delivered.sha256 !== validatedSnapshot.sha256)
+    throw new Error('Export does not match the validated package snapshot');
+  artifact = { output, ...delivered };
   if (preview) {
     phase = 'preview';
     const result = await cli([
@@ -185,10 +212,22 @@ try {
   });
 } catch (cause) {
   process.exitCode = 1;
+  let recoverableSnapshot;
+  if (phase === 'export' && validatedSnapshot) {
+    const candidate = await inspectSnapshot().catch(() => undefined);
+    if (candidate?.sha256 === validatedSnapshot.sha256) recoverableSnapshot = candidate;
+  }
   await report({
     ok: false,
     ...artifact,
-    state: artifact && phase === 'preview' ? 'preview-blocked' : 'failed',
+    state:
+      artifact && phase === 'preview'
+        ? 'preview-blocked'
+        : recoverableSnapshot
+          ? 'recoverable-snapshot'
+          : 'failed',
+    ...(recoverableSnapshot ? { recoverableSnapshot } : {}),
+    ...(failureKind ? { failureKind } : {}),
     error: cause instanceof Error ? cause.message : String(cause),
   });
 }

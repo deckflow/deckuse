@@ -209,6 +209,61 @@ export async function agentContext(options: {
     },
     operationTypes: types,
     operationFields,
+    ...(format === 'pptx' && scenario === 'create'
+      ? {
+          applyContract: {
+            input:
+              'Array of operations passed directly to apply --input. Supply revision and request identity as CLI flags.',
+            target: 'addShape.slide accepts a one-based page number or exact unique slide name.',
+            units: ['px', 'pt', 'mm', 'cm', 'in', '%', 'emu'],
+            commonEnums: {
+              layout: ['Blank'],
+              shapeType: ['text', 'rect', 'rounded-rect', 'ellipse', 'line', 'image', 'table'],
+              anchor: ['top', 'middle', 'bottom'],
+              wrap: ['square', 'none'],
+              autofit: ['none', 'shrink', 'resize'],
+              align: ['left', 'center', 'right', 'justify'],
+            },
+            examples: {
+              slide: { type: 'addSlide', name: 'Overview', layout: 'Blank' },
+              nativeShape: {
+                type: 'addShape',
+                slide: 'Overview',
+                shapeType: 'rounded-rect',
+                name: 'Panel',
+                x: '0.5in',
+                y: '0.5in',
+                width: '8in',
+                height: '2in',
+                fill: { color: 'EDF4FA' },
+                stroke: { color: '345671', width: 1 },
+              },
+              richText: {
+                type: 'addShape',
+                slide: 'Overview',
+                shapeType: 'text',
+                name: 'Title',
+                x: '0.75in',
+                y: '0.8in',
+                width: '7in',
+                height: '1in',
+                anchor: 'middle',
+                wrap: 'square',
+                autofit: 'none',
+                blocks: [
+                  {
+                    align: 'left',
+                    runs: [
+                      { text: '产品 ', bold: true, fontSize: 24, textColor: '123456' },
+                      { text: 'Overview', fontSize: 24 },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        }
+      : {}),
     ...(options.includeSchema ? { contracts } : {}),
     ...(dynamic ? { dynamic } : {}),
   };

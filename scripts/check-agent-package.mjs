@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -80,6 +80,93 @@ const context = cli([
   'create',
   '--include-schema',
 ]).data;
+const probeHook = join(staging, 'browser-preflight-fault.mjs');
+const converter = join(staging, 'version-only-converter');
+await writeFile(converter, '#!/bin/sh\nprintf "%s\\n" "test converter 1"\n', { mode: 0o755 });
+await writeFile(
+  probeHook,
+  `
+  import fs from 'node:fs';
+  import { syncBuiltinESMExports } from 'node:module';
+  const mkdtemp = fs.promises.mkdtemp, rm = fs.promises.rm;
+  const denial = () => Object.assign(new Error('Injected browser preflight denial'), { code: 'EACCES' });
+  fs.promises.mkdtemp = async (prefix, ...args) => {
+    if (String(prefix).includes('deckuse-browser-preflight-') && process.env.DECKUSE_PROBE_FAULT === 'create') throw denial();
+    return mkdtemp(prefix, ...args);
+  };
+  fs.promises.rm = async (path, ...args) => {
+    if (String(path).includes('deckuse-browser-preflight-') && process.env.DECKUSE_PROBE_FAULT === 'cleanup') throw denial();
+    return rm(path, ...args);
+  };
+  syncBuiltinESMExports();
+`,
+);
+function probeCli(args, fault) {
+  const result = spawnSync(
+    process.execPath,
+    ['--import', probeHook, join(root, 'dist/bin.js'), ...args, '--json'],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DECKUSE_PROBE_FAULT: fault,
+        DECKUSE_DECK2HTML_BINARY: converter,
+        DECKUSE_BROWSER_PROVIDER: 'headless-shell',
+        DECKUSE_BROWSER_EXECUTION: 'allowed',
+      },
+    },
+  );
+  return { status: result.status, envelope: JSON.parse(result.stdout) };
+}
+const start = performance.now();
+const compact = probeCli(['agent-context', '--format', 'pptx', '--scenario', 'create'], 'create');
+if (
+  compact.status !== 0 ||
+  compact.envelope.data.contracts ||
+  compact.envelope.data.dependencies.browser.cacheWritable !== 'not-probed'
+)
+  throw new Error('Authoring context probed preview or returned protocol schema');
+const contract = compact.envelope.data.applyContract.examples;
+const generatedOps = join(staging, 'compact-nine-page-ops.json');
+const generatedNames = join(staging, 'compact-nine-page-names.json');
+const inventory = ['Blank starter', ...Array.from({ length: 8 }, (_, i) => 'Page ' + (i + 2))];
+await writeFile(
+  generatedOps,
+  JSON.stringify(
+    inventory.flatMap((slide, i) => [
+      ...(i ? [{ ...contract.slide, name: slide }] : []),
+      { ...contract.nativeShape, slide },
+      { ...contract.richText, slide },
+    ]),
+  ),
+);
+const timeToOperationsMs = performance.now() - start;
+await writeFile(generatedNames, JSON.stringify(inventory));
+for (const [fault, code] of [
+  ['create', 'BROWSER_CACHE_UNWRITABLE'],
+  ['cleanup', 'BROWSER_PREFLIGHT_CLEANUP_FAILED'],
+]) {
+  const result = probeCli(['render', '--preflight'], fault);
+  if (
+    result.status !== 1 ||
+    result.envelope.error.code !== code ||
+    (fault === 'cleanup' && result.envelope.error.details.previewSupported !== false)
+  )
+    throw new Error('Incorrect browser preflight diagnostic: ' + JSON.stringify(result));
+}
+const compactDeck = JSON.parse(
+  execFileSync(
+    process.execPath,
+    [join(root, 'scripts/rebuild-generation.mjs'), staging, generatedOps, generatedNames],
+    { encoding: 'utf8', env: { ...process.env, DECKUSE_BROWSER_EXECUTION: 'denied' } },
+  ),
+);
+if (!compactDeck.ok || compactDeck.slides !== 9)
+  throw new Error('Compact contract did not produce nine editable slides');
+const firstPage = cli(['list', 'shapes', '--slide', '1', '--workspace', compactDeck.workspace]);
+if (!JSON.stringify(firstPage).includes('产品 Overview'))
+  throw new Error('Rich text was not preserved');
+
 const ops = join(root, context.resource.example);
 await access(ops);
 process.env.DECKUSE_BROWSER_EXECUTION = 'denied';
@@ -169,6 +256,7 @@ console.log(
     ok: true,
     package: packed.filename,
     staging,
+    timeToOperationsMs,
     checks: [
       'resources',
       'skill links',

@@ -309,3 +309,17 @@ For managed installations, pass an exact version or `latest` to
 `scripts/managed-bootstrap.sh`. Version lookup has a 30-second deadline and
 installation has a 180-second deadline. The cache is isolated by default.
 Use `--shared-cache` only with an approved, existing cache directory.
+
+### Export returns no CLI response
+
+The generation runner records the child exit status, stderr and stdout for each
+step. An empty response is labeled `no-cli-envelope` because the wrapper may
+have lost the result. The previous deliverable is outside the new generation.
+
+If structural validation passed and the unchanged workspace package still
+matches the manifest digest, revision and expected ordered slide inventory, the
+runner reports `recoverable-snapshot` with its path and SHA-256. Treat that
+package as structural-only. Recheck the digest before handing it off under a
+new filename. An empty, corrupt or mismatched package yields a failed result
+without a recoverable path. A preview failure after verified publication is
+recorded separately as `preview-blocked`.

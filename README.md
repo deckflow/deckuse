@@ -43,14 +43,14 @@ Run this in a fresh directory with a writable npm cache. The installed binary an
 npm install --cache ./.npm-cache @deckflow/deckuse
 set -e
 deckuse_cli=./node_modules/.bin/deckuse
-"$deckuse_cli" agent-context --format pptx --scenario create --include-schema --json
+"$deckuse_cli" agent-context --format pptx --scenario create --json
 "$deckuse_cli" new ./example-workspace --blank --json
 "$deckuse_cli" apply --workspace ./example-workspace --input ./node_modules/@deckflow/deckuse/skills/deckuse/examples/create-blank-pptx.json --request-id create-1 --expect-revision 1 --json
 "$deckuse_cli" validate --workspace ./example-workspace --json
 "$deckuse_cli" export ./example.pptx --workspace ./example-workspace --json
 ```
 
-The example contains CLI apply operations. The context response's `data.contracts` describes protocol commands, which include workspace and version fields. Export and structural validation work without a browser. For optional preview, use `render --preflight --json` to check converter and browser setup.
+The example contains CLI apply operations. For first drafts, `data.applyContract` gives units, common enum values and directly usable operations. Request `--include-schema` when you need the protocol contract. Export and structural validation work without a browser. For optional preview, use `render --preflight --json` to check converter and browser setup.
 
 ## Use Deckuse with a coding agent
 

@@ -104,6 +104,7 @@ async function checkBrowserPreflight() {
     throw new RenderFailure('BROWSER_PREFLIGHT_CLEANUP_FAILED', String(cause), {
       ...details('profile-cleanup', probe, cause),
       retryable: false,
+      previewSupported: false,
       ...(writeFailure ? { writeFailure: writeFailure.details } : {}),
     });
   }
