@@ -2759,9 +2759,19 @@ const main = async () => {
   if (!summary.ok) process.exitCode = 1;
 };
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   process.stderr.write(
     `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
   );
   process.exitCode = 1;
-});
+}
+
+// Reports are complete. Flush queued output before exiting despite lingering handles.
+await Promise.all(
+  [process.stdout, process.stderr].map((stream) =>
+    new Promise((resolve) => stream.write('', resolve)),
+  ),
+);
+process.exit(process.exitCode ?? 0);
