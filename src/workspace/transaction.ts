@@ -1,3 +1,4 @@
+import { retireOwnedPath, warnCleanup } from './cleanup.js';
 import { timed } from '../timing.js';
 import { cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -104,10 +105,10 @@ export async function recoverTransaction(
       }
     }
     try {
-      await timed('cleanup-transaction-recovery', () => rm(dir, { recursive: true, force: true }));
+      await timed('cleanup-transaction-recovery', () => retireOwnedPath(root, dir, true));
     } catch (cause) {
       if (!committed || !options?.allowCommittedCleanupFailure) throw cause;
-      process.stderr.write(`deckuse: TRANSACTION_CLEANUP_FAILED (${dir}): ${String(cause)}\n`);
+      warnCleanup('TRANSACTION_CLEANUP_FAILED', dir, cause);
     }
   } catch (cause) {
     throw new RecoveryRequiredError(
@@ -166,10 +167,10 @@ export async function withWorkspaceTransaction<T>(
     await ensureGitignore(root);
     const result = await action(journal.id, prepareCommit, dir, prepareRewind);
     try {
-      await timed('cleanup-transaction', () => rm(dir, { recursive: true, force: true }));
+      await timed('cleanup-transaction', () => retireOwnedPath(root, dir, true));
     } catch (cause) {
       // The commit succeeded. A later locked access can retry journal cleanup.
-      process.stderr.write(`deckuse: TRANSACTION_CLEANUP_FAILED (${dir}): ${String(cause)}\n`);
+      warnCleanup('TRANSACTION_CLEANUP_FAILED', dir, cause);
     }
     return result;
   } catch (e) {

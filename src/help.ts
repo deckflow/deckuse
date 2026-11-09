@@ -712,6 +712,9 @@ Options:
   --package                 Include package checks
   --relationships           Include relationship graph checks
   --slide <n>               Limit to one slide when supported
+  --expect-revision <rev>   PPTX: require this workspace revision
+  --expect-slides <count>   PPTX: require this slide count
+  --expect-slide-names <file> PPTX: require this ordered JSON array of unique names
   --workspace <path>        Workspace root
   --revision <rev>          Validate a historical revision
   --json                    Machine-readable envelope

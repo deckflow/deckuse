@@ -276,6 +276,7 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
         revision: data?.['revision'],
         dryRun: data?.['dryRun'],
         replayed: data?.['replayed'],
+        cleanupWarnings: data?.['cleanupWarnings'],
         operationCount: Array.isArray(data?.['results']) ? data['results'].length : data ? 1 : 0,
         affectedSlides: pages.slice(0, 256),
         affectedSlideCount: pages.length,
@@ -1302,6 +1303,17 @@ const main = async (): Promise<void> => {
           profile: optionFrom(clean, '--profile') ?? 'structure',
           workspaceId: workspace,
           level: optionFrom(clean, '--level') ?? 'full',
+          ...(expectRevisionOpt ? { expectRevision: expectRevisionOpt } : {}),
+          ...(clean.includes('--expect-slides')
+            ? { expectedSlides: Number(optionFrom(clean, '--expect-slides')) }
+            : {}),
+          ...(clean.includes('--expect-slide-names')
+            ? {
+                expectedSlideNames: JSON.parse(
+                  await readFile(requireDefined(optionFrom(clean, '--expect-slide-names')), 'utf8'),
+                ) as unknown,
+              }
+            : {}),
           render: clean.includes('--render'),
           package: clean.includes('--package'),
           relationships: clean.includes('--relationships'),

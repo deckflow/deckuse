@@ -20,6 +20,21 @@ This repository is the **community edition** (`edition=community`). See [docs/ed
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
+## Install in a managed agent job
+
+From a reviewed checkout, run the [managed bootstrap](scripts/managed-bootstrap.sh)
+with an exact published version, an unused job directory, and an existing cache
+root approved by the host. The script prints the verified local CLI path.
+
+```sh
+sh scripts/managed-bootstrap.sh 1.9.3 ./deckuse-job /path/to/approved-cache
+```
+
+The script allocates an empty cache per job and stops with npm's failure code if
+lookup or installation fails. If the host cannot provide an approved cache or
+install location, stop and report that prerequisite. Use the returned binary for
+the example below.
+
 ## Create an editable PPTX from the installed example
 
 Run this in a fresh directory with a writable npm cache. The installed binary and example come from the same package version.

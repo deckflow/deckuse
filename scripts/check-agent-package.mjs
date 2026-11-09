@@ -96,7 +96,19 @@ cli([
   '--expect-revision',
   '1',
 ]);
-const status = cli(['validate', '--workspace', ws]);
+const expectedNames = join(staging, 'expected-slide-names.json');
+await writeFile(expectedNames, JSON.stringify(['Blank starter', 'Details']));
+const status = cli([
+  'validate',
+  '--workspace',
+  ws,
+  '--expect-revision',
+  '2',
+  '--expect-slides',
+  '2',
+  '--expect-slide-names',
+  expectedNames,
+]);
 if (!status.data.valid) throw new Error('Invalid packaged presentation');
 const slides = cli(['list', 'slides', '--workspace', ws]).data.items;
 if (slides.length !== 2) throw new Error('Expected two slides');

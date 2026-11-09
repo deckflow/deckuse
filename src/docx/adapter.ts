@@ -500,6 +500,15 @@ export const docxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'validate') {
+          if (
+            command.expectedSlides !== undefined ||
+            command.expectedSlideNames ||
+            command.expectRevision
+          )
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              'Expected PPTX revision and slide inventory checks require a PPTX workspace',
+            );
           const diagnostics = validateArchive(archive);
           return diagnostics.some((d) => d.severity === 'error')
             ? err('VALIDATION_FAILED', 'DOCX validation failed', diagnostics)

@@ -9,7 +9,7 @@ const exec = promisify(execFile);
 const cli = async (args: string[], preload?: string) => {
   const argv = [
     ...(preload ? ['--import', preload] : []),
-    resolve('dist/bin.js'),
+    process.env['DECKUSE_TEST_CLI'] ?? resolve('dist/bin.js'),
     ...args,
     '--json',
   ];
@@ -279,3 +279,61 @@ it('restores the current revision when undo fails after changing Git HEAD', asyn
   expect((await cli(['undo', '--workspace', ws])).body.data.revision).toBe('1');
   expect(await readFile(join(ws, 'user-note.txt'), 'utf8')).toBe('Keep this note');
 }, 30_000);
+
+it.each(['lock', 'journal', 'retirement'])(
+  'preserves a committed write when %s cleanup is denied',
+  async (mode) => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-postcommit-cleanup-'));
+    const ws = join(root, 'ws');
+    const input = resolve('skills/deckuse/examples/create-blank-pptx.json');
+    const preload = join(root, 'deny.mjs');
+    expect((await cli(['new', ws, '--blank'])).code).toBe(0);
+    await writeFile(
+      preload,
+      `
+    import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    const mode = ${JSON.stringify(mode)};
+    if (mode === 'retirement') process.env.DECKUSE_CLEANUP_MODE = 'retire';
+    const rm = fs.promises.rm, rename = fs.promises.rename;
+    function blocked(path) {
+      const name = String(path).split(/[\\\\/]/).at(-1);
+      if (name !== 'write.lock' && name !== 'transaction') return false;
+      const root = String(path).slice(0, -name.length);
+      const revision = JSON.parse(fs.readFileSync(root + 'manifest.json', 'utf8')).revision;
+      return revision === '2' && (mode === 'retirement' || (mode === 'lock' ? name === 'write.lock' : name === 'transaction'));
+    }
+    const deny = () => { throw Object.assign(new Error('Injected cleanup denial'), { code: 'EACCES' }); };
+    fs.promises.rm = async (path, ...args) => { if (blocked(path)) deny(); return rm(path, ...args); };
+    fs.promises.rename = async (path, ...args) => { if (mode === 'retirement' && blocked(path)) deny(); return rename(path, ...args); };
+    syncBuiltinESMExports();
+  `,
+    );
+    const args = [
+      'apply',
+      ws,
+      '--input',
+      input,
+      '--request-id',
+      'create',
+      '--expect-revision',
+      '1',
+      '--summary',
+    ];
+    const first = await cli(args, preload);
+    expect(first.code).toBe(0);
+    expect(first.body.data).toMatchObject({ revision: '2', cleanupWarnings: expect.any(Array) });
+    expect(
+      first.body.data.cleanupWarnings.map((warning: { code: string }) => warning.code),
+    ).toContain(mode === 'journal' ? 'TRANSACTION_CLEANUP_FAILED' : 'WRITE_LOCK_CLEANUP_FAILED');
+    expect((await cli(args)).body.data).toMatchObject({ revision: '2', replayed: true });
+    expect(
+      (await cli(['validate', '--workspace', ws, '--expect-slides', '2', '--expect-revision', '2']))
+        .code,
+    ).toBe(0);
+    expect(
+      (await cli(['validate', '--workspace', ws, '--expect-slides', '1'])).body.error.details,
+    ).toMatchObject({ expectedSlides: 1, observedSlides: 2 });
+  },
+  30_000,
+);

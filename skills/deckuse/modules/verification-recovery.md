@@ -47,3 +47,25 @@ corrected input. A `reverted` receipt identifies a write undone in this workspac
 An `unknown` result has no receipt, so reconcile status, history and the current
 revision before any guarded retry. A later successful write does not erase the
 original receipt of an earlier commit that remains in history.
+
+### Managed authorization and pre-delivery checks
+
+Before a host asks to authorize a write, persist its logical request ID, exact
+operation file and expected base revision in the job. Re-invocation after
+authorization must reuse that tuple. If the result is missing, query the receipt
+with `status --request-id` before another write. A new logical edit receives a new
+ID and current base revision even if its content matches an earlier edit.
+
+Before preview or export, run `validate --expect-revision 2 --expect-slides 2
+--expect-slide-names ./expected-names.json --workspace ./ws --json`. The name
+file is an ordered JSON array of unique slide names. Use the actual expected
+inventory and the revision returned by apply. Stop on a mismatch. Pin export
+with `--revision 2` and compare preview's revision and page inventory to it.
+
+For a host that approves moving Deckuse-owned internal artifacts, set
+`DECKUSE_CLEANUP_MODE=retire` before authoring. Routine lock and journal release
+then moves retired entries into the workspace's `.deckuse-trash/` without a
+delete attempt. This leaves an auditable directory that can grow over time.
+If release fails, keep the committed response and its cleanup warnings.
+Leave unknown or live locks in place. A claim left by interrupted stale-lock
+retirement can require host intervention, so preserve it and report the state.

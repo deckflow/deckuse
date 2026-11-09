@@ -1,3 +1,4 @@
+import { managedRetirement } from '../workspace/cleanup.js';
 import { operationDigest, readApplyReceipt, writeApplyReceipt } from '../workspace/receipts.js';
 import { exportDigest } from './export-recovery.js';
 import { tableMergeDiagnostics } from './table.js';
@@ -1103,6 +1104,42 @@ export const pptxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'validate') {
+          const expectedNames = command.expectedSlideNames;
+          if (command.expectRevision && command.expectRevision !== manifest.revision)
+            return err(
+              'TRANSACTION_CONFLICT',
+              'Workspace revision differs from the expected revision',
+              [],
+              {
+                details: { expected: command.expectRevision, observed: manifest.revision },
+              },
+            );
+          if (expectedNames || command.expectedSlides !== undefined) {
+            const names = index.elements
+              .filter((item) => item.kind === 'slide')
+              .map((item) => item.name);
+            const expected = command.expectedSlides ?? expectedNames?.length;
+            if (
+              expected !== names.length ||
+              (expectedNames &&
+                (new Set(expectedNames).size !== expectedNames.length ||
+                  expectedNames.length !== names.length ||
+                  expectedNames.some((name, i) => name !== names[i])))
+            )
+              return err(
+                'VALIDATION_FAILED',
+                'PPTX slide inventory differs from the expected inventory',
+                [],
+                {
+                  details: {
+                    expectedSlides: expected,
+                    observedSlides: names.length,
+                    expectedSlideNames: expectedNames,
+                    observedSlideNames: names,
+                  },
+                },
+              );
+          }
           const diagnostics = validateArchive(archive, workspace);
           const chartData = await verifyChartData(archive);
           const visual = auditVisuals(archive, command.slide);
@@ -1206,7 +1243,7 @@ export const pptxAdapter: FormatAdapter = {
                 },
               });
             }
-            const cleanupWarning = await cleanup();
+            const cleanupWarning = managedRetirement() ? undefined : await cleanup();
 
             return ok({
               output,

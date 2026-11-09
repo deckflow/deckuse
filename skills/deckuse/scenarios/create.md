@@ -36,3 +36,13 @@ deckuse export ./presentation.pptx --workspace ./ws --json
 Keep the same output directory to reuse unchanged pages. Review newly rendered pages and use the combined contact sheet for context. Verify Chinese line breaks and any suspected clipping at readable size. A CJK orphan-line note is a heuristic, not a blocker on its own. For intentional geometry, pass `--review-notes ./notes.json` with entries such as `{"code":"OBJECT_OUT_OF_BOUNDS","targets":["slide:1/shape:5"],"reason":"Intentional full-bleed background"}`. This adds a reason to the matching diagnostic while retaining the visual evidence. A reused page identifies its original revision. If the apply response is missing, query `deckuse status --workspace ./ws --request-id polish-1 --json` before another write. Reuse the ID and exact input only when recovering that same request, and stop on conflicts.
 
 7. Deliver the PPTX and report the actual verification states, selected font strategy and remaining native review. Do not use an entire-slide bitmap as an editable design substitute.
+
+### Rebuild as a new generation
+
+Use a revision-guarded patch for local changes. For a full replacement, run
+`node <installed-package>/scripts/rebuild-generation.mjs ./job ./ops.json
+./expected-slide-names.json`. The output root must exist and allow the script's
+internal retirement moves. Each run creates a separate generation with its own
+workspace, exported PPTX and reports. Add `--preview` to render into that
+generation's preview directory and check the page inventory against the export.
+A failed generation leaves all earlier workspaces and deliverables intact.
