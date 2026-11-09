@@ -10,7 +10,17 @@ import { deckuseDir, lockPath } from './paths.js';
 
 const LOCK_WAIT_MS = 30_000;
 const LOCK_POLL_MS = 50;
-const LOCK_INITIALIZING_MS = 500;
+
+export class WorkspaceLockError extends Error {
+  constructor(
+    readonly path: string,
+    readonly stage: 'wait' | 'reclaim',
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+  }
+}
 
 interface LockPayload {
   pid: number;
@@ -18,7 +28,7 @@ interface LockPayload {
   token?: string;
 }
 
-const isProcessAlive = (pid: number): boolean => {
+export const isProcessAlive = (pid: number): boolean => {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -28,7 +38,7 @@ const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-const parseLockPayload = (raw: string): LockPayload | undefined => {
+export const parseLockPayload = (raw: string): LockPayload | undefined => {
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
   try {
@@ -45,7 +55,7 @@ const parseLockPayload = (raw: string): LockPayload | undefined => {
   }
 };
 
-/** Remove lock if missing holder / dead PID. Returns true when the path is free. */
+/** Reclaim only a specific lock generation with a confirmed dead PID. */
 const reclaimIfStale = async (path: string): Promise<boolean> => {
   let raw: string;
   let initial: Awaited<ReturnType<typeof stat>>;
@@ -57,18 +67,7 @@ const reclaimIfStale = async (path: string): Promise<boolean> => {
     throw error;
   }
   const payload = parseLockPayload(raw);
-  if (payload && isProcessAlive(payload.pid)) return false;
-  if (!payload && managedRetirement()) return false;
-  if (!payload) {
-    // An exclusive open creates an empty file before the holder writes its PID.
-    try {
-      if (Date.now() - (await stat(path)).mtimeMs < LOCK_INITIALIZING_MS) return false;
-      if ((await readFile(path, 'utf8')) !== raw) return false;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-      throw error;
-    }
-  }
+  if (!payload || isProcessAlive(payload.pid)) return false;
   const root = dirname(dirname(path));
   // Claim this specific stale generation. Only the claimant can retire it.
   const key = createHash('sha256')
@@ -93,10 +92,19 @@ const reclaimIfStale = async (path: string): Promise<boolean> => {
     current.ino !== initial.ino ||
     current.ctimeMs !== initial.ctimeMs ||
     (await readFile(path, 'utf8')) !== raw ||
-    (payload && isProcessAlive(payload.pid))
+    isProcessAlive(payload.pid)
   )
     return false;
-  await timed('cleanup-lock-reclaim', () => retireOwnedPath(root, path));
+  try {
+    await timed('cleanup-lock-reclaim', () => retireOwnedPath(root, path));
+  } catch (cause) {
+    throw new WorkspaceLockError(
+      path,
+      'reclaim',
+      'Could not reclaim the workspace write lock. Preserve it and use status --read-only.',
+      { cause },
+    );
+  }
   return true;
 };
 
@@ -125,7 +133,6 @@ export const acquireWriteLock = async (workspace: string): Promise<() => Promise
   while (Date.now() < deadline) {
     try {
       handle = await open(path, 'wx');
-      await handle.writeFile(`${JSON.stringify(payload)}\n`);
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
@@ -134,16 +141,30 @@ export const acquireWriteLock = async (workspace: string): Promise<() => Promise
     }
   }
   if (!handle) {
-    throw new Error(
-      'Timed out waiting for workspace write lock. If no other deckuse process is running, inspect .deckuse/write.lock and reconcile the request before recovery.',
+    throw new WorkspaceLockError(
+      path,
+      'wait',
+      'Timed out waiting for workspace write lock. Preserve it and use status --read-only to reconcile the request.',
     );
   }
-  return async () => {
+  try {
+    await handle.writeFile(`${JSON.stringify(payload)}\n`);
+    const acquired = await handle.stat();
+    return async () => {
+      await handle.close();
+      const current = await lstat(path);
+      if (
+        current.dev !== acquired.dev ||
+        current.ino !== acquired.ino ||
+        parseLockPayload(await readFile(path, 'utf8'))?.token !== payload.token
+      )
+        throw new Error('Workspace write lock ownership changed');
+      await timed('cleanup-lock-release', () => retireOwnedPath(workspace, path));
+    };
+  } catch (error) {
     await handle.close();
-    if (parseLockPayload(await readFile(path, 'utf8'))?.token !== payload.token)
-      throw new Error('Workspace write lock ownership changed');
-    await timed('cleanup-lock-release', () => retireOwnedPath(workspace, path));
-  };
+    throw error;
+  }
 };
 
 const heldLocks = new AsyncLocalStorage<ReadonlySet<string>>();

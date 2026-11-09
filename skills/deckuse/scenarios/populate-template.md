@@ -14,5 +14,4 @@ Required modules: [CLI context](../modules/cli-context.md), [Preservation](../mo
 
 For DOCX template mapping, use Word inventory/bookmarks and [Edit DOCX](edit-doc.md); do not apply slide geometry to Word. The primary route is edit-doc with template mapping as an additional task module.
 
-
 PPTX `replaceText` defaults to `formatPolicy: "safe"`. It edits matching text runs in place and refuses matches across different formatting, paragraphs or protected structures. Choose `"firstRun"` explicitly only when the target may be rewritten with its first run's formatting. Scope by exact one-based page with `{"page": 5}` or `page=5`. The legacy `slide` selector matches internal slide IDs. An apply with no final content change reports `noOp` and keeps the same revision.

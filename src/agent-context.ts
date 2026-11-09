@@ -7,7 +7,7 @@ import { pptxCapabilities } from './pptx/adapter.js';
 import { docxCapabilities } from './docx/adapter.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
-import { browserPreflight, renderFailurePayload } from './render-browser.js';
+import { browserConfiguration } from './render-browser.js';
 
 type RecordValue = Record<string, unknown>;
 const isRecord = (v: unknown): v is RecordValue =>
@@ -112,29 +112,38 @@ export async function agentContext(options: {
   const identity = {
     cliVersion: version,
     protocolVersion: PROTOCOL_VERSION,
-    contextSchemaVersion: 1,
+    contextSchemaVersion: 2,
     edition: EDITION,
     format,
   };
   const fingerprint = createHash('sha256')
     .update(JSON.stringify({ identity, capabilities, contracts, scenario }))
     .digest('hex');
-  let browser: unknown;
-  try {
-    const state = await browserPreflight();
-    browser = {
-      provider: state.provider,
-      execution: state.execution,
-      executableStatus: state.executableStatus,
-      cacheWritable: state.cacheWritable,
-      launch: state.launch,
-      dependencyCompatibility: state.dependencyCompatibility,
-      installation: state.installation,
-    };
-  } catch (cause) {
-    const error = renderFailurePayload(cause);
-    browser = { available: false, code: error.code, message: error.message, launch: 'not-probed' };
-  }
+  const config = browserConfiguration();
+  const browser = {
+    provider: config.provider,
+    execution: config.execution,
+    executableStatus: 'unknown',
+    cacheWritable: 'not-probed',
+    launch: 'not-probed',
+    dependencyCompatibility: 'unverified',
+    installation: 'Use render --preflight to inspect the selected browser and converter.',
+    ...(config.execution === 'denied' ? { available: false, code: 'BROWSER_HOST_DENIED' } : {}),
+  };
+  const operationFields = Object.fromEntries(
+    types.map((type, i) => {
+      const branch = contracts.anyOf[i] as RecordValue;
+      return [
+        type,
+        {
+          fields: Object.keys(branch['properties'] ?? {}),
+          required: branch['required'] ?? [],
+          additionalProperties: branch['additionalProperties'] ?? true,
+          contract: `#/contracts/anyOf/${String(i)}`,
+        },
+      ];
+    }),
+  );
   const example = 'skills/deckuse/examples/create-blank-pptx.json';
   const sample =
     format === 'pptx'
@@ -199,6 +208,62 @@ export async function agentContext(options: {
       ],
     },
     operationTypes: types,
+    operationFields,
+    ...(format === 'pptx' && scenario === 'create'
+      ? {
+          applyContract: {
+            input:
+              'Array of operations passed directly to apply --input. Supply revision and request identity as CLI flags.',
+            target: 'addShape.slide accepts a one-based page number or exact unique slide name.',
+            units: ['px', 'pt', 'mm', 'cm', 'in', '%', 'emu'],
+            commonEnums: {
+              layout: ['Blank'],
+              shapeType: ['text', 'rect', 'rounded-rect', 'ellipse', 'line', 'image', 'table'],
+              anchor: ['top', 'middle', 'bottom'],
+              wrap: ['square', 'none'],
+              autofit: ['none', 'shrink', 'resize'],
+              align: ['left', 'center', 'right', 'justify'],
+            },
+            examples: {
+              slide: { type: 'addSlide', name: 'Overview', layout: 'Blank' },
+              nativeShape: {
+                type: 'addShape',
+                slide: 'Overview',
+                shapeType: 'rounded-rect',
+                name: 'Panel',
+                x: '0.5in',
+                y: '0.5in',
+                width: '8in',
+                height: '2in',
+                fill: { color: 'EDF4FA' },
+                stroke: { color: '345671', width: 1 },
+              },
+              richText: {
+                type: 'addShape',
+                slide: 'Overview',
+                shapeType: 'text',
+                name: 'Title',
+                x: '0.75in',
+                y: '0.8in',
+                width: '7in',
+                height: '1in',
+                anchor: 'middle',
+                wrap: 'square',
+                autofit: 'none',
+                blocks: [
+                  {
+                    align: 'left',
+                    runs: [
+                      { text: '产品 ', bold: true, fontSize: 24, textColor: '123456' },
+                      { text: 'Overview', fontSize: 24 },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        }
+      : {}),
     ...(options.includeSchema ? { contracts } : {}),
     ...(dynamic ? { dynamic } : {}),
   };

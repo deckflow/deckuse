@@ -169,7 +169,7 @@ or LibreOffice fallback is used. Catching an error cannot undo an OS crash dialo
 
 `agent-context --format pptx --scenario create --json` returns static identity,
 adapter capabilities, skill resource locations, cache fingerprint, execution
-conventions, browser preflight and an executable smoke recipe. Use --include-schema
+conventions, a static browser configuration, a named operation index, and an executable smoke recipe. Use --include-schema
 for reachable task contracts in the same response, or retrieve them once later.
 JSON operation contracts are separate from recipe.cli shell syntax. Capability
 flags are taken from the same adapters as status; schemas do not override edition,
@@ -299,3 +299,27 @@ order, editable shape text, and validation results. Package bytes can differ
 because the workspaces record independent build metadata.
 
 For host-level wall-time trials see the [managed PPTX benchmark](managed-pptx-benchmark.md).
+
+For live state that cannot be read through regular status, use
+`deckuse status --workspace ./ws --read-only --request-id create-1 --json`.
+This samples existing metadata without acquiring a lock or recovering a
+transaction. A stable observation is diagnostic and does not authorize replay.
+
+For managed installations, pass an exact version or `latest` to
+`scripts/managed-bootstrap.sh`. Version lookup has a 30-second deadline and
+installation has a 180-second deadline. The cache is isolated by default.
+Use `--shared-cache` only with an approved, existing cache directory.
+
+### Export returns no CLI response
+
+The generation runner records the child exit status, stderr and stdout for each
+step. An empty response is labeled `no-cli-envelope` because the wrapper may
+have lost the result. The previous deliverable is outside the new generation.
+
+If structural validation passed and the unchanged workspace package still
+matches the manifest digest, revision and expected ordered slide inventory, the
+runner reports `recoverable-snapshot` with its path and SHA-256. Treat that
+package as structural-only. Recheck the digest before handing it off under a
+new filename. An empty, corrupt or mismatched package yields a failed result
+without a recoverable path. A preview failure after verified publication is
+recorded separately as `preview-blocked`.

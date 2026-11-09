@@ -1,3 +1,4 @@
+import { timed } from './timing.js';
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +31,9 @@ export function browserConfiguration() {
   };
 }
 /** Static only: never starts a browser or downloads dependencies. */
-export async function browserPreflight() {
+export const browserPreflight = () => timed('browser-preflight', checkBrowserPreflight);
+
+async function checkBrowserPreflight() {
   const config = browserConfiguration();
   if (!['headless-shell', 'chrome', 'msedge', 'chromium', 'executable'].includes(config.provider))
     throw new RenderFailure('BROWSER_CONFIGURATION_INVALID', 'Unknown DECKUSE_BROWSER_PROVIDER', {
@@ -40,7 +43,7 @@ export async function browserPreflight() {
     throw new RenderFailure(
       'BROWSER_HOST_DENIED',
       'Host declares browser execution unavailable. Use a host-approved worker or execution context; Deckuse will not bypass this restriction.',
-      { provider: config.provider, stage: 'preflight' },
+      { provider: config.provider, stage: 'preflight', retryable: false },
     );
   const executable =
     config.provider === 'executable'
@@ -69,22 +72,47 @@ export async function browserPreflight() {
       );
     }
   }
-  let cacheWritable: boolean;
+  const temporaryRoot = tmpdir();
+  const details = (stage: string, path: string, cause: unknown) => {
+    const code = (cause as NodeJS.ErrnoException).code;
+    return { stage, path, systemCode: code, retryable: code !== 'EACCES' && code !== 'EPERM' };
+  };
+  let probe: string;
   try {
-    const probe = await mkdtemp(join(tmpdir(), 'deckuse-browser-preflight-'));
-    await rm(probe, { recursive: true });
-    cacheWritable = true;
-  } catch {
+    probe = await mkdtemp(join(temporaryRoot, 'deckuse-browser-preflight-'));
+  } catch (cause) {
     throw new RenderFailure(
       'BROWSER_CACHE_UNWRITABLE',
-      'Temporary profile directory is not writable.',
-      { stage: 'preflight' },
+      String(cause),
+      details('profile-create', temporaryRoot, cause),
     );
   }
+  const probeFile = join(probe, 'probe');
+  let writeFailure: RenderFailure | undefined;
+  try {
+    await writeFile(probeFile, '', { flag: 'wx' });
+  } catch (cause) {
+    writeFailure = new RenderFailure(
+      'BROWSER_CACHE_UNWRITABLE',
+      String(cause),
+      details('profile-write', probeFile, cause),
+    );
+  }
+  try {
+    await timed('cleanup-browser-preflight', () => rm(probe, { recursive: true }));
+  } catch (cause) {
+    throw new RenderFailure('BROWSER_PREFLIGHT_CLEANUP_FAILED', String(cause), {
+      ...details('profile-cleanup', probe, cause),
+      retryable: false,
+      previewSupported: false,
+      ...(writeFailure ? { writeFailure: writeFailure.details } : {}),
+    });
+  }
+  if (writeFailure) throw writeFailure;
   return {
     ...config,
     executableStatus,
-    cacheWritable,
+    cacheWritable: true,
     dependencyCompatibility:
       config.provider === 'headless-shell' ? 'playwright-managed' : 'unverified',
     launch: 'not-probed',

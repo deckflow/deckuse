@@ -30,6 +30,7 @@
     "docs/managed-pptx-benchmark.md",
     "scripts/managed-bootstrap.sh",
     "scripts/rebuild-generation.mjs",
+    "scripts/benchmark-managed-replay.mjs",
     "docs/verification-agent-reliability.md",
     "docs/review.md",
     "docs/review-implementation-status.md",

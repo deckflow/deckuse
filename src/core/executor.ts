@@ -1,3 +1,4 @@
+import { WorkspaceLockError } from '../workspace/lock.js';
 import {
   AdapterRegistry,
   type AdapterContext,
@@ -74,6 +75,15 @@ export class Executor {
     try {
       return await operation();
     } catch (cause) {
+      if (cause instanceof WorkspaceLockError)
+        return err(
+          cause.stage === 'wait' ? 'TRANSACTION_CONFLICT' : 'RECOVERY_REQUIRED',
+          cause.message,
+          [],
+          {
+            details: { stage: `lock-${cause.stage}`, path: cause.path, retryable: false },
+          },
+        );
       const message = cause instanceof Error ? cause.message : 'Unknown adapter error';
       return { ok: false, error: { code: 'INTERNAL_ERROR', message, cause }, diagnostics: [] };
     }

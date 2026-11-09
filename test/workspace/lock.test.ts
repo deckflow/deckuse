@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -29,18 +29,14 @@ describe('workspace write lock', () => {
     expect(await isWriteLockHeld(workspace)).toBe(false);
   });
 
-  it('allows an initializing lock and reclaims stale or invalid lock files', async () => {
+  it('preserves an initializing or unidentifiable lock even after it ages', async () => {
     const workspace = await workspaceFixture();
-    await writeFile(lockPath(workspace), '');
-    expect(await isWriteLockHeld(workspace)).toBe(true);
-    await utimes(lockPath(workspace), new Date(0), new Date(0));
-    expect(await isWriteLockHeld(workspace)).toBe(false);
-    await expect(access(lockPath(workspace))).rejects.toMatchObject({ code: 'ENOENT' });
-
-    await writeFile(lockPath(workspace), 'not-json\n');
-    const release = await acquireWriteLock(workspace);
-    expect(await isWriteLockHeld(workspace)).toBe(true);
-    await release();
+    for (const raw of ['', 'not-json\n']) {
+      await writeFile(lockPath(workspace), raw);
+      await utimes(lockPath(workspace), new Date(0), new Date(0));
+      expect(await isWriteLockHeld(workspace)).toBe(true);
+      expect(await readFile(lockPath(workspace), 'utf8')).toBe(raw);
+    }
   });
 
   it('reclaims locks held by a dead pid', async () => {
@@ -71,7 +67,7 @@ describe('workspace write lock', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
     expect(acquired).toBe(false);
 
-    await writeFile(lockPath(workspace), '');
+    await rename(lockPath(workspace), join(workspace, 'released-test-lock'));
     const release = await pending;
     expect(acquired).toBe(true);
     await release();

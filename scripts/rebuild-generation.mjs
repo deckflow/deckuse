@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { OpcArchive } from '../dist/opc/index.js';
+import { buildIndex } from '../dist/pptx/indexer.js';
 import { fileURLToPath } from 'node:url';
 
 const [root, operations, names, preview] = process.argv.slice(2);
@@ -38,21 +40,101 @@ await writeFile(join(generation, 'expected-slide-names.json'), JSON.stringify(ex
 });
 let phase = 'new';
 let revision;
-let exported = false;
+let artifact;
+let validatedSnapshot;
+let failureKind;
+const runId = process.env.DECKUSE_RUN_ID ?? requestId;
+const reportPath = join(generation, 'run.json');
 async function cli(args) {
-  const result = spawnSync(process.execPath, [binary, ...args, '--json'], {
+  const startedAt = Date.now();
+  const argv = [binary, ...args, '--json'];
+  const commandId = phase;
+  const result = spawnSync(process.execPath, argv, {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
-    env: { ...process.env, DECKUSE_CLEANUP_MODE: 'retire' },
+    env: {
+      ...process.env,
+      DECKUSE_CLEANUP_MODE: 'retire',
+      DECKUSE_RUN_ID: runId,
+      DECKUSE_COMMAND_ID: commandId,
+    },
   });
-  if (result.stderr) process.stderr.write(result.stderr);
+  const durationMs = Date.now() - startedAt;
+  await writeFile(
+    join(generation, phase + '.process.json'),
+    JSON.stringify({
+      argv,
+      runId,
+      commandId,
+      startedAt,
+      durationMs,
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
+    }),
+    { flag: 'wx' },
+  );
+  await writeFile(join(generation, phase + '.stderr.txt'), result.stderr ?? '', { flag: 'wx' });
   await writeFile(join(generation, phase + '.json'), result.stdout ?? '', { flag: 'wx' });
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
+  if (!result.stdout?.trim()) {
+    failureKind = 'no-cli-envelope';
+    throw new Error(phase + ' returned empty stdout');
+  }
   const envelope = JSON.parse(result.stdout);
-  if (result.status !== 0 || !envelope.ok || envelope.data?.valid === false)
-    throw new Error(envelope.error?.message ?? phase + ' failed');
+  if (
+    result.status !== 0 ||
+    envelope?.ok !== true ||
+    (['validate', 'export'].includes(phase) && envelope.data?.valid !== true)
+  )
+    throw new Error(envelope?.error?.message ?? phase + ' failed');
   return envelope.data;
 }
+async function report(result) {
+  const data = {
+    runId,
+    generation,
+    workspace,
+    phase,
+    revision,
+    visualReview: 'not-performed',
+    ...result,
+  };
+  await writeFile(reportPath, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
+  console.log(JSON.stringify({ ...data, report: reportPath }));
+}
+
+async function inspectPptx(path) {
+  const bytes = await readFile(path);
+  if (!bytes.length) throw new Error('PPTX is empty');
+  const archive = await OpcArchive.open(bytes);
+  const names = buildIndex(archive, workspace, revision)
+    .elements.filter((item) => item.kind === 'slide')
+    .map((item) => item.name);
+  if (names.length !== expected.length || expected.some((name, i) => name !== names[i]))
+    throw new Error('PPTX slide inventory does not match the expected order');
+  return { sha256: createHash('sha256').update(bytes).digest('hex'), slides: names.length };
+}
+
+async function inspectSnapshot() {
+  const metadataPath = join(workspace, '.deckuse', 'manifest.json');
+  const before = await readFile(metadataPath, 'utf8');
+  const manifest = JSON.parse(before);
+  const path = join(workspace, 'package.pptx');
+  const inspected = await inspectPptx(path);
+  if (
+    manifest.format !== 'pptx' ||
+    manifest.revision !== revision ||
+    !manifest.files?.some(
+      (file) => file.path === 'package.pptx' && file.checksum === inspected.sha256,
+    ) ||
+    before !== (await readFile(metadataPath, 'utf8'))
+  )
+    throw new Error('Snapshot no longer matches the validated workspace revision');
+  return { path, revision, slideNames: expected, ...inspected };
+}
+
 try {
   await cli(['new', workspace, '--blank']);
   phase = 'apply';
@@ -87,8 +169,21 @@ try {
     join(generation, 'expected-slide-names.json'),
   ]);
   phase = 'export';
-  await cli(['export', output, '--workspace', workspace, '--revision', revision, '--from-package']);
-  exported = true;
+  validatedSnapshot = await inspectSnapshot();
+  const exported = await cli([
+    'export',
+    output,
+    '--workspace',
+    workspace,
+    '--revision',
+    revision,
+    '--from-package',
+  ]);
+  if (exported.revision !== revision) throw new Error('Export revision does not match validation');
+  const delivered = await inspectPptx(output);
+  if (delivered.sha256 !== validatedSnapshot.sha256)
+    throw new Error('Export does not match the validated package snapshot');
+  artifact = { output, ...delivered };
   if (preview) {
     phase = 'preview';
     const result = await cli([
@@ -101,6 +196,7 @@ try {
     ]);
     if (
       result.revision !== revision ||
+      result.inputSha256 !== artifact.sha256 ||
       result.results.length !== expected.length ||
       result.results.some(
         (page, i) => !page.ok || page.page !== i + 1 || page.result?.revision !== revision,
@@ -108,28 +204,30 @@ try {
     )
       throw new Error('Preview does not match the replacement generation');
   }
-  console.log(
-    JSON.stringify({
-      ok: true,
-      generation,
-      workspace,
-      output,
-      revision,
-      slides: expected.length,
-      ...(preview ? { previewInventory: join(generation, 'preview.json') } : {}),
-    }),
-  );
+  await report({
+    ok: true,
+    ...artifact,
+    state: preview ? 'preview-ready' : 'structural-only',
+    ...(preview ? { previewInventory: join(generation, 'preview.json') } : {}),
+  });
 } catch (cause) {
-  console.log(
-    JSON.stringify({
-      ok: false,
-      generation,
-      workspace,
-      phase,
-      revision,
-      ...(exported ? { output, state: 'structural-only' } : {}),
-      error: cause instanceof Error ? cause.message : String(cause),
-    }),
-  );
   process.exitCode = 1;
+  let recoverableSnapshot;
+  if (phase === 'export' && validatedSnapshot) {
+    const candidate = await inspectSnapshot().catch(() => undefined);
+    if (candidate?.sha256 === validatedSnapshot.sha256) recoverableSnapshot = candidate;
+  }
+  await report({
+    ok: false,
+    ...artifact,
+    state:
+      artifact && phase === 'preview'
+        ? 'preview-blocked'
+        : recoverableSnapshot
+          ? 'recoverable-snapshot'
+          : 'failed',
+    ...(recoverableSnapshot ? { recoverableSnapshot } : {}),
+    ...(failureKind ? { failureKind } : {}),
+    error: cause instanceof Error ? cause.message : String(cause),
+  });
 }

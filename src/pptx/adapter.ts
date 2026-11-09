@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { resolveRef } from 'isomorphic-git';
-import { managedRetirement } from '../workspace/cleanup.js';
+import { managedRetirement, retireOwnedPath } from '../workspace/cleanup.js';
 import {
   operationDigest,
   readApplyReceipt,
@@ -26,8 +26,8 @@ import { initializationState, WorkspaceNotEmptyError } from '../workspace/initia
 import { auditVisuals } from './visual-audit.js';
 import { ChartDataError, verifyChartData, prepareChartData } from './chart-data.js';
 import { randomUUID } from 'node:crypto';
-import { access, copyFile, readFile, rename, rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { access, copyFile, readFile, rename } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import {
   err,
   ok,
@@ -1263,10 +1263,14 @@ export const pptxAdapter: FormatAdapter = {
           const temporary = `${output}.${invocationId}.tmp`;
           const cleanup = async () => {
             try {
-              await rm(temporary, { force: true });
+              if (managedRetirement() && dirname(temporary) !== workspace) {
+                return `Preserved export staging file outside the workspace: ${temporary}`;
+              }
+              await timed('cleanup-export', () => retireOwnedPath(workspace, temporary));
               return undefined;
             } catch (cause) {
-              return `Could not remove export staging file ${temporary}: ${String(cause)}`;
+              if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+              return `Could not clean export staging file ${temporary}: ${String(cause)}`;
             }
           };
           try {

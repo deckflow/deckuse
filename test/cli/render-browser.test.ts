@@ -59,3 +59,30 @@ it('probes a trivial page with bounded launch and closes the browser on page tim
   await expect(probeRenderBrowser(launch)).rejects.toMatchObject({ code: 'BROWSER_PROBE_TIMEOUT' });
   expect(close).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  ['mkdtemp', 'BROWSER_CACHE_UNWRITABLE', 'profile-create'],
+  ['writeFile', 'BROWSER_CACHE_UNWRITABLE', 'profile-write'],
+  ['rm', 'BROWSER_PREFLIGHT_CLEANUP_FAILED', 'profile-cleanup'],
+] as const)('reports a denied %s probe at its own stage', async (method, code, stage) => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  vi.stubEnv('DECKUSE_BROWSER_PROVIDER', 'headless-shell');
+  vi.stubEnv('DECKUSE_BROWSER_EXECUTION', 'unknown');
+  const original = fs.promises[method];
+  Object.assign(fs.promises, {
+    [method]: async () => {
+      throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    },
+  });
+  syncBuiltinESMExports();
+  try {
+    await expect(browserPreflight()).rejects.toMatchObject({
+      code,
+      details: { stage, systemCode: 'EACCES', retryable: false },
+    });
+  } finally {
+    Object.assign(fs.promises, { [method]: original });
+    syncBuiltinESMExports();
+  }
+});

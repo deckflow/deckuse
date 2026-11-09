@@ -7,10 +7,10 @@ Read once per task. Keep executable/version/schema information separate from dyn
 On 1.9 or later, load the workflow and its command contracts once:
 
 ```bash
-deckuse agent-context --format pptx --scenario create --include-schema --json
+deckuse agent-context --format pptx --scenario create --json
 ```
 
-Use `--workspace ./ws` for an existing workspace and select the matching scenario. For Word use `--format docx` with `create`, `edit`, `audit` or `preview-export`. Cache static contracts by executable and capability fingerprint. Read live revision and targets before each write. Query a targeted schema when the selected context omits an operation. For older releases, use the fallback below.
+Use `--workspace ./ws` for an existing workspace and select the matching scenario. For Word use `--format docx` with `create`, `edit`, `audit` or `preview-export`. Cache static contracts by executable and capability fingerprint. Read live revision and targets before each write. For PPTX creation, start with `data.applyContract` for copyable CLI operations, geometry units, text and style examples. Use v2 `operationFields` to find additional top-level fields by name. Query `schema --type <operation> --json` for nested fields, or request `--include-schema` for the complete scenario contract. Run an explicit render preflight to check the environment. For older releases, use the fallback below.
 
 Use an existing task snapshot if it matches the selected executable, release/edition and format. Otherwise collect `deckuse --version` and `deckuse schema --json`, saving full stdout/stderr/exit code separately. The schema envelope contains `cliVersion`, `protocolVersion`, `edition`, and `schema`. It lists protocol operations, not proof of every edition/format capability. Keep the complete schema on disk and extract only task-relevant definitions into context.
 
