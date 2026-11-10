@@ -2770,8 +2770,8 @@ try {
 
 // Reports are complete. Flush queued output before exiting despite lingering handles.
 await Promise.all(
-  [process.stdout, process.stderr].map((stream) =>
-    new Promise((resolve) => stream.write('', resolve)),
+  [process.stdout, process.stderr].map(
+    (stream) => new Promise((resolve) => stream.write('', resolve)),
   ),
 );
 process.exit(process.exitCode ?? 0);
