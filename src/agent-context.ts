@@ -97,6 +97,7 @@ export async function agentContext(options: {
         : scenario === 'edit' || scenario === 'populate-template'
           ? ['setText', 'setProperties', 'replacePicture', 'duplicate', 'validate', 'export']
           : ['addSlide', 'addShape', 'remove', 'setText', 'setProperties', 'validate', 'export'];
+  if (format === 'pptx' && scenario === 'edit') types.unshift('addShape');
   if (format === 'pptx' && !['create', 'audit', 'preview-export'].includes(scenario))
     types.push(
       'groupShapes',

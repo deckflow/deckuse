@@ -13,7 +13,8 @@ Use the user's language. Identify the outcome, supplied inputs, and what must be
 ## Start here
 
 - **New PPTX from a brief.** Run `deckuse agent-context --format pptx --scenario create --json` once. Use its compact apply examples to author an operation file and an ordered expected slide-name list. Run the guarded build and validation in [Create](scenarios/create.md). Query `deckuse schema --type <operation> --json` only for a missing field.
-- **Edit an existing deck.** Start with `deckuse status --workspace ./ws --json` and `deckuse list slides --workspace ./ws --json` to establish revision and targets. If you only have a PPTX file, initialize a fresh workspace first. Use [Edit](scenarios/edit.md) for a guarded patch. Stop on an unhealthy or unexpected workspace.
+- **Edit an existing deck.** Initialize a workspace if you only have a PPTX. Run `deckuse status --workspace ./ws --json` and `deckuse list slides --workspace ./ws --json`. Stop on an unhealthy or unexpected workspace, then follow [Edit](scenarios/edit.md) for a guarded patch.
+- **Insert PPTX elements in either workflow.** Use `addShape` in a batch to add images, audio, video, native charts, or native tables. For single inserts, see `deckuse add shape --help`.
 - **Preview or export an existing workspace.** Run `deckuse validate --workspace ./ws --json` for structural status. Stop publication on validation failure. Follow [Preview/export](scenarios/preview-export.md) to export the validated revision. Probe the browser only when preview is needed, and recheck affected pages after a patch. If host policy blocks preview, preserve the validated artifact and report preview as blocked.
 
 Use host-approved browser and cleanup capabilities. Keep earlier deliverables

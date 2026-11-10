@@ -29,7 +29,14 @@
     "edit": {
       "path": "scenarios/edit.md",
       "formats": ["pptx", "docx"],
-      "schemaTypes": ["setText", "setProperties", "replaceText", "setSlideLayout", "duplicate"],
+      "schemaTypes": [
+        "addShape",
+        "setText",
+        "setProperties",
+        "replaceText",
+        "setSlideLayout",
+        "duplicate"
+      ],
       "requiredModules": [
         "modules/cli-context.md",
         "modules/verification-recovery.md",

@@ -68,6 +68,9 @@ it('executes the returned new/apply/validate/export recipe and reads workspace r
   const before = cli('status', '--workspace', ws).data.revision;
   const context = cli('agent-context', '--workspace', ws, '--scenario', 'edit');
   expect(context.data.dynamic.revision).toBe(before);
+  expect(context.data.operationFields.addShape.fields).toEqual(
+    expect.arrayContaining(['shapeType', 'file', 'rows', 'chartType', 'data']),
+  );
   expect(JSON.stringify(context)).not.toContain(ws);
   expect(cli('status', '--workspace', ws).data.revision).toBe(before);
   const invalid = spawnSync(
