@@ -31,7 +31,13 @@ import {
   monitorStopAll,
   runMonitorForeground,
 } from './monitor-daemon.js';
-import { renderPage, renderPages, parsePageSelection, parseRenderReviewNotes } from './render.js';
+import {
+  renderPage,
+  renderPages,
+  parsePageSelection,
+  parseRenderReviewNotes,
+  type RenderPagesResult,
+} from './render.js';
 import { browserPreflight, probeRenderBrowser, renderFailurePayload } from './render-browser.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
@@ -331,6 +337,7 @@ async function outputRender(
   envelope: CommandEnvelope & { data: object },
   diagnostics: readonly Diagnostic[],
   result: unknown,
+  batch?: RenderPagesResult,
 ): Promise<boolean> {
   let reportPath: string | undefined;
   if (reportOpt) {
@@ -342,7 +349,7 @@ async function outputRender(
     }
   }
   const reportFailed = Boolean(reportOpt && !reportPath);
-  if (!summaryOpt && !reportOpt) {
+  if (!summaryOpt && !reportOpt && !batch) {
     outputEnvelope(envelope);
     return envelope.ok;
   }
@@ -356,16 +363,14 @@ async function outputRender(
   const measured = diagnostics
     .filter((finding) => finding.details?.['measured'] === true)
     .sort((a, b) => rank.indexOf(a.code) - rank.indexOf(b.code));
+  const fontCodes = new Set([
+    'FONT_UNRESOLVED',
+    'CJK_GLYPH_COVERAGE_UNVERIFIED',
+    'CJK_FONT_INHERITANCE_UNVERIFIED',
+  ]);
   const fonts = new Map<string, { codes: Set<string>; pages: Set<number> }>();
   for (const diagnostic of diagnostics) {
-    if (
-      ![
-        'FONT_UNRESOLVED',
-        'CJK_GLYPH_COVERAGE_UNVERIFIED',
-        'CJK_FONT_INHERITANCE_UNVERIFIED',
-      ].includes(diagnostic.code)
-    )
-      continue;
+    if (!fontCodes.has(diagnostic.code)) continue;
     const { family, fonts: families, page } = diagnostic.details ?? {};
     if (typeof page !== 'number') continue;
     const names =
@@ -382,6 +387,29 @@ async function outputRender(
       fonts.set(font, group);
     }
   }
+  const fontDiagnostics = [...fonts].map(([font, { codes, pages }]) => ({
+    font,
+    codes: [...codes],
+    pageCount: pages.size,
+    pages: [...pages].sort((a, b) => a - b),
+  }));
+  const visibleBatch = batch && {
+    ...batch,
+    fontDiagnostics,
+    results: batch.results.map((item) => {
+      if (!item.result) return item;
+      return {
+        ...item,
+        result: {
+          ...item.result,
+          diagnostics: item.result.diagnostics.filter(({ code }) => !fontCodes.has(code)),
+          warnings: item.result.warnings.filter(
+            (warning) => !fontCodes.has(warning.split(':', 1)[0] ?? ''),
+          ),
+        },
+      };
+    }),
+  };
   outputEnvelope({
     ...envelope,
     ...(summaryOpt ? { warnings: measured.slice(0, 10).map((item) => item.message) } : {}),
@@ -392,18 +420,15 @@ async function outputRender(
               .slice(0, 10)
               .map(({ code, details, message }) => ({ code, ...details, message })),
             measuredFindingCount: measured.length,
-            fontDiagnostics: [...fonts].map(([font, { codes, pages }]) => ({
-              font,
-              codes: [...codes],
-              pageCount: pages.size,
-              pages: [...pages],
-            })),
-            diagnosticCount: diagnostics.length,
+            fontDiagnostics,
+            diagnosticCount:
+              diagnostics.filter(({ code }) => !fontCodes.has(code)).length +
+              fontDiagnostics.length,
+            fullDiagnosticCount: diagnostics.length,
             result,
           }
-        : envelope.data),
-      reportPath,
-      reportFailed,
+        : (visibleBatch ?? envelope.data)),
+      ...(reportOpt ? { reportPath, reportFailed } : {}),
     },
   });
   return envelope.ok && !reportFailed;
@@ -1807,6 +1832,7 @@ const main = async (): Promise<void> => {
                   output: result?.output,
                 })),
               },
+              rendered,
             );
             if (!reported) process.exitCode = 1;
           } catch (cause) {
