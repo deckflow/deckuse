@@ -42,8 +42,8 @@ describe('visual audit and controlled chart baseline', () => {
     const doc = a.readXml(slide),
       tree = descendants(doc, 'spTree')[0]!;
     for (const child of [...Array.from(tree.childNodes)]) tree.removeChild(child);
-    const shape = (id: number, x: number, text: string) =>
-      `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="Text${id}"/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="0"/><a:ext cx="1000000" cy="100000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="2400"/><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
+    const shape = (id: number, x: number, text: string, y = 0) =>
+      `<p:sp xmlns:p="${NS.p}" xmlns:a="${NS.a}"><p:nvSpPr><p:cNvPr id="${id}" name="Text${id}"/></p:nvSpPr><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="1000000" cy="100000"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="2400"/><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
     for (const [id, x] of [
       [2, -100],
       [3, 300000],
@@ -54,6 +54,15 @@ describe('visual audit and controlled chart baseline', () => {
           true,
         ),
       );
+    tree.appendChild(
+      doc.importNode(parseXml(shape(5, 300000, 'below text', 300000)).documentElement, true),
+    );
+    tree.appendChild(
+      doc.importNode(
+        parseXml(shape(6, 3000000, 'Isolated text that will wrap many times')).documentElement,
+        true,
+      ),
+    );
     tree.appendChild(
       doc.importNode(
         parseXml(
@@ -66,7 +75,11 @@ describe('visual audit and controlled chart baseline', () => {
     const audit = auditVisuals(a);
     const codes = audit.diagnostics.map((d) => d.code);
     expect(codes).toContain('OBJECT_OUT_OF_BOUNDS');
-    expect(codes).toContain('TEXT_OVERFLOW_SUSPECTED');
+    expect(
+      audit.diagnostics
+        .filter((d) => d.code === 'TEXT_OVERFLOW_SUSPECTED')
+        .map((d) => d.details?.['shapeName']),
+    ).toEqual(['Text2', 'Text3']);
     expect(codes).toContain('CONTENT_OVERLAP_SUSPECTED');
     expect(codes).toContain('MISSING_IMAGE_RELATIONSHIP');
     expect(audit.reviewItems).toHaveLength(1);

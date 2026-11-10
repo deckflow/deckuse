@@ -1,3 +1,4 @@
+import type { Element } from '@xmldom/xmldom';
 import type { Diagnostic } from '../core/index.js';
 import { measureText } from '../core/measure.js';
 import type { OpcArchive } from '../opc/index.js';
@@ -7,7 +8,7 @@ import type { IndexFile } from './types.js';
 import { nodeFor } from './node-for.js';
 import { readSlideSize } from './slide-size.js';
 import { chartRenderDiagnostics } from './render-fidelity.js';
-import { descendants, first, NS } from './xml.js';
+import { children, descendants, first, NS } from './xml.js';
 export interface ReviewItem {
   target: string;
   page: number;
@@ -21,6 +22,31 @@ export interface VisualAudit {
   fontVerification: 'unknown';
   nativeVerification: 'unverified';
 }
+interface Bounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function isUnpaintedTextbox(node: Element): boolean {
+  const shapeProperties = children(node);
+  const spPr = shapeProperties.find((child) => child.localName === 'spPr');
+  const properties = spPr ? children(spPr) : [];
+  const line = properties.find((child) => child.localName === 'ln');
+  const style = shapeProperties.some((child) => child.localName === 'style');
+  const hasFill = properties.some((child) =>
+    ['solidFill', 'gradFill', 'pattFill', 'blipFill', 'grpFill'].includes(child.localName ?? ''),
+  );
+  const unfilled = properties.some((child) => child.localName === 'noFill') || (!style && !hasFill);
+  const unoutlined = line ? children(line).some((child) => child.localName === 'noFill') : !style;
+  return unfilled && unoutlined && !first(node, 'ph');
+}
+
+function intersects(a: Bounds, b: Bounds): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 /** Geometric facts and heuristic concerns stay explicitly distinguished. */
 export function auditVisuals(
   archive: OpcArchive,
@@ -50,6 +76,9 @@ export function auditVisuals(
       w: number;
       h: number;
     }[] = [];
+    const boundsByTarget = new Map<string, Bounds>();
+    const pendingOverflow: { diagnostic: Diagnostic; excessBounds: Bounds[] }[] = [];
+    let hasUnknownBounds = false;
     const doc = archive.readXml(slide.partUri);
     for (const item of items) {
       const target = targetPathForItem(index, item);
@@ -84,6 +113,7 @@ export function auditVisuals(
       // Group coordinates and inherited placeholder transforms require renderer evaluation.
       const parent = index.elements.find((p) => p.ref.elementId === item.parentId);
       if (parent?.kind === 'group' || item.kind === 'group') {
+        hasUnknownBounds = true;
         diagnostics.push({
           severity: 'info',
           code: 'GROUP_GEOMETRY_UNVERIFIED',
@@ -94,6 +124,7 @@ export function auditVisuals(
       }
       const t = item.transform;
       if (!t) {
+        hasUnknownBounds = true;
         if (node && first(node, 'ph'))
           diagnostics.push({
             severity: 'info',
@@ -109,6 +140,7 @@ export function auditVisuals(
         w = Number(t['width']),
         h = Number(t['height']);
       if (![x, y, w, h].every(Number.isFinite) || w < 0 || h < 0) {
+        hasUnknownBounds = true;
         diagnostics.push({
           severity: 'warning',
           code: 'INVALID_GEOMETRY',
@@ -122,6 +154,7 @@ export function auditVisuals(
       const bh = Math.abs(w * Math.sin(radians)) + Math.abs(h * Math.cos(radians));
       const bx = x + (w - bw) / 2,
         by = y + (h - bh) / 2;
+      boundsByTarget.set(target, { x: bx, y: by, w: bw, h: bh });
       if (bx < -1 || by < -1 || bx + bw > size.widthEmu + 1 || by + bh > size.heightEmu + 1)
         diagnostics.push({
           severity: 'warning',
@@ -169,25 +202,56 @@ export function auditVisuals(
             maxWidthEmu: Math.max(1, w - left - right),
           });
           const excess = estimated.heightEmu - (h - top - bottom);
-          if (excess > 0 && (estimated.lines > 1 || excess >= estimated.heightEmu / 2))
-            diagnostics.push({
-              severity: 'info',
-              code: 'TEXT_OVERFLOW_SUSPECTED',
-              message:
-                'Estimated text height exceeds the available box; confirm with the rendering engine',
-              details: {
-                page,
-                target,
-                shapeName: item.name,
-                sample: item.text.slice(0, 80),
-                estimatedHeight: estimated.heightEmu,
-                availableHeight: h - top - bottom,
-                excessHeightEmu: estimated.heightEmu - (h - top - bottom),
-                heuristic: true,
-              },
-            });
+          if (excess <= 0 || (estimated.lines === 1 && excess < estimated.heightEmu / 2)) continue;
+          const diagnostic: Diagnostic = {
+            severity: 'info',
+            code: 'TEXT_OVERFLOW_SUSPECTED',
+            message:
+              'Estimated text height exceeds the available box; confirm with the rendering engine',
+            details: {
+              page,
+              target,
+              shapeName: item.name,
+              sample: item.text.slice(0, 80),
+              estimatedHeight: estimated.heightEmu,
+              availableHeight: h - top - bottom,
+              excessHeightEmu: excess,
+              heuristic: true,
+            },
+          };
+          const orientation = body?.getAttribute('vert');
+          if (
+            radians !== 0 ||
+            (orientation && orientation !== 'horz') ||
+            !isUnpaintedTextbox(node)
+          ) {
+            diagnostics.push(diagnostic);
+            continue;
+          }
+          const anchor = body?.getAttribute('anchor');
+          const anchorOffset = anchor === 'b' ? excess : anchor === 'ctr' ? excess / 2 : 0;
+          const textTop = y + top - anchorOffset;
+          const textBottom = textTop + estimated.heightEmu;
+          const textWidth = Math.max(1, w - left - right);
+          const excessBounds: Bounds[] = [];
+          if (textTop < y)
+            excessBounds.push({ x: x + left, y: textTop, w: textWidth, h: y - textTop });
+          if (textBottom > y + h)
+            excessBounds.push({ x: x + left, y: y + h, w: textWidth, h: textBottom - y - h });
+          pendingOverflow.push({ diagnostic, excessBounds });
         }
       }
+    }
+    for (const { diagnostic, excessBounds } of pendingOverflow) {
+      if (
+        hasUnknownBounds ||
+        [...boundsByTarget].some(
+          ([target, bounds]) =>
+            target !== diagnostic.details?.['target'] &&
+            excessBounds.some((excess) => intersects(excess, bounds)),
+        )
+      )
+        diagnostics.push(diagnostic);
     }
     for (let i = 0; i < boxes.length; i++)
       for (const b of boxes.slice(i + 1)) {

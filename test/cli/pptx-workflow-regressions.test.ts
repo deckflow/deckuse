@@ -52,6 +52,7 @@ it('exports one full report and compact counts, then applies the reported target
         slide: 1,
         shapeType: 'text',
         name: 'Overflow',
+        fill: { color: 'EEEEEE' },
         x: '10%',
         y: '10%',
         width: '300px',
