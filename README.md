@@ -20,6 +20,20 @@ This repository is the **community edition** (`edition=community`). See [docs/ed
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
+## Agent quick start
+
+Install the canonical package, then read the bundled Skill from the CLI you
+will actually run.
+
+```sh
+npm install --cache ./.npm-cache @deckflow/deckuse
+./node_modules/.bin/deckuse skill-path --json
+```
+
+Read the absolute file in `data.nextAction.path`. For an existing installation,
+run the same command with that installed binary. Managed jobs can use the
+bootstrap below with `--handoff-json`. The unscoped package is deprecated.
+
 ## Install in a managed agent job
 
 From a reviewed checkout, run the [managed bootstrap](scripts/managed-bootstrap.sh)

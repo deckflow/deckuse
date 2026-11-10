@@ -1233,6 +1233,9 @@ export const pptxAdapter: FormatAdapter = {
                 {
                   valid: true,
                   revision: index.revision,
+                  ...(command.render
+                    ? { renderPerformed: false, layoutSource: 'structural-estimates' }
+                    : {}),
                   ...(command.summary
                     ? {
                         inspection: {

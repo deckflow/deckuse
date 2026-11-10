@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, readdir, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, access, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 const staging = await mkdtemp(join(tmpdir(), 'deckuse-package-check-'));
@@ -74,6 +74,22 @@ function cli(args) {
     }),
   );
 }
+const bin = join(staging, 'node_modules/.bin/deckuse');
+const handoff = JSON.parse(execFileSync(bin, ['skill-path', '--json'], { encoding: 'utf8' })).data;
+if (
+  handoff.cli !== (await realpath(bin)) ||
+  handoff.version !== packed.version ||
+  handoff.skill !== (await realpath(join(skillRoot, manifest.entry))) ||
+  handoff.nextAction.type !== 'read-file' ||
+  handoff.nextAction.path !== handoff.skill
+)
+  throw new Error('Installed CLI resolved the wrong Skill: ' + JSON.stringify(handoff));
+const routes = entry.split('## Start here')[1]?.split('## Choose a workflow')[0] ?? '';
+const createRoute = routes.match(
+  /`deckuse (agent-context --format pptx --scenario create) --json`/,
+);
+if (!createRoute || !routes.includes('deckuse status') || !routes.includes('deckuse validate'))
+  throw new Error('Skill entry does not expose the executable workflow routes');
 const types = cli(['schema', '--list']).data;
 if (!types.batchTypes.includes('addSlide')) throw new Error('Missing batch addSlide');
 const context = cli([
@@ -123,7 +139,7 @@ function probeCli(args, fault) {
   return { status: result.status, envelope: JSON.parse(result.stdout) };
 }
 const start = performance.now();
-const compact = probeCli(['agent-context', '--format', 'pptx', '--scenario', 'create'], 'create');
+const compact = probeCli(createRoute[1].split(' '), 'create');
 if (
   compact.status !== 0 ||
   compact.envelope.data.contracts ||
@@ -167,6 +183,11 @@ const compactDeck = JSON.parse(
 );
 if (!compactDeck.ok || compactDeck.slides !== 9)
   throw new Error('Compact contract did not produce nine editable slides');
+if (
+  !cli(['status', '--workspace', compactDeck.workspace]).ok ||
+  !cli(['validate', '--workspace', compactDeck.workspace]).ok
+)
+  throw new Error('Installed edit and preview routes could not inspect a generated workspace');
 const firstPage = cli(['list', 'shapes', '--slide', '1', '--workspace', compactDeck.workspace]);
 if (!JSON.stringify(firstPage).includes('产品 Overview'))
   throw new Error('Rich text was not preserved');
@@ -200,6 +221,33 @@ const generated = JSON.parse(
 if (generated.state !== 'structural-only' || !generated.sha256)
   throw new Error('Packaged generation runner did not verify an export');
 await access(generated.output);
+const original = await readFile(generated.output);
+const runner = join(root, 'scripts/rebuild-generation.mjs');
+const deniedPreview = spawnSync(
+  process.execPath,
+  [runner, staging, ops, expectedNames, '--preview'],
+  { encoding: 'utf8' },
+);
+const blocked = JSON.parse(deniedPreview.stdout);
+if (deniedPreview.status !== 1 || blocked.state !== 'preview-blocked' || !blocked.output)
+  throw Error('Unavailable preview did not preserve the structural artifact');
+await access(blocked.output);
+const wrongNames = join(staging, 'wrong-slide-names.json');
+await writeFile(wrongNames, JSON.stringify(['Blank starter', 'Unexpected']));
+const invalidBuild = spawnSync(process.execPath, [runner, staging, ops, wrongNames], {
+  encoding: 'utf8',
+});
+const invalid = JSON.parse(invalidBuild.stdout);
+if (
+  invalidBuild.status !== 1 ||
+  invalid.state !== 'failed' ||
+  invalid.output ||
+  !(await readFile(generated.output)).equals(original)
+)
+  throw Error('Failed validation did not preserve the previous good output');
+if (!cli(['schema', '--type', 'addShape']).ok)
+  throw Error('Narrow lookup could not resolve an operation field');
+
 await access(join(root, 'scripts/managed-bootstrap.sh'));
 await access(join(root, 'scripts/benchmark-managed-replay.mjs'));
 const loaded = JSON.parse(
@@ -243,6 +291,7 @@ const summary = cli([
   join(staging, 'validation-report.json'),
 ]);
 if (
+  summary.data.renderPerformed !== false ||
   summary.data.inspection.slideCount !== 2 ||
   summary.data.inspection.verification.visualReview !== 'not-performed'
 )

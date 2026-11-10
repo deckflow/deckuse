@@ -1,3 +1,5 @@
+import type { PreviewFinding } from './preview-layout.js';
+import { cNvPrIdOf, targetPathForItem } from './pptx/addressing.js';
 import { requireDefined } from './required.js';
 import { readRenderCache, renderEnvironmentKey, writeRenderCache } from './render-cache.js';
 import { openPptxRenderSession, renderContactSheet } from './render-pptx-browser.js';
@@ -46,7 +48,7 @@ export type ScreenshotFn = (options: {
 }) => Promise<void | {
   browserText: string;
   chartWarnings?: { id: string; message: string }[];
-  cjkOrphans?: { shapeId: string; sample: string }[];
+  layout?: { findings: PreviewFinding[]; shapeIds: string[] };
 }>;
 
 export interface RenderDependencies {
@@ -289,7 +291,9 @@ const renderPageSnapshot = async (
         ? auditVisuals(batch.archive, page, batch.index).diagnostics
         : await inspectChartRenderFidelity(absoluteWorkspace, page)
       : [];
-  const warnings = diagnostics.map((item) => `${item.code}: ${item.message}`);
+  const warnings = diagnostics
+    .filter((item) => item.severity !== 'info')
+    .map((item) => `${item.code}: ${item.message}`);
 
   if (!batch && !options.dependencies?.convert) await ensureDeck2HtmlExecutable();
 
@@ -353,13 +357,61 @@ const renderPageSnapshot = async (
       });
       warnings.push(`CHART_NUMBER_FORMAT_UNSUPPORTED: ${warning.message}`);
     }
-    for (const orphan of screenshotResult?.cjkOrphans ?? []) {
-      diagnostics.push({
-        severity: 'info',
-        code: 'CJK_ORPHAN_LINE',
-        message: 'A final wrapped line contains one CJK character; review the line break.',
-        details: { page, ...orphan, heuristic: true },
-      });
+    if (screenshotResult?.layout) {
+      const index =
+        batch?.index ??
+        buildIndex(await OpcArchive.openFile(packagePath), 'render', renderedRevision ?? '0');
+      const slide = index.elements.filter((item) => item.kind === 'slide')[page - 1];
+      const shapes = new Map(
+        index.elements
+          .filter((item) => item.partUri === slide?.partUri)
+          .map((item) => [cNvPrIdOf(item), item]),
+      );
+      const measuredTargets = new Set(
+        screenshotResult.layout.shapeIds.flatMap((id) => {
+          const shape = shapes.get(id);
+          return shape ? [targetPathForItem(index, shape)] : [];
+        }),
+      );
+      for (let i = diagnostics.length - 1; i >= 0; i--) {
+        const diagnostic = diagnostics[i];
+        const { target, targets } = diagnostic?.details ?? {};
+        if (
+          (diagnostic?.code === 'TEXT_OVERFLOW_SUSPECTED' &&
+            typeof target === 'string' &&
+            measuredTargets.has(target)) ||
+          (diagnostic?.code === 'CONTENT_OVERLAP_SUSPECTED' &&
+            Array.isArray(targets) &&
+            targets.every((item) => typeof item === 'string' && measuredTargets.has(item)))
+        )
+          diagnostics.splice(i, 1);
+      }
+      for (const finding of screenshotResult.layout.findings) {
+        const shape = shapes.get(finding.shapeId);
+        const other = shapes.get(finding.otherShapeId);
+        const message =
+          'Measured in the preview render. PowerPoint may wrap differently with other fonts. ' +
+          finding.action;
+        diagnostics.push({
+          severity: 'warning',
+          code: finding.code,
+          message,
+          details: {
+            ...finding,
+            page,
+            measured: true,
+            heuristic: false,
+            target: shape
+              ? targetPathForItem(index, shape)
+              : `slide:${String(page)}/shape:${finding.shapeId}`,
+            shapeName: shape?.name,
+            ...(other
+              ? { otherShapeName: other.name, otherTarget: targetPathForItem(index, other) }
+              : {}),
+          },
+        });
+        warnings.push(finding.code + ': ' + message);
+      }
     }
     let fontReport: ReturnType<typeof fontRiskReport>['report'] | undefined;
     try {

@@ -828,6 +828,11 @@ Examples:
   deckuse monitor stop --all`,
   },
 
+  'skill-path': {
+    usage: 'deckuse skill-path --json',
+    summary: 'Locate the version-matched Skill bundled with the selected CLI.',
+    example: 'deckuse skill-path --json',
+  },
   'agent-context': {
     usage:
       'deckuse agent-context [--format pptx|docx | --workspace <path>] [--scenario <id>] [--include-schema] --json',
@@ -852,6 +857,8 @@ Options:
   --all                    Render all pages from one snapshot
   --since-revision <rev>   PPTX: reuse verified PNGs in the same output directory
   --contact-sheet         PPTX batch: also save contact-sheet.png
+  --summary               Return up to ten ranked preview findings and grouped font risks
+  --report <file.json>    Save full diagnostics to a new report file
   --review-notes <json>   Annotate exact out-of-bounds/overlap targets with reasons
   --output-dir <dir>       Batch PNG directory; mutually exclusive with --output
   --output <file.png>       PNG path (default: .deckuse/render/page-<n>.png)

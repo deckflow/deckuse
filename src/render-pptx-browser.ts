@@ -1,3 +1,4 @@
+import { measurePreviewLayout } from './preview-layout.js';
 import { createRequire } from 'node:module';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -140,50 +141,7 @@ export async function openPptxRenderSession(
           await deck.screenshot({ path: outputPath, type: 'png', timeout: 15_000 });
           return {
             browserText: await slide.innerText(),
-            cjkOrphans: await slide.locator('.shape-text p').evaluateAll((paragraphs) => {
-              return paragraphs
-                .flatMap((paragraph) => {
-                  const text = paragraph.textContent;
-                  if (
-                    !/[\p{Script=Han}][。！？]?$/u.test(text.trim()) ||
-                    text.length > 400 ||
-                    paragraph.querySelector('br')
-                  )
-                    return [];
-                  const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
-                  const range = document.createRange();
-                  const positions: { char: string; bottom: number }[] = [];
-                  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-                    const value = node.textContent ?? '';
-                    for (let i = 0; i < value.length; i++) {
-                      const char = value[i];
-                      if (!char?.trim()) continue;
-                      range.setStart(node, i);
-                      range.setEnd(node, i + 1);
-                      const rect = range.getBoundingClientRect();
-                      if (rect.width > 0) positions.push({ char, bottom: rect.bottom });
-                    }
-                  }
-                  const last = positions.at(-1);
-                  if (!last) return [];
-                  const lastLine = positions.filter(
-                    (entry) => Math.abs(entry.bottom - last.bottom) < 2,
-                  );
-                  const sample = lastLine.map((entry) => entry.char).join('');
-                  return lastLine.length < positions.length &&
-                    /^\p{Script=Han}[。！？]?$/u.test(sample)
-                    ? [
-                        {
-                          shapeId:
-                            paragraph.closest('[data-shape-id]')?.getAttribute('data-shape-id') ??
-                            '',
-                          sample,
-                        },
-                      ]
-                    : [];
-                })
-                .slice(0, 20);
-            }),
+            layout: await slide.locator('.shape-text p').evaluateAll(measurePreviewLayout),
             chartWarnings: await slide.locator('[data-chart-warning]').evaluateAll((elements) =>
               elements.map((el) => ({
                 id: el.getAttribute('data-chart-id') ?? el.id,

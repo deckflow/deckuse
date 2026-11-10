@@ -1,5 +1,6 @@
 {
   "name": "@deckflow/deckuse",
+  "description": "Canonical Deckuse CLI for editable PowerPoint and Word documents with a bundled agent Skill.",
   "version": "1.9.4",
   "license": "AGPL-3.0",
   "type": "module",

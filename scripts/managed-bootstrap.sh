@@ -1,8 +1,13 @@
 #!/bin/sh
 # Run this script from a reviewed checkout before installing Deckuse.
 set -eu
+handoff=0
+if [ "${1:-}" = --handoff-json ]; then
+  handoff=1
+  shift
+fi
 if [ "$#" -ne 3 ] && { [ "$#" -ne 4 ] || [ "$4" != --shared-cache ]; }; then
-  printf '%s\n' 'Usage: managed-bootstrap.sh <exact-version|latest> <new-job-directory> <approved-cache-root> [--shared-cache]' >&2
+  printf '%s\n' 'Usage: managed-bootstrap.sh [--handoff-json] <exact-version|latest> <new-job-directory> <approved-cache-root> [--shared-cache]' >&2
   exit 2
 fi
 version=$1
@@ -62,5 +67,8 @@ actual=$("$cli" --version)
 if [ "$actual" != "deckuse $resolved (edition=community)" ]; then
   printf 'Installed CLI version mismatch: %s\n' "$actual" >&2
   exit 2
+fi
+if [ "$handoff" = 1 ]; then
+  exec "$cli" skill-path --json
 fi
 printf '%s\n' "$cli"
