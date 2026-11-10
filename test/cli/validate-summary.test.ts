@@ -25,6 +25,7 @@ it('reports presentation order, editable targets and honest layout states; prese
         slide: '第一页',
         shapeType: 'text',
         name: 'Title',
+        fill: { color: 'EEEEEE' },
         x: '10px',
         y: '10px',
         width: '200px',
@@ -54,7 +55,9 @@ it('reports presentation order, editable targets and honest layout states; prese
   expect(inspection.slides[1].text[0].target).toMatch(/^slide:2\/shape:/);
   expect(inspection.packageSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(inspection.layout.state).toBe('heuristic-only');
-  expect(inspection.layout.diagnostics.length).toBeGreaterThan(0);
+  expect(inspection.layout.diagnostics).toEqual(
+    expect.arrayContaining([expect.objectContaining({ code: 'TEXT_OVERFLOW_SUSPECTED' })]),
+  );
   expect(inspection.verification).toMatchObject({
     structure: 'valid',
     preview: 'not-performed',
