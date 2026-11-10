@@ -7,6 +7,7 @@ import { agentContext } from './agent-context.js';
 import { REVIEW_WRITES } from './review/schema.js';
 import { requireDefined } from './required.js';
 import { access, open, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { dirname, extname, join, resolve } from 'node:path';
 import {
   PROTOCOL_VERSION,
@@ -61,8 +62,10 @@ const expectRevisionOpt = takeOption(args, '--expect-revision');
 const reasonOpt = takeOption(args, '--reason');
 const requestIdPresent = args.includes('--request-id');
 const requestIdOpt = takeOption(args, '--request-id');
-const summaryOpt = ['apply', 'validate'].includes(args[0] ?? '') && takeFlag(args, '--summary');
-const reportPresent = ['apply', 'validate'].includes(args[0] ?? '') && args.includes('--report');
+const summaryOpt =
+  ['apply', 'validate', 'render'].includes(args[0] ?? '') && takeFlag(args, '--summary');
+const reportPresent =
+  ['apply', 'validate', 'render'].includes(args[0] ?? '') && args.includes('--report');
 const reportOpt = reportPresent ? takeOption(args, '--report') : undefined;
 const clean = args;
 
@@ -271,9 +274,12 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
       data: {
         ...(summaryOpt
           ? {
+              measuredFindings: [],
               valid: data?.['valid'] === true,
               revision: data?.['revision'],
               inspection: data?.['inspection'],
+              renderPerformed: data?.['renderPerformed'],
+              layoutSource: data?.['layoutSource'],
               diagnosticCount: result.diagnostics.length,
               diagnostics: envelope.ok ? undefined : result.diagnostics,
             }
@@ -320,6 +326,88 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
   } else outputEnvelope(envelope);
   return result.ok;
 };
+
+async function outputRender(
+  envelope: CommandEnvelope & { data: object },
+  diagnostics: readonly Diagnostic[],
+  result: unknown,
+): Promise<boolean> {
+  let reportPath: string | undefined;
+  if (reportOpt) {
+    try {
+      await writeFile(resolve(reportOpt), JSON.stringify(envelope) + '\n', { flag: 'wx' });
+      reportPath = resolve(reportOpt);
+    } catch (cause) {
+      process.stderr.write(`deckuse: could not write report: ${String(cause)}\n`);
+    }
+  }
+  const reportFailed = Boolean(reportOpt && !reportPath);
+  if (!summaryOpt && !reportOpt) {
+    outputEnvelope(envelope);
+    return envelope.ok;
+  }
+  const rank = [
+    'RENDERED_TEXT_OVERLAP',
+    'SHORT_LABEL_WRAP',
+    'CJK_ORPHAN_LINE',
+    'TEXT_TOKEN_WRAP',
+    'RENDERED_TEXT_OUTSIDE_SHAPE',
+  ];
+  const measured = diagnostics
+    .filter((finding) => finding.details?.['measured'] === true)
+    .sort((a, b) => rank.indexOf(a.code) - rank.indexOf(b.code));
+  const fonts = new Map<string, { codes: Set<string>; pages: Set<number> }>();
+  for (const diagnostic of diagnostics) {
+    if (
+      ![
+        'FONT_UNRESOLVED',
+        'CJK_GLYPH_COVERAGE_UNVERIFIED',
+        'CJK_FONT_INHERITANCE_UNVERIFIED',
+      ].includes(diagnostic.code)
+    )
+      continue;
+    const { family, fonts: families, page } = diagnostic.details ?? {};
+    if (typeof page !== 'number') continue;
+    const names =
+      typeof family === 'string'
+        ? [family]
+        : Array.isArray(families) && families.length
+          ? families
+          : ['(inherited)'];
+    for (const font of names) {
+      if (typeof font !== 'string') continue;
+      const group = fonts.get(font) ?? { codes: new Set<string>(), pages: new Set<number>() };
+      group.codes.add(diagnostic.code);
+      group.pages.add(page);
+      fonts.set(font, group);
+    }
+  }
+  outputEnvelope({
+    ...envelope,
+    ...(summaryOpt ? { warnings: measured.slice(0, 10).map((item) => item.message) } : {}),
+    data: {
+      ...(summaryOpt
+        ? {
+            measuredFindings: measured
+              .slice(0, 10)
+              .map(({ code, details, message }) => ({ code, ...details, message })),
+            measuredFindingCount: measured.length,
+            fontDiagnostics: [...fonts].map(([font, { codes, pages }]) => ({
+              font,
+              codes: [...codes],
+              pageCount: pages.size,
+              pages: [...pages],
+            })),
+            diagnosticCount: diagnostics.length,
+            result,
+          }
+        : envelope.data),
+      reportPath,
+      reportFailed,
+    },
+  });
+  return envelope.ok && !reportFailed;
+}
 
 const parseProps = (list: string[]): Record<string, unknown> => {
   const props: Record<string, unknown> = {};
@@ -504,6 +592,25 @@ const main = async (): Promise<void> => {
         throw new Error('--request-id requires apply or status');
       if (requestIdOpt && revisionOpt) throw new Error('--request-id requires the live workspace');
 
+      if (action === 'skill-path') {
+        if (clean.length !== 1) throw new Error('Usage: deckuse skill-path --json');
+        const cli = await realpath(fileURLToPath(import.meta.url));
+        const skill = await realpath(join(dirname(cli), '../skills/deckuse/SKILL.md'));
+        await access(skill);
+        outputEnvelope({
+          ok: true,
+          command: 'deckuse skill-path',
+          data: {
+            package: '@deckflow/deckuse',
+            cli,
+            version,
+            edition: EDITION,
+            skill,
+            nextAction: { type: 'read-file', path: skill },
+          },
+        });
+        return;
+      }
       if (action === 'agent-context') {
         for (const flag of ['--format', '--scenario'])
           if (clean.includes(flag) && !optionFrom(clean, flag))
@@ -1689,8 +1796,19 @@ const main = async (): Promise<void> => {
                 ? Number(optionFrom(clean, '--scale'))
                 : undefined,
             });
-            outputEnvelope({ ok: rendered.ok, command: 'deckuse render', data: rendered });
-            if (!rendered.ok) process.exitCode = 1;
+            const { results, ...batch } = rendered;
+            const reported = await outputRender(
+              { ok: rendered.ok, command: 'deckuse render', data: rendered },
+              results.flatMap((item) => item.result?.diagnostics ?? []),
+              {
+                ...batch,
+                results: results.map(({ result, ...item }) => ({
+                  ...item,
+                  output: result?.output,
+                })),
+              },
+            );
+            if (!reported) process.exitCode = 1;
           } catch (cause) {
             outputEnvelope({
               ok: false,
@@ -1722,18 +1840,16 @@ const main = async (): Promise<void> => {
             ...(outputOpt ? { output: resolve(outputOpt) } : {}),
             ...(scale !== undefined ? { scale } : {}),
           });
-          outputEnvelope({
-            ok: true,
-            command: 'deckuse render',
-            warnings: [...rendered.warnings],
-            data: {
-              ...rendered,
-              page: rendered.page,
-              output: rendered.output,
-              warnings: rendered.warnings,
-              diagnostics: rendered.diagnostics,
+          ok = await outputRender(
+            {
+              ok: true,
+              command: 'deckuse render',
+              warnings: [...rendered.warnings],
+              data: rendered,
             },
-          });
+            rendered.diagnostics,
+            { page: rendered.page, output: rendered.output, revision: rendered.revision },
+          );
         } catch (error) {
           outputEnvelope({
             ok: false,

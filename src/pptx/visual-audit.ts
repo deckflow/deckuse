@@ -41,8 +41,15 @@ export function auditVisuals(
         e.kind !== 'slide' &&
         !['tableCell', 'notes'].includes(e.kind),
     );
-    const boxes: { target: string; kind: string; x: number; y: number; w: number; h: number }[] =
-      [];
+    const boxes: {
+      target: string;
+      name: string | undefined;
+      sample: string | undefined;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }[] = [];
     const doc = archive.readXml(slide.partUri);
     for (const item of items) {
       const target = targetPathForItem(index, item);
@@ -123,6 +130,8 @@ export function auditVisuals(
           details: {
             page,
             target,
+            shapeName: item.name,
+            sample: item.text?.slice(0, 80),
             bounds: { x: bx, y: by, width: bw, height: bh },
             slide: size,
             excessEmu: {
@@ -135,7 +144,15 @@ export function auditVisuals(
           },
         });
       if (['textbox', 'table', 'chart'].includes(item.kind))
-        boxes.push({ target, kind: item.kind, x: bx, y: by, w: bw, h: bh });
+        boxes.push({
+          target,
+          name: item.name,
+          sample: item.text?.slice(0, 80),
+          x: bx,
+          y: by,
+          w: bw,
+          h: bh,
+        });
       if (item.kind === 'textbox' && item.text && node && w > 0) {
         const sizes = descendants(node, 'rPr')
           .map((n) => Number(n.getAttribute('sz')) / 100)
@@ -151,15 +168,18 @@ export function auditVisuals(
             fontSize: Math.max(...sizes),
             maxWidthEmu: Math.max(1, w - left - right),
           });
-          if (estimated.heightEmu > h - top - bottom)
+          const excess = estimated.heightEmu - (h - top - bottom);
+          if (excess > 0 && (estimated.lines > 1 || excess >= estimated.heightEmu / 2))
             diagnostics.push({
-              severity: 'warning',
+              severity: 'info',
               code: 'TEXT_OVERFLOW_SUSPECTED',
               message:
                 'Estimated text height exceeds the available box; confirm with the rendering engine',
               details: {
                 page,
                 target,
+                shapeName: item.name,
+                sample: item.text.slice(0, 80),
                 estimatedHeight: estimated.heightEmu,
                 availableHeight: h - top - bottom,
                 excessHeightEmu: estimated.heightEmu - (h - top - bottom),
@@ -180,12 +200,16 @@ export function auditVisuals(
           (b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h);
         if (!contained && dx > 0 && dy > 0 && dx * dy > Math.min(a.w * a.h, b.w * b.h) * 0.1)
           diagnostics.push({
-            severity: 'warning',
+            severity: 'info',
             code: 'CONTENT_OVERLAP_SUSPECTED',
             message: 'Content objects overlap; confirm whether the overlap is intentional',
             details: {
               page,
               targets: [a.target, b.target],
+              shapeName: a.name,
+              sample: a.sample,
+              otherShapeName: b.name,
+              otherSample: b.sample,
               overlapArea: dx * dy,
               overlapWidthEmu: dx,
               overlapHeightEmu: dy,
