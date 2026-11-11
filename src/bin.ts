@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { writeApplyReport } from './apply-report.js';
+import { checkTextAssertions, textAssertionsSchema } from './text-assertions.js';
+import { schemaField } from './schema-field.js';
 import { recoverPptxExport } from './pptx/export-recovery.js';
 import { converterPreflight } from './deck2html-exec.js';
 import { recordCliStartup, timed, timedSync } from './timing.js';
@@ -208,7 +211,11 @@ const outputEnvelope = (envelope: CommandEnvelope): void => {
   process.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
 };
 
-const execute = async (commandLabel: string, command: unknown): Promise<boolean> => {
+const execute = async (
+  commandLabel: string,
+  command: unknown,
+  textAssertions?: unknown,
+): Promise<boolean> => {
   const format =
     requestIdOpt && isRecord(command) && typeof command['workspaceId'] === 'string'
       ? (
@@ -237,12 +244,35 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
         'Apply without --request-id cannot guarantee idempotency when the host reruns the command.',
     });
   const envelope = toEnvelope(commandLabel, result);
+  if (textAssertions !== undefined && envelope.ok) {
+    const data = envelope.data as Record<string, unknown>;
+    const checks = checkTextAssertions(textAssertions, data['inspection']);
+    data['textAssertions'] = checks;
+    if (checks.some((check) => !check.valid)) {
+      data['valid'] = false;
+      envelope.ok = false;
+      envelope.error = {
+        code: 'VALIDATION_FAILED',
+        message: 'Text assertions failed; inspect data.textAssertions',
+      };
+    }
+  }
   let reportPath: string | undefined;
+  let reportStatus: 'written' | 'reused' | 'failed' | undefined;
+  let reportWarnings: unknown;
   if (reportOpt) {
     try {
-      await writeFile(resolve(reportOpt), JSON.stringify(envelope) + '\n', { flag: 'wx' });
+      if (commandLabel === 'deckuse apply') {
+        const written = await writeApplyReport(resolve(reportOpt), envelope, command);
+        reportStatus = written.status;
+        reportWarnings = written.warnings;
+      } else {
+        await writeFile(resolve(reportOpt), JSON.stringify(envelope) + '\n', { flag: 'wx' });
+        reportStatus = 'written';
+      }
       reportPath = resolve(reportOpt);
     } catch (cause) {
+      reportStatus = 'failed';
       // Reporting happens after the transaction. Preserve the actual outcome.
       process.stderr.write(`deckuse: could not write report: ${String(cause)}\n`);
     }
@@ -258,6 +288,7 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
               valid: data?.['valid'] === true,
               revision: data?.['revision'],
               inspection: data?.['inspection'],
+              textAssertions: data?.['textAssertions'],
               renderPerformed: data?.['renderPerformed'],
               layoutSource: data?.['layoutSource'],
               diagnosticCount: result.diagnostics.length,
@@ -268,7 +299,33 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
         reportFailed: Boolean(reportOpt && !reportPath),
       },
     });
-    return result.ok && !(reportOpt && !reportPath);
+    return envelope.ok && !(reportOpt && !reportPath);
+  }
+  if (commandLabel === 'deckuse apply' && isRecord(envelope.data)) {
+    const data = envelope.data;
+    const results = Array.isArray(data['results']) ? data['results'].filter(isRecord) : [];
+    const matches = results.filter((item) => typeof item['matchedTargets'] === 'number');
+    Object.assign(data, {
+      mutationState: envelope.ok
+        ? data['dryRun']
+          ? 'preview'
+          : data['noOp']
+            ? 'no-op'
+            : 'committed'
+        : 'not-confirmed',
+      ...(reportOpt ? { reportStatus, reportPath, reportWarnings, reportFailed: !reportPath } : {}),
+      ...(matches.length
+        ? {
+            matchSummary: {
+              operationCount: matches.length,
+              zeroMatchOperations: matches.filter((r) => r['matchedTargets'] === 0).length,
+              multipleMatchOperations: matches.filter((r) => Number(r['matchedTargets']) > 1)
+                .length,
+              changedTargets: matches.reduce((n, r) => n + Number(r['matched'] ?? 0), 0),
+            },
+          }
+        : {}),
+    });
   }
   if (summaryOpt) {
     const data = envelope.data as Record<string, unknown> | undefined;
@@ -287,6 +344,16 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
         : {}),
       warnings: envelope.warnings?.slice(0, 16) ?? [],
       data: {
+        mutationState: data?.['mutationState'],
+        matchSummary: data?.['matchSummary'],
+        changedTargets: Array.isArray(data?.['changedTargets'])
+          ? data['changedTargets'].slice(0, 64)
+          : undefined,
+        changedTargetCount: Array.isArray(data?.['changedTargets'])
+          ? data['changedTargets'].length
+          : undefined,
+        reportStatus,
+        reportWarnings,
         noOp: data?.['noOp'],
         noOpReason: data?.['noOpReason'],
         cleanupRetirements: data?.['cleanupRetirements'],
@@ -304,7 +371,7 @@ const execute = async (commandLabel: string, command: unknown): Promise<boolean>
       },
     });
   } else outputEnvelope(envelope);
-  return result.ok;
+  return envelope.ok;
 };
 
 async function outputRender(
@@ -650,6 +717,8 @@ const main = async (): Promise<void> => {
       if (action === 'schema') {
         if (clean.includes('--type') && !optionFrom(clean, '--type'))
           throw new Error('--type requires a command type');
+        if (clean.includes('--list') && clean.includes('--field'))
+          throw new Error('--field requires --type, not --list');
         if (clean.includes('--list') && clean.includes('--type'))
           throw new Error('Choose --list or --type');
         if (clean.includes('--command'))
@@ -735,6 +804,10 @@ const main = async (): Promise<void> => {
           visit(root);
           schema = { ...root, $defs: reachable };
         }
+        const field = optionFrom(clean, '--field');
+        if (clean.includes('--field') && (!typeOpt || !field))
+          throw new Error('--field requires --type and a field name');
+        if (field) schema = schemaField(schema, field);
         const payload = {
           ok: true,
           command: 'deckuse schema',
@@ -743,6 +816,7 @@ const main = async (): Promise<void> => {
             protocolVersion: PROTOCOL_VERSION,
             edition: EDITION,
             ...(typeOpt ? { type: typeOpt } : {}),
+            ...(field ? { field } : {}),
             schema,
           },
         };
@@ -1481,29 +1555,53 @@ const main = async (): Promise<void> => {
         }
       } else if (action === 'validate') {
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
-        ok = await execute('deckuse validate', {
-          version: PROTOCOL_VERSION,
-          type: 'validate',
-          profile: optionFrom(clean, '--profile') ?? 'structure',
-          workspaceId: workspace,
-          level: optionFrom(clean, '--level') ?? 'full',
-          ...(expectRevisionOpt ? { expectRevision: expectRevisionOpt } : {}),
-          ...(clean.includes('--expect-slides')
-            ? { expectedSlides: Number(optionFrom(clean, '--expect-slides')) }
-            : {}),
-          ...(clean.includes('--expect-slide-names')
-            ? {
-                expectedSlideNames: JSON.parse(
-                  await readFile(requireDefined(optionFrom(clean, '--expect-slide-names')), 'utf8'),
-                ) as unknown,
-              }
-            : {}),
-          ...(summaryOpt || reportOpt ? { summary: true } : {}),
-          render: clean.includes('--render'),
-          ...(clean.includes('--package') ? { package: true } : {}),
-          ...(clean.includes('--relationships') ? { relationships: true } : {}),
-          ...(optionFrom(clean, '--slide') ? { slide: Number(optionFrom(clean, '--slide')) } : {}),
-        });
+        const assertionsPath = optionFrom(clean, '--assert-text');
+        if (clean.includes('--assert-text') && !assertionsPath)
+          throw new Error('--assert-text requires a JSON file');
+        const assertions = assertionsPath
+          ? textAssertionsSchema.parse(JSON.parse(await readFile(assertionsPath, 'utf8')))
+          : undefined;
+        if (
+          assertions &&
+          (
+            JSON.parse(await readFile(join(workspace, '.deckuse/manifest.json'), 'utf8')) as {
+              format: string;
+            }
+          ).format !== 'pptx'
+        )
+          throw new Error('--assert-text currently supports PPTX only');
+        ok = await execute(
+          'deckuse validate',
+          {
+            version: PROTOCOL_VERSION,
+            type: 'validate',
+            profile: optionFrom(clean, '--profile') ?? 'structure',
+            workspaceId: workspace,
+            level: optionFrom(clean, '--level') ?? 'full',
+            ...(expectRevisionOpt ? { expectRevision: expectRevisionOpt } : {}),
+            ...(clean.includes('--expect-slides')
+              ? { expectedSlides: Number(optionFrom(clean, '--expect-slides')) }
+              : {}),
+            ...(clean.includes('--expect-slide-names')
+              ? {
+                  expectedSlideNames: JSON.parse(
+                    await readFile(
+                      requireDefined(optionFrom(clean, '--expect-slide-names')),
+                      'utf8',
+                    ),
+                  ) as unknown,
+                }
+              : {}),
+            ...(summaryOpt || reportOpt || assertions ? { summary: true } : {}),
+            render: clean.includes('--render'),
+            ...(clean.includes('--package') ? { package: true } : {}),
+            ...(clean.includes('--relationships') ? { relationships: true } : {}),
+            ...(optionFrom(clean, '--slide')
+              ? { slide: Number(optionFrom(clean, '--slide')) }
+              : {}),
+          },
+          assertions,
+        );
       } else if (action === 'history') {
         const workspace = await findWorkspace(workspaceOpt ?? clean[1]);
         ok = await execute('deckuse history', {

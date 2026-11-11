@@ -9,7 +9,12 @@ Required modules: [CLI context](../modules/cli-context.md), [Typography/layout](
 3. Reuse the confirmed absolute CLI path across jobs; do not copy `node_modules`. When the request selects Deckuse, use this workflow from the installed package. For installation, use the scoped `@deckflow/deckuse` package and resolve latest once before pinning the exact version. Do not claim latest if resolution failed. Avoid unrelated authoring-tool tutorials and full README/schema scans. Run `deckuse agent-context --format pptx --scenario create --json` once and use the operation index and recipe. Load a targeted schema only when a nested field needs clarification.
    Research and independent environment preparation may run concurrently; keep blocking install polling out of the same batch as independent reads. On a follow-up, inspect the existing authoring script and retain suitable helpers, changing only content, colors and required geometry. Do not force an unsuitable layout to fit new content. Do not generate another custom layout checker or HTML preview; use validation and actual PPTX rendering.
 
-4. If the delivery needs a visual review, run `deckuse render --preflight --probe-browser --json` before authoring. A static preflight does not prove the browser can launch. Use an explicitly configured browser in the host-approved execution context.
+4. Once operations and expected slide names are saved, prefer the installed
+   generation runner described below. It captures process results and checks the
+   resulting artifact. Use individual CLI calls when editing an existing workspace
+   or diagnosing a failed phase; do not rediscover the full protocol schema.
+
+   If the delivery needs a visual review, run `deckuse render --preflight --probe-browser --json` before authoring. A static preflight does not prove the browser can launch. Use an explicitly configured browser in the host-approved execution context.
 
    Copy or adapt the installed [two-slide starter](../examples/create-blank-pptx.json) to `ops.json`. Save the operation file, request ID and expected revision together before the first apply. Run each command separately. Require exit zero and JSON `ok: true`, plus explicit `data.valid: true` on validate and export. A pipe that prints `ok` does not enforce these checks. Use `list slides` for presentation order, never the numbering of XML files.
 
@@ -86,3 +91,35 @@ from slide XML filenames. Review actual PPTX PNGs and the contact sheet; do not
 substitute HTML drawn from operations for artifact verification. Inspect all
 first-pass pages, batch local corrections, then render changed pages using the
 existing `--since-revision` workflow. A runner's `preview-ready` is not visual approval.
+
+### Keep the reviewed result reproducible
+
+If polishing changed content, update the authoring source or retain an ordered
+base-plus-patches recipe. Rebuilding only the original ops file loses the edits.
+The existing runner accepts repeatable `--patch` inputs (JSON arrays of high-level
+operations), saves their bytes and digests, and compiles them in order into one
+atomic apply. No additional revision is required for each patch in a fresh build.
+
+```sh
+node <installed-package>/scripts/rebuild-generation.mjs ./job ./ops.json ./expected-slide-names.json --patch ./patch.json --assert-text ./assertions.json --preview
+```
+
+`assertions.json` is an array such as
+`[{"text":"Final title","count":1,"slide":1},{"text":"Old title","count":0}]`.
+Counts are matching text objects, not substring occurrences. A missing page or a
+malformed assertion is a failure. Resume verifies saved inputs before continuing.
+For a live revision-guarded patch, validate the same assertions in one snapshot:
+
+```sh
+deckuse validate --workspace ./ws --expect-revision 3 --assert-text ./assertions.json --summary --json
+```
+
+Read `data.matchSummary` after apply and `data.textAssertions` after validation.
+Search returns `data.matches`; list returns `data.items`. Never default a missing
+required response field to an empty array. `replaceText` reports changed targets
+and per-operation counts in the full report. Reflowing a slide must not remove
+qualifiers or strengthen claims merely to save space; consider box/layout changes.
+
+A structural pass does not establish font availability or native Office fidelity.
+Keep structure, preview, visual review, font and native verification distinct in
+handoff. Deliver after the required checks; retain machine reports for details.

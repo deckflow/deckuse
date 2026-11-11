@@ -15,7 +15,7 @@ import {
 } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
-import { resolveTarget, resolveToRef, type ParsedTarget } from './addressing.js';
+import { resolveTarget, resolveToRef, targetPathForItem, type ParsedTarget } from './addressing.js';
 import { nodeFor, shapeByCNvPrId, focusMutationNode } from './node-for.js';
 import { computeAlignUpdates, readBBox, writeBBox } from './align.js';
 import { editionGatedWriteKind, gatedWriteHardDeny } from './edition.js';
@@ -546,6 +546,9 @@ const applyReplaceText = async (
       changed: refs.length > 0,
       matched: refs.length,
       matchedTargets: selected.length,
+      changedTargets: selected
+        .filter((item) => refs.includes(item.ref))
+        .map((item) => targetPathForItem(index, item)),
       refs,
       slides: mergeSlides(slidePages),
       diagnostics,

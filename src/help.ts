@@ -656,9 +656,9 @@ Examples:
   },
 
   schema: {
-    usage: 'deckuse schema [--list | --type <commandType>] [--json]',
+    usage: 'deckuse schema [--list | --type <commandType> [--field <name>]] [--json]',
     summary: 'Print the command JSON Schema (Draft 2020-12) with CLI/protocol version.',
-    example: 'deckuse schema --type addShape --json',
+    example: 'deckuse schema --type addShape --field blocks --json',
     details: `Options:
   --list                   List command types and batchable types
   --type <commandType>      Slice to one command (e.g. addShape, setProperties, batch)
@@ -703,6 +703,7 @@ Options:
   --relationships           Confirm relationship graph checks (enabled by default)
   --slide <n>               Limit to one slide when supported
   --expect-revision <rev>   PPTX: require this workspace revision
+  --assert-text <file>      PPTX: JSON [{text,count,slide?}], count matching text objects
   --expect-slides <count>   PPTX: require this slide count
   --expect-slide-names <file> PPTX: require this ordered JSON array of unique names
   --workspace <path>        Workspace root
