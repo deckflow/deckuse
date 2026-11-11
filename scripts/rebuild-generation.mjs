@@ -25,6 +25,9 @@ const option = (name) => {
   args.splice(i, 2);
   return value;
 };
+const patchInputs = [];
+while (args.includes('--patch')) patchInputs.push(option('--patch'));
+const assertionsInput = option('--assert-text');
 const resume = option('--resume');
 const requestedPreview = flag('--preview');
 const retryPreview = flag('--retry-preview');
@@ -36,9 +39,12 @@ const duration = (value, fallback) => {
     throw Error('Timeout must be 1..3600000 ms');
   return n;
 };
-if ((resume && args.length) || (!resume && args.length !== 3)) {
+if (
+  (resume && (args.length || patchInputs.length || assertionsInput)) ||
+  (!resume && args.length !== 3)
+) {
   console.error(
-    'Usage: rebuild-generation.mjs <existing-output-root> <ops.json> <expected-slide-names.json> [--preview] [--timeout-ms 60000] [--preview-timeout-ms 180000]\n       rebuild-generation.mjs --resume <generation-directory> [--retry-preview]',
+    'Usage: rebuild-generation.mjs <existing-output-root> <ops.json> <expected-slide-names.json> [--patch patch.json ...] [--assert-text assertions.json] [--preview] [--timeout-ms 60000] [--preview-timeout-ms 180000]\n       rebuild-generation.mjs --resume <generation-directory> [--retry-preview]',
   );
   process.exit(2);
 }
@@ -270,6 +276,18 @@ async function run() {
       const names = await readFile(join(generation, 'expected-slide-names.json'));
       if (hash(ops) !== config.operationsSha256 || hash(names) !== config.namesSha256)
         throw Error('Saved generation inputs changed; resume refused');
+      for (const source of config.recipeInputs ?? []) {
+        if (
+          !/^recipe-\d+\.json$/.test(source.file) ||
+          hash(await readFile(join(generation, source.file))) !== source.sha256
+        )
+          throw Error('Saved recipe inputs changed; resume refused');
+      }
+      if (
+        config.assertionsSha256 &&
+        hash(await readFile(join(generation, 'assertions.json'))) !== config.assertionsSha256
+      )
+        throw Error('Saved assertions changed; resume refused');
       const checkpoints = (await readdir(generation))
         .filter((name) => /^checkpoint-\d+\.json$/.test(name))
         .sort();
@@ -319,7 +337,32 @@ async function run() {
         throw Error('Initialization outcome is unknown; preserve this generation');
       }
     } else {
-      const operations = await readFile(args[1]);
+      let operations = await readFile(args[1]);
+      const recipeInputs = [];
+      if (patchInputs.length) {
+        const compiled = [];
+        for (const [i, path] of [args[1], ...patchInputs].entries()) {
+          const bytes = await readFile(path);
+          const values = JSON.parse(bytes);
+          if (
+            !Array.isArray(values) ||
+            values.some((value) => !value || typeof value.type !== 'string' || 'op' in value)
+          )
+            throw Error('--patch recipes require arrays of high-level operations');
+          compiled.push(...values);
+          const file = `recipe-${i}.json`;
+          await writeFile(join(generation, file), bytes, { flag: 'wx' });
+          recipeInputs.push({ file, sha256: hash(bytes), role: i === 0 ? 'base' : 'patch' });
+        }
+        operations = Buffer.from(JSON.stringify(compiled));
+      }
+      let assertions;
+      if (assertionsInput) {
+        const { textAssertionsSchema } = await import('../dist/text-assertions.js');
+        assertions = await readFile(assertionsInput);
+        textAssertionsSchema.parse(JSON.parse(assertions));
+        await writeFile(join(generation, 'assertions.json'), assertions, { flag: 'wx' });
+      }
       const names = await readFile(args[2]);
       const expected = JSON.parse(names);
       if (
@@ -337,6 +380,8 @@ async function run() {
         expected,
         operationsSha256: hash(operations),
         namesSha256: hash(names),
+        recipeInputs,
+        ...(assertions ? { assertionsSha256: hash(assertions) } : {}),
         preview: requestedPreview,
         timeoutMs: duration(timeoutValue, 60000),
         previewTimeoutMs: duration(previewTimeoutValue, 180000),
@@ -386,6 +431,7 @@ async function run() {
         join(generation, 'expected-slide-names.json'),
         '--summary',
         '--render',
+        ...(config.assertionsSha256 ? ['--assert-text', join(generation, 'assertions.json')] : []),
       ]);
       phase = 'export';
       validatedSnapshot = await inspectSnapshot();

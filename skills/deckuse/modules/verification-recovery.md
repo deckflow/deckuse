@@ -73,3 +73,13 @@ Successful moves are listed in `cleanupRetirements` with both paths and a catego
 If release fails, keep the committed response and its cleanup warnings.
 Leave unknown or live locks in place. A claim left by interrupted stale-lock
 retirement can require host intervention, so preserve it and report the state.
+
+### Report replay
+
+`data.mutationState` describes the apply outcome independently of
+`data.reportStatus` (`written`, `reused`, `failed`). A report failure cannot undo
+committed content. On a receipt replay, Deckuse may reuse an existing report only
+when its request identity and committed result agree; unrelated files remain
+untouched. `data.reportWarnings` preserves the original report's cleanup evidence.
+A cleanup warning or an existing report is not evidence of a dry-run commit.
+Resolve missing results through request status rather than rerunning a shell block.

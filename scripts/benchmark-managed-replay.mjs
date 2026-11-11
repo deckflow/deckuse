@@ -15,7 +15,8 @@ const take = (name) => {
   return value;
 };
 const scenario = take('--scenario') ?? 'nine-slide';
-if (!['nine-slide', 'ten-slide'].includes(scenario)) throw Error('Unknown scenario');
+if (!['nine-slide', 'ten-slide', 'eleven-slide'].includes(scenario))
+  throw Error('Unknown scenario');
 const reference = take('--reference-cli');
 const [baseline, candidate, report, preview] = args;
 if (!baseline || !candidate || !report || (preview && preview !== '--preview'))
@@ -26,43 +27,54 @@ if (!baseline || !candidate || !report || (preview && preview !== '--preview'))
 const root = await mkdtemp(join(tmpdir(), 'deckuse-managed-replay-'));
 const input = join(root, 'create.json');
 const patch = join(root, 'patch.json');
-const pageCount = scenario === 'ten-slide' ? 10 : 9;
-const objectsPerPage = scenario === 'ten-slide' ? 26 : 21;
-const names = Array.from({ length: pageCount }, (_, i) => `Page ${i + 1}`);
+const pageCount = scenario === 'eleven-slide' ? 11 : scenario === 'ten-slide' ? 10 : 9;
+const objectsPerPage = scenario === 'eleven-slide' ? 18 : scenario === 'ten-slide' ? 26 : 21;
+const names = Array.from({ length: pageCount }, (_, i) =>
+  scenario === 'eleven-slide' && i === 0 ? 'Blank starter' : `Page ${i + 1}`,
+);
 const shapes = names.flatMap((slide, page) =>
-  Array.from({ length: objectsPerPage }, (_, i) => ({
-    type: 'addShape',
-    slide,
-    name: `Text-${i}`,
-    shapeType: 'text',
-    x: `${50 + (i % 3) * 400}px`,
-    y: `${60 + Math.floor(i / 3) * (pageCount === 10 ? 68 : 85)}px`,
-    width: '365px',
-    height: '52px',
-    blocks: [
-      {
-        text: `第 ${page + 1} 页 · 项目 ${i + 1} · Editable text`,
-        fontSize: 20,
-      },
-    ],
-  })),
+  Array.from(
+    { length: objectsPerPage + (scenario === 'eleven-slide' && page < 2 ? 1 : 0) },
+    (_, i) => ({
+      type: 'addShape',
+      slide,
+      name: `Text-${i}`,
+      shapeType: 'text',
+      x: `${50 + (i % 3) * 400}px`,
+      y: `${60 + Math.floor(i / 3) * (pageCount === 10 ? 68 : 85)}px`,
+      width: '365px',
+      height: '52px',
+      blocks: [
+        {
+          text: `第 ${page + 1} 页 · 项目 ${i + 1} · Editable text`,
+          fontSize: 20,
+        },
+      ],
+    }),
+  ),
 );
 const operations = [
-  ...names.map((name) => ({ type: 'addSlide', name, layout: 'Blank' })),
-  { type: 'remove', target: 'slide:1' },
+  ...(scenario === 'eleven-slide' ? names.slice(1) : names).map((name) => ({
+    type: 'addSlide',
+    name,
+    layout: 'Blank',
+  })),
+  ...(scenario === 'eleven-slide' ? [] : [{ type: 'remove', target: 'slide:1' }]),
   ...shapes,
 ];
 await writeFile(input, JSON.stringify(operations));
-await writeFile(
-  patch,
-  JSON.stringify([
-    {
-      type: 'setText',
-      target: 'slide:1/shape:Text-0',
-      value: '更新后的标题 · Revised title',
-    },
-  ]),
-);
+const changedPages = scenario === 'eleven-slide' ? [2, 4, 5, 6, 7, 8] : [1];
+const patches =
+  scenario === 'eleven-slide'
+    ? changedPages.flatMap((page, i) =>
+        Array.from({ length: [3, 6, 2, 1, 2, 2][i] }, (_, shape) => ({
+          type: 'replaceText',
+          find: `第 ${page} 页 · 项目 ${shape + 1} · Editable text`,
+          replace: `第 ${page} 页 · 项目 ${shape + 1} · Reviewed text`,
+        })),
+      )
+    : [{ type: 'setText', target: 'slide:1/shape:Text-0', value: '更新后的标题 · Revised title' }];
+await writeFile(patch, JSON.stringify(patches));
 
 const rows = [];
 for (let trial = 1; trial <= 3; trial++) {
@@ -148,8 +160,8 @@ for (let trial = 1; trial <= 3; trial++) {
         '2',
         '--summary',
       ]);
-      if (applied.revision !== '3' || applied.affectedSlides.join() !== '1')
-        throw new Error('Patch did not update only page 1');
+      if (applied.revision !== '3' || applied.affectedSlides.join() !== changedPages.join())
+        throw new Error('Patch did not update exactly the expected pages');
       run('validate-patch', ['validate', '--workspace', workspace], true);
       run('export-patch', ['export', output, '--workspace', workspace, '--from-package'], true);
       const sha256 = createHash('sha256')
@@ -175,8 +187,11 @@ for (let trial = 1; trial <= 3; trial++) {
           rendered.inputSha256 !== sha256 ||
           rendered.results.length !== pageCount ||
           rendered.results.some((page, i) => !page.ok || page.page !== i + 1) ||
-          rendered.results[0]?.reusedFromRevision ||
-          rendered.results.slice(1).some((page) => page.reusedFromRevision !== '2')
+          rendered.results.some((page) =>
+            changedPages.includes(page.page)
+              ? Boolean(page.reusedFromRevision)
+              : page.reusedFromRevision !== '2',
+          )
         )
           throw new Error('Incremental preview did not match the patched export');
         Object.assign(row, { outcome: 'preview-ready', contactSheet: rendered.contactSheet });
@@ -201,6 +216,60 @@ const summary = Object.fromEntries(
     return [label, { medianMs: elapsed[1], outcomes: trials.map((row) => row.outcome) }];
   }),
 );
+const verificationTrials = [];
+if (scenario === 'eleven-slide') {
+  const assertions = patches.slice(0, 5).flatMap((op) => [
+    { text: op.replace, count: 1 },
+    { text: op.find, count: 0 },
+  ]);
+  const assertionsFile = join(root, 'assertions.json');
+  await writeFile(assertionsFile, JSON.stringify(assertions));
+  for (let trial = 1; trial <= 3; trial++) {
+    for (const [label, executable] of [
+      ['baseline', baseline],
+      ['candidate', candidate],
+    ]) {
+      const workspace = join(root, `${label}-${trial}`);
+      const start = performance.now();
+      function query(argv) {
+        const result = spawnSync(
+          process.execPath,
+          [resolve(executable), ...argv, '--workspace', workspace, '--json'],
+          { encoding: 'utf8', timeout: 60000 },
+        );
+        if (result.error || result.status !== 0) throw Error(result.stderr || String(result.error));
+        const envelope = JSON.parse(result.stdout);
+        if (!envelope.ok) throw Error('Verification command failed');
+        return envelope.data;
+      }
+      if (label === 'baseline') {
+        for (const assertion of assertions) {
+          const result = query(['search', 'text', assertion.text]);
+          if (!Array.isArray(result.matches) || result.matches.length !== assertion.count)
+            throw Error('Baseline text assertion failed');
+        }
+      }
+      const result = query([
+        'validate',
+        '--expect-revision',
+        '3',
+        '--summary',
+        ...(label === 'candidate' ? ['--assert-text', assertionsFile] : []),
+      ]);
+      if (
+        result.valid !== true ||
+        (label === 'candidate' && result.textAssertions?.length !== assertions.length)
+      )
+        throw Error('Validation failed');
+      verificationTrials.push({
+        label,
+        trial,
+        calls: label === 'baseline' ? 11 : 1,
+        durationMs: performance.now() - start,
+      });
+    }
+  }
+}
 await writeFile(
   report,
   JSON.stringify(
@@ -212,6 +281,9 @@ await writeFile(
       condition: 'process-cold',
       operations: operations.length,
       shapes: shapes.length,
+      patchOperations: patches.length,
+      changedPages,
+      verificationTrials,
       summary,
       rows,
     },

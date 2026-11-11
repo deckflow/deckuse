@@ -108,6 +108,8 @@ export async function agentContext(options: {
       'setTableLayout',
       'xfrmSet',
     );
+  if (format === 'pptx' && !['audit', 'preview-export'].includes(scenario))
+    types.push('replaceText');
   const contracts = taskSchemas(types);
   const capabilities = format === 'pptx' ? pptxCapabilities : docxCapabilities;
   const identity = {
@@ -170,6 +172,23 @@ export async function agentContext(options: {
       fallback:
         'If agent-context is absent, use the skill from the same installed package and schema --list / schema --type; do not retry an unknown command indefinitely.',
     },
+    responseContracts: {
+      search: { matches: 'data.matches (array); data.items belongs to list, not search' },
+      apply: {
+        state: 'data.mutationState',
+        matches: 'data.matchSummary',
+        report: 'data.reportStatus; failed does not undo a committed mutation',
+      },
+      validate: {
+        valid: 'data.valid === true',
+        assertions: 'data.textAssertions; count is matching text objects, not occurrences',
+      },
+      schemaField: 'schema --type addShape --field blocks --json resolves nested definitions',
+      assertTextExample: [
+        { text: 'Final title', count: 1, slide: 1 },
+        { text: 'Old title', count: 0 },
+      ],
+    },
     conventions: {
       geometry: 'Explicit px/pt/cm/in/%; bare numbers are EMU',
       targets:
@@ -197,6 +216,8 @@ export async function agentContext(options: {
               resource: 'scripts/rebuild-generation.mjs',
               create:
                 'node <package>/scripts/rebuild-generation.mjs ./job ./ops.json ./expected-slide-names.json --preview',
+              patches:
+                'Append --patch ./patch.json for each ordered patch; inputs are saved and compiled into one guarded apply',
               resume:
                 'node <package>/scripts/rebuild-generation.mjs --resume <generation-directory>',
               cleanup:
