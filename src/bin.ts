@@ -55,8 +55,9 @@ const takeOption = (list: string[], name: string): string | undefined => {
   const i = list.indexOf(name);
   if (i < 0) return undefined;
   const value = list[i + 1];
-  list.splice(i, 2);
-  return value;
+  const hasValue = value !== undefined && !value.startsWith('--');
+  list.splice(i, hasValue ? 2 : 1);
+  return hasValue ? value : undefined;
 };
 
 const json = takeFlag(args, '--json');
@@ -64,6 +65,8 @@ const quiet = takeFlag(args, '--quiet');
 const dryRun = takeFlag(args, '--dry-run');
 const workspaceOpt = takeOption(args, '--workspace');
 const revisionOpt = takeOption(args, '--revision');
+const expectRevisionPresent = args.includes('--expect-revision');
+const revisionPresent = revisionOpt !== undefined || process.argv.includes('--revision');
 const expectRevisionOpt = takeOption(args, '--expect-revision');
 const reasonOpt = takeOption(args, '--reason');
 const requestIdPresent = args.includes('--request-id');
@@ -206,35 +209,6 @@ const outputEnvelope = (envelope: CommandEnvelope): void => {
 };
 
 const execute = async (commandLabel: string, command: unknown): Promise<boolean> => {
-  if (revisionOpt && typeof command === 'object' && command !== null) {
-    const type = (command as { type?: string }).type;
-    if (
-      type &&
-      ![
-        'status',
-        'list',
-        'get',
-        'inspect',
-        'search',
-        'find',
-        'query',
-        'getText',
-        'validate',
-        'history',
-        'export',
-      ].includes(type)
-    ) {
-      outputEnvelope({
-        ok: false,
-        command: commandLabel,
-        error: {
-          code: 'INVALID_COMMAND',
-          message: 'Write commands reject --revision; omit it or use a read command',
-        },
-      });
-      return false;
-    }
-  }
   const format =
     requestIdOpt && isRecord(command) && typeof command['workspaceId'] === 'string'
       ? (
@@ -590,6 +564,9 @@ const classifyApplyOps = (
 
 const main = async (): Promise<void> => {
   try {
+    if (expectRevisionPresent && !expectRevisionOpt?.trim())
+      throw new Error('--expect-revision requires a revision');
+    if (revisionPresent && !revisionOpt?.trim()) throw new Error('--revision requires a revision');
     if (
       requestIdPresent &&
       (!requestIdOpt?.trim() || requestIdOpt.startsWith('--') || requestIdOpt.length > 256)
@@ -598,6 +575,7 @@ const main = async (): Promise<void> => {
     if (reportPresent && (!reportOpt || reportOpt.startsWith('--')))
       throw new Error('--report requires a path');
     if (clean.length === 0) {
+      if (revisionOpt) throw new Error('--revision requires the export command');
       const payload = await readStdin();
       const parsed = JSON.parse(payload) as unknown;
       const ok = await execute('stdin', parsed);
@@ -612,6 +590,19 @@ const main = async (): Promise<void> => {
       }
 
       const action = requireDefined(clean[0]);
+      if (revisionOpt && action !== 'export') {
+        outputEnvelope({
+          ok: false,
+          command: `deckuse ${action}`,
+          error: {
+            code: 'UNSUPPORTED_CAPABILITY',
+            message: '--revision is only supported for export of the current revision.',
+            hint: 'Omit --revision to use the current workspace.',
+          },
+        });
+        process.exitCode = 1;
+        return;
+      }
       let ok = true;
       if (requestIdOpt !== undefined && !['apply', 'status'].includes(action))
         throw new Error('--request-id requires apply or status');
@@ -1414,32 +1405,51 @@ const main = async (): Promise<void> => {
           ...(requestIdOpt ? { requestId: requestIdOpt } : {}),
         };
         const runHighLevelBatch = async (list: unknown[]): Promise<boolean> => {
-          const commands = list.map((value) => {
+          const nested = list.flatMap((value) => {
             if (!isRecord(value)) throw new Error('apply input must contain command objects');
-            if (value['type'] === 'batch') return value;
-            if (!APPLY_WRITE_TYPES.has(String(value['type'])))
-              throw new Error(`apply input contains non-write command: ${String(value['type'])}`);
+            if (value['type'] !== 'batch') return [value];
+            if (value['dryRun'] === true && !dryRun) throw new Error('Pass --dry-run on the CLI');
+            if (!Array.isArray(value['commands'])) throw new Error('apply batch requires commands');
+            return value['commands'] as unknown[];
+          });
+          const controls = new Set([
+            'version',
+            'workspaceId',
+            'transactionId',
+            'expectRevision',
+            'dryRun',
+            'requestId',
+          ]);
+          const commands = nested.map((value) => {
+            if (!isRecord(value) || !APPLY_WRITE_TYPES.has(String(value['type'])))
+              throw new Error('apply input must contain supported write commands');
+            if (value['dryRun'] === true && !dryRun) throw new Error('Pass --dry-run on the CLI');
+            const guard = value['expectRevision'];
+            if (
+              guard !== undefined &&
+              ((typeof guard !== 'string' && typeof guard !== 'number') ||
+                String(guard) !== (extras.expectRevision ?? extras.transactionId))
+            )
+              throw new Error('Input expectRevision differs from the apply revision guard');
+            const operation = Object.fromEntries<unknown>(
+              Object.entries(value).filter(([key]) => !controls.has(key)),
+            );
             return {
+              ...operation,
               ...extras,
               ...(REVIEW_WRITES.has(String(value['type']))
                 ? { expectRevision: extras.expectRevision ?? extras.transactionId }
                 : {}),
-              ...value,
             };
           });
           const payload =
-            !requestIdOpt && commands.length === 1 && commands[0]?.['type'] !== 'batch'
+            !requestIdOpt &&
+            commands.length === 1 &&
+            list.length === 1 &&
+            isRecord(list[0]) &&
+            list[0]['type'] !== 'batch'
               ? commands[0]
-              : {
-                  ...extras,
-                  type: 'batch',
-                  atomic: true,
-                  commands: commands.flatMap((command) =>
-                    command['type'] === 'batch'
-                      ? (command as { commands: unknown[] }).commands
-                      : [command],
-                  ),
-                };
+              : { ...extras, type: 'batch', atomic: true, commands };
           return execute('deckuse apply', payload);
         };
 
@@ -1490,8 +1500,8 @@ const main = async (): Promise<void> => {
             : {}),
           ...(summaryOpt || reportOpt ? { summary: true } : {}),
           render: clean.includes('--render'),
-          package: clean.includes('--package'),
-          relationships: clean.includes('--relationships'),
+          ...(clean.includes('--package') ? { package: true } : {}),
+          ...(clean.includes('--relationships') ? { relationships: true } : {}),
           ...(optionFrom(clean, '--slide') ? { slide: Number(optionFrom(clean, '--slide')) } : {}),
         });
       } else if (action === 'history') {

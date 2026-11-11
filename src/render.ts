@@ -234,9 +234,9 @@ const renderPageSnapshot = async (
   batch?: {
     converted: Awaited<ReturnType<ConvertFn>>;
     directory: string;
-    slideIndex: number;
-    archive: OpcArchive;
-    index: IndexFile;
+    slideIndex?: number;
+    archive?: OpcArchive;
+    index?: IndexFile;
     sha: string;
   },
 ): Promise<RenderResult> => {
@@ -287,7 +287,7 @@ const renderPageSnapshot = async (
 
   const diagnostics =
     snapshot === PACKAGE_PPTX
-      ? batch
+      ? batch?.archive
         ? auditVisuals(batch.archive, page, batch.index).diagnostics
         : await inspectChartRenderFidelity(absoluteWorkspace, page)
       : [];
@@ -329,7 +329,7 @@ const renderPageSnapshot = async (
       screenshot({
         indexHtmlPath,
         outputPath: output,
-        ...(batch ? { slideIndex: batch.slideIndex } : {}),
+        ...(batch?.slideIndex === undefined ? {} : { slideIndex: batch.slideIndex }),
         ...(snapshot === 'package.docx' ? { documentPage: page } : {}),
         ...(options.scale !== undefined ? { scale: options.scale } : {}),
       }),
@@ -671,36 +671,61 @@ export async function renderPages(
     const outputDir = resolve(options.outputDir ?? join(root, '.deckuse/render'));
     let count: number;
     let archive: OpcArchive | undefined;
+    let documentBatch:
+      { converted: Awaited<ReturnType<ConvertFn>>; directory: string; sha: string } | undefined;
+    let documentPage: Page | undefined;
     if (options.sinceRevision && manifest.format !== 'pptx')
       throw new Error('--since-revision requires a PPTX workspace');
     if (manifest.format === 'docx') {
-      // Word's page count is determined by deck2html's browser pagination.
-      if (!options.all) {
-        count = Number.MAX_SAFE_INTEGER;
-      } else {
-        const htmlDir = join(staging, 'document-html');
-        await mkdir(htmlDir);
-        if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
-        const converted = await (options.dependencies?.convert ?? convertWithConfiguredBinary)(
-          join(staging, 'package.docx'),
-          { output: htmlDir },
+      if (options.contactSheet || options.reviewNotes)
+        throw new Error('Contact sheets and review notes require PPTX');
+      const directory = join(staging, 'document-html');
+      await mkdir(directory);
+      if (!options.dependencies?.convert) await ensureDeck2HtmlExecutable();
+      try {
+        const converted = await timed('convert', () =>
+          (options.dependencies?.convert ?? convertWithConfiguredBinary)(
+            join(staging, 'package.docx'),
+            { output: directory },
+          ),
         );
         if (converted.exitCode !== 0)
           throw converterFailure(converted.stderr || 'deck2html conversion failed');
         const entry = resolve(converted.indexHtmlPath);
-        const entryRelative = relative(htmlDir, entry);
+        const entryRelative = relative(directory, entry);
         if (entryRelative === '..' || entryRelative.startsWith(`..${sep}`))
           throw new Error('deck2html returned an output outside the staging directory');
-        browser = await launchRenderBrowser();
-        const page = await browser.newPage({ viewport: DEFAULT_VIEWPORT });
-        try {
-          await page.goto(pathToFileURL(entry).href, { waitUntil: 'networkidle', timeout: 60_000 });
-          await prepareDocumentPage(page);
-          count = await page.locator(DOCUMENT_PAGE_SELECTOR).count();
-        } finally {
-          await page.close();
+        documentBatch = { converted, directory, sha };
+        count = Number.MAX_SAFE_INTEGER;
+        if (options.all || !options.dependencies?.screenshot) {
+          browser = await launchRenderBrowser();
+          documentPage = await browser.newPage({
+            viewport: DEFAULT_VIEWPORT,
+            deviceScaleFactor: options.scale ?? 1,
+          });
+          await documentPage.goto(pathToFileURL(entry).href, {
+            waitUntil: 'networkidle',
+            timeout: 60_000,
+          });
+          await prepareDocumentPage(documentPage);
+          if (options.all) {
+            count = await documentPage.locator(DOCUMENT_PAGE_SELECTOR).count();
+            if (!count) throw new Error('No document pages found');
+          }
         }
-        if (count === 0) throw new Error('No document pages found');
+      } catch (cause) {
+        if (
+          options.all ||
+          (cause instanceof RenderFailure && cause.code === 'RENDER_CONVERTER_EXTRACTION_FAILED')
+        )
+          throw cause;
+        return {
+          ok: false,
+          engine: 'html',
+          revision: manifest.revision,
+          inputSha256: sha,
+          results: [...new Set(options.pages)].map((page) => renderPageError(page, cause)),
+        };
       }
     } else {
       archive = await OpcArchive.openFile(join(staging, 'package.pptx'));
@@ -865,27 +890,32 @@ export async function renderPages(
         ...(contactSheet ? { contactSheet } : {}),
       };
     }
-    if (options.contactSheet || options.reviewNotes)
-      throw new Error('Contact sheets and review notes require PPTX');
-    if (!options.dependencies?.screenshot && !browser) browser = await launchRenderBrowser();
-    const shared = browser;
+    const sharedPage = documentPage;
     const results: RenderPageOutcome[] = [];
     for (const page of pages) {
       try {
-        const result = await renderPageSnapshot(staging, {
-          page,
-          output: join(outputDir, `page-${String(page)}.png`),
-          scale: options.scale,
-          dependencies: {
-            ...options.dependencies,
-            screenshot:
-              options.dependencies?.screenshot ??
-              (async (opts) => {
-                if (!shared) throw new Error('Browser unavailable');
-                return await screenshotWithBrowser(shared, opts);
-              }),
+        const result = await renderPageSnapshot(
+          staging,
+          {
+            page,
+            output: join(outputDir, `page-${String(page)}.png`),
+            scale: options.scale,
+            dependencies: {
+              ...options.dependencies,
+              screenshot:
+                options.dependencies?.screenshot ??
+                (async ({ outputPath }) => {
+                  if (!sharedPage) throw new Error('Document render page unavailable');
+                  const elements = sharedPage.locator(DOCUMENT_PAGE_SELECTOR);
+                  if (page > (await elements.count()))
+                    throw new Error('Requested page does not exist');
+                  await elements.nth(page - 1).screenshot({ path: outputPath, type: 'png' });
+                  return { browserText: await sharedPage.locator('body').innerText() };
+                }),
+            },
           },
-        });
+          requireDefined(documentBatch),
+        );
         results.push({
           page,
           ok: true,

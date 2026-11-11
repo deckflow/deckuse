@@ -1,3 +1,4 @@
+import { reserveUndoRevision } from '../workspace/revision.js';
 import { retireOwnedPath, warnCleanup } from '../workspace/cleanup.js';
 import { writeApplyReceipt, type ApplyReceipt } from '../workspace/receipts.js';
 import { timed } from '../timing.js';
@@ -20,6 +21,7 @@ import {
   writeMetadata,
   writeOperations,
 } from '../workspace/index.js';
+import { buildIndex } from './indexer.js';
 import { loadIndex } from './index-sync.js';
 import type { IndexFile } from './types.js';
 
@@ -100,7 +102,15 @@ const packPackage = async (
   manifest: WorkspaceManifest,
 ): Promise<WorkspaceManifest> => {
   const path = packagePath(workspace);
-  const { checksum } = await timed('pack', () => snapshotArchive(archive, path));
+  const { checksum } = await timed('pack', () =>
+    snapshotArchive(archive, path, async (staging) => {
+      try {
+        await retireOwnedPath(workspace, staging, false, 'package-staging');
+      } catch (cause) {
+        warnCleanup('PACKAGE_STAGING_CLEANUP_FAILED', staging, cause);
+      }
+    }),
+  );
   const withFiles: WorkspaceManifest = {
     ...manifest,
     files: [
@@ -123,7 +133,7 @@ export async function repackWorkspace(workspace: string): Promise<{
   return withWriteLock(root, async () => {
     const manifest = await readManifest(root);
     const archive = await OpcArchive.openDirectory(sourceDir(root));
-    const index = await loadIndex(root, archive, manifest, { persist: true });
+    const index = buildIndex(archive, manifest.workspaceId, manifest.revision);
     const packed = await packPackage(root, archive, {
       ...manifest,
       updatedAt: new Date().toISOString(),
@@ -179,51 +189,55 @@ export async function persistWrite(
   const rev = index.revision;
   const source = sourceDir(root);
   const sourceTmp = `${source}.${randomUUID()}.tmp`;
-  return withWorkspaceTransaction(root, async (transactionId, prepareCommit, journal) => {
-    let ownsStaging = false;
-    try {
-      await mkdir(sourceTmp);
-      ownsStaging = true;
-      await archive.writeDirectoryContents(sourceTmp);
-      await timed('source-swap', async () => {
-        // Keep the outgoing source inside the journal until the commit is durable.
-        await rename(source, join(journal, 'retired-source'));
-        await rename(sourceTmp, source);
-        ownsStaging = false;
-      });
-      const next: WorkspaceManifest = {
-        ...manifest,
-        revision: rev,
-        updatedAt: new Date().toISOString(),
-      };
-      const packed = await packPackage(root, archive, next);
-      await writeMetadata(root, packed, index);
-      if (receipt) await writeApplyReceipt(root, { ...receipt, commitToken: transactionId });
-      await appendOperationCommit(
-        root,
-        {
-          at: new Date().toISOString(),
+  return withWorkspaceTransaction(
+    root,
+    async (transactionId, prepareCommit, journal) => {
+      let ownsStaging = false;
+      try {
+        await mkdir(sourceTmp);
+        ownsStaging = true;
+        await archive.writeDirectoryContents(sourceTmp);
+        await timed('source-swap', async () => {
+          // Keep the outgoing source inside the journal until the commit is durable.
+          await rename(source, join(journal, 'retired-source'));
+          await rename(sourceTmp, source);
+          ownsStaging = false;
+        });
+        const next: WorkspaceManifest = {
+          ...manifest,
           revision: rev,
-          operation,
-          commitToken: transactionId,
-          changedParts,
-          slides: [...new Set(slides)].sort((a, b) => a - b),
-        },
-        transactionId,
-        prepareCommit,
-      );
-      return packed;
-    } catch (error) {
-      if (ownsStaging) {
-        try {
-          await retireOwnedPath(root, sourceTmp, true, 'source-staging');
-        } catch (cause) {
-          warnCleanup('SOURCE_STAGING_CLEANUP_FAILED', sourceTmp, cause);
+          updatedAt: new Date().toISOString(),
+        };
+        const packed = await packPackage(root, archive, next);
+        await writeMetadata(root, packed, index);
+        if (receipt) await writeApplyReceipt(root, { ...receipt, commitToken: transactionId });
+        await appendOperationCommit(
+          root,
+          {
+            at: new Date().toISOString(),
+            revision: rev,
+            operation,
+            commitToken: transactionId,
+            changedParts,
+            slides: [...new Set(slides)].sort((a, b) => a - b),
+          },
+          transactionId,
+          prepareCommit,
+        );
+        return packed;
+      } catch (error) {
+        if (ownsStaging) {
+          try {
+            await retireOwnedPath(root, sourceTmp, true, 'source-staging');
+          } catch (cause) {
+            warnCleanup('SOURCE_STAGING_CLEANUP_FAILED', sourceTmp, cause);
+          }
         }
+        throw error;
       }
-      throw error;
-    }
-  });
+    },
+    { sourceSwap: true },
+  );
 }
 
 export async function undoWrites(
@@ -237,6 +251,7 @@ export async function undoWrites(
       `Cannot undo ${String(steps)} step(s); only ${String(records.length)} available`,
     );
   return withWorkspaceTransaction(root, async (_id, prepareCommit, _directory, prepareRewind) => {
+    await reserveUndoRevision(root, (await readManifest(root)).revision);
     await resetGit(root, steps, prepareRewind);
     const manifest = await readManifest(root);
     const archive = await OpcArchive.openDirectory(sourceDir(root));

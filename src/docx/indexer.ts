@@ -406,64 +406,63 @@ export const locate = (
 
 export const findIndexed = (
   index: IndexFile,
-  ref: { elementId?: string | undefined; path?: string | undefined },
+  ref: import('../core/schema.js').ElementRef,
 ): IndexedElement | undefined =>
   index.elements.find(
     (item) =>
-      (ref.elementId !== undefined && item.ref.elementId === ref.elementId) ||
-      (ref.path !== undefined && item.ref.path === ref.path),
+      item.ref.documentId === ref.documentId &&
+      (ref.elementId === undefined || item.ref.elementId === ref.elementId) &&
+      (ref.path === undefined || item.ref.path === ref.path),
   );
 
-export function matchesSelector(
-  item: IndexedElement,
-  selector:
-    | string
-    | {
-        kind?: string | undefined;
-        name?: string | undefined;
-        text?: string | undefined;
-        textRegex?: string | undefined;
-        id?: string | undefined;
-        hasText?: boolean | undefined;
-      },
-): boolean {
-  if (typeof selector === 'string' && (selector === '*' || selector === 'all')) return true;
+export function docxSelector(
+  selector: import('../core/schema.js').Selector,
+): (item: IndexedElement) => boolean {
+  if (selector === '*' || selector === 'all') return () => true;
   if (typeof selector === 'string' && !selector.includes('=')) {
     const needle = selector.toLowerCase();
-    return (
+    return (item) =>
       item.ref.path === selector ||
       item.kind === selector ||
       (item.text?.toLowerCase().includes(needle) ?? false) ||
-      (item.name?.toLowerCase().includes(needle) ?? false)
-    );
+      (item.name?.toLowerCase().includes(needle) ?? false);
   }
-  const spec: {
-    kind?: string | undefined;
-    name?: string | undefined;
-    text?: string | undefined;
-    textRegex?: string | undefined;
-    id?: string | undefined;
-    hasText?: boolean | string | undefined;
-  } =
+  const spec =
     typeof selector === 'string'
-      ? Object.fromEntries(
-          selector.split(/\s+/).map((part) => {
-            const indexOfEq = part.indexOf('=');
-            return [part.slice(0, indexOfEq), part.slice(indexOfEq + 1)];
-          }),
+      ? Object.fromEntries<string | boolean>(
+          selector
+            .trim()
+            .split(/\s+/)
+            .map((term) => {
+              const [, key, value] = /^([^=]+)=(.+)$/.exec(term) ?? [];
+              if (!key || value === undefined)
+                throw new Error(`Invalid DOCX selector term: ${term}`);
+              if (key === 'hasText') {
+                if (value !== 'true' && value !== 'false')
+                  throw new Error('hasText must be true or false');
+                return [key, value === 'true'];
+              }
+              return [key, value];
+            }),
         )
       : selector;
-  if (spec.kind && spec.kind !== item.kind) return false;
-  if (spec.name && item.name !== spec.name) return false;
-  if (spec.id && item.payload?.['paraId'] !== spec.id && item.ref.elementId !== spec.id)
-    return false;
-  if (spec.text && !(item.text?.toLowerCase().includes(spec.text.toLowerCase()) ?? false))
-    return false;
-  if (spec.textRegex) {
-    const regex = new RegExp(spec.textRegex, 'i');
-    if (!regex.test(item.text ?? '')) return false;
-  }
-  if (spec.hasText === true && !(item.text && item.text.length > 0)) return false;
-  if (spec.hasText === false && item.text && item.text.length > 0) return false;
-  return true;
+  for (const key of Object.keys(spec))
+    if (!['kind', 'name', 'id', 'text', 'textRegex', 'hasText'].includes(key))
+      throw new Error(`Unsupported DOCX selector key: ${key}`);
+  const { kind, name, id, text, textRegex, hasText } = spec as {
+    kind?: string;
+    name?: string;
+    id?: string;
+    text?: string;
+    textRegex?: string;
+    hasText?: boolean;
+  };
+  const regex = textRegex === undefined ? undefined : new RegExp(textRegex, 'i');
+  return (item) =>
+    (kind === undefined || kind === item.kind) &&
+    (name === undefined || name === item.name) &&
+    (id === undefined || id === item.ref.elementId || id === item.payload?.['paraId']) &&
+    (text === undefined || (item.text?.toLowerCase().includes(text.toLowerCase()) ?? false)) &&
+    (regex === undefined || regex.test(item.text ?? '')) &&
+    (hasText === undefined || hasText === Boolean(item.text?.length));
 }

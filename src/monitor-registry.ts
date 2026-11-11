@@ -141,15 +141,8 @@ export async function processLooksLikeMonitorDaemon(
   const hasWorker = cmdline.includes('--daemon-worker');
   if (!hasMonitor || !hasWorker) return false;
   if (workspace) {
-    const abs = resolve(workspace);
-    // Require workspace path somewhere in argv when we know it.
-    if (!cmdline.includes(abs) && !cmdline.includes(workspace)) {
-      // Still accept if --workspace flag present but path differs only by trailing slash noise;
-      // otherwise treat as not our monitor (PID reuse / wrong process).
-      const wsMatch = /--workspace\s+(\S+)/.exec(cmdline);
-      if (!wsMatch?.[1]) return false;
-      if (resolve(wsMatch[1]) !== abs) return false;
-    }
+    const parsed = monitorWorkerArguments(cmdline);
+    return parsed ? resolve(parsed.workspace) === resolve(workspace) : null;
   }
   return true;
 }
@@ -159,6 +152,15 @@ export interface DiscoveredMonitor {
   readonly workspace: string;
   readonly host?: string;
   readonly port?: number;
+}
+
+function monitorWorkerArguments(command: string) {
+  const match =
+    /\bmonitor\s+--daemon-worker\s+--workspace\s+(.+)\s+--host\s+(\S+)\s+--port\s+(\d+)$/.exec(
+      command,
+    );
+  if (!match?.[1] || !match[2] || !match[3]) return undefined;
+  return { workspace: resolve(match[1]), host: match[2], port: Number(match[3]) };
 }
 
 /** Parse `ps` output for detached monitor workers (darwin/linux). */
@@ -189,18 +191,8 @@ export async function discoverMonitorsFromProcessTable(): Promise<DiscoveredMoni
     const cmd = pidMatch[2] ?? '';
     if (!Number.isInteger(pid) || pid <= 0) continue;
 
-    const wsMatch = /--workspace(?:\s+|=)(\S+)/.exec(cmd);
-    if (!wsMatch?.[1]) continue;
-    const workspace = resolve(wsMatch[1]);
-
-    const hostMatch = /--host(?:\s+|=)(\S+)/.exec(cmd);
-    const portMatch = /--port(?:\s+|=)(\d+)/.exec(cmd);
-    found.push({
-      pid,
-      workspace,
-      ...(hostMatch?.[1] ? { host: hostMatch[1] } : {}),
-      ...(portMatch?.[1] ? { port: Number(portMatch[1]) } : {}),
-    });
+    const args = monitorWorkerArguments(cmd);
+    if (args) found.push({ pid, ...args });
   }
   return found;
 }

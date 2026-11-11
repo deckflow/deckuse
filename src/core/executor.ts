@@ -63,13 +63,15 @@ export class Executor {
       if (result.ok) this.#workspaceAdapters.set(command.workspaceId, adapter);
       return result;
     }
-    const adapter =
-      this.#workspaceAdapters.get(command.workspaceId) ??
-      (await this.options.resolveAdapter?.(command.workspaceId, this.options.context ?? {}));
-    if (adapter) this.#workspaceAdapters.set(command.workspaceId, adapter);
-    if (!adapter)
-      return err('WORKSPACE_NOT_FOUND', `Workspace is not initialized: ${command.workspaceId}`);
-    return this.#safely(() => adapter.execute(command, this.options.context ?? {}));
+    return this.#safely(async () => {
+      const adapter =
+        this.#workspaceAdapters.get(command.workspaceId) ??
+        (await this.options.resolveAdapter?.(command.workspaceId, this.options.context ?? {}));
+      if (adapter) this.#workspaceAdapters.set(command.workspaceId, adapter);
+      if (!adapter)
+        return err('WORKSPACE_NOT_FOUND', `Workspace is not initialized: ${command.workspaceId}`);
+      return adapter.execute(command, this.options.context ?? {});
+    });
   }
   async #safely(operation: () => Promise<Result<unknown>>): Promise<Result<unknown>> {
     try {
@@ -81,6 +83,7 @@ export class Executor {
           cause.message,
           [],
           {
+            hint: 'Use deckuse status --read-only to inspect workspace and lock state before retrying.',
             details: { stage: `lock-${cause.stage}`, path: cause.path, retryable: false },
           },
         );

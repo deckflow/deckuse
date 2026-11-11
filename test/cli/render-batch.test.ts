@@ -57,4 +57,41 @@ describe('batch render snapshot', () => {
     expect(result.results[0].result?.inputSha256).toBe(result.inputSha256);
     expect(await readFile(join(root, '.deckuse/render/page-1.png'), 'utf8')).toBe('png');
   });
+  it('converts explicit DOCX pages once and keeps independent screenshot failures', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-word-batch-'));
+    expect(
+      (
+        await runCommand({
+          version: '2.0',
+          type: 'init',
+          workspaceId: root,
+          format: 'docx',
+          source: resolve('assets/default.docx'),
+        })
+      ).ok,
+    ).toBe(true);
+    const converted: string[] = [];
+    const screenshots: (number | undefined)[] = [];
+    const result = await renderPages(root, {
+      pages: [1, 2, 3],
+      dependencies: {
+        convert: async (input, options) => {
+          converted.push(input);
+          const indexHtmlPath = join(options.output, 'index.html');
+          await writeFile(indexHtmlPath, '<html/>');
+          return { exitCode: 0, stderr: '', stdout: '', indexHtmlPath };
+        },
+        screenshot: async ({ indexHtmlPath, outputPath, documentPage }) => {
+          screenshots.push(documentPage);
+          expect(await readFile(indexHtmlPath, 'utf8')).toBe('<html/>');
+          if (documentPage === 2) throw new Error('Failed page 2');
+          await writeFile(outputPath, 'png');
+        },
+      },
+    });
+    expect(converted).toHaveLength(1);
+    expect(screenshots).toEqual([1, 2, 3]);
+    expect(result.results.map((page) => page.ok)).toEqual([true, false, true]);
+    expect(result.results[2]?.result?.inputSha256).toBe(result.inputSha256);
+  });
 });

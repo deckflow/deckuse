@@ -1,3 +1,4 @@
+import { isWorkspaceExportPathProtected } from '../workspace/export-path.js';
 import fs from 'node:fs';
 import { resolveRef } from 'isomorphic-git';
 import { managedRetirement, retireOwnedPath } from '../workspace/cleanup.js';
@@ -38,7 +39,7 @@ import {
   type WorkspaceManifest,
 } from '../core/index.js';
 import { OpcArchive } from '../opc/index.js';
-import { isIntegerRevision, nextRevision } from '../workspace/index.js';
+import { isIntegerRevision, nextWorkspaceRevision } from '../workspace/revision.js';
 import { rankFind } from '../find/rank.js';
 import { cNvPrIdOf, resolveTarget, targetPathForItem, uidForItem } from './addressing.js';
 import { collectPptxFindCandidates } from './find-candidates.js';
@@ -881,11 +882,34 @@ export const pptxAdapter: FormatAdapter = {
         cause instanceof Error ? cause.message : 'Workspace unavailable',
       );
     }
-    return withWriteLock(workspace, async () => {
+    const local = await withWriteLock(workspace, async () => {
       try {
         await recoverTransaction(workspace, {
           allowCommittedCleanupFailure: command.type === 'status' && Boolean(command.requestId),
         });
+        const manifest = await timed('revision-load', () => readManifest(workspace));
+        if ((manifest.schemaVersion as string) !== '2.0' || !isIntegerRevision(manifest.revision)) {
+          if (command.type === 'status') {
+            return ok({
+              workspaceId: workspace,
+              format: manifest.format,
+              revision: manifest.revision,
+              schemaVersion: manifest.schemaVersion,
+              compatible: false,
+              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
+              capabilities: manifest.metadata?.['capabilities'],
+            });
+          }
+          return err(
+            'UNSUPPORTED_VERSION',
+            'Workspace manifest is incompatible with protocol 2.0.',
+            [],
+            {
+              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
+            },
+          );
+        }
+
         if (command.type === 'undo') {
           return await withWriteLock(workspace, async () => {
             try {
@@ -932,15 +956,7 @@ export const pptxAdapter: FormatAdapter = {
           });
         }
         if (command.type === 'history') {
-          const { records, total } = await readHistory(workspace, command.limit, command.offset);
-          const filtered =
-            command.slide !== undefined
-              ? records.filter((record) => record.slides.includes(requireDefined(command.slide)))
-              : records;
-          return ok({
-            records: filtered,
-            total: command.slide !== undefined ? filtered.length : total,
-          });
+          return ok(await readHistory(workspace, command.limit, command.offset, command.slide));
         }
 
         if (command.type === 'preflightChartData') {
@@ -985,20 +1001,6 @@ export const pptxAdapter: FormatAdapter = {
                   reason: cause instanceof Error ? cause.message : String(cause),
                 },
               ],
-            });
-          }
-        }
-        const manifest = await timed('revision-load', () => readManifest(workspace));
-        if ((manifest.schemaVersion as string) !== '2.0' || !isIntegerRevision(manifest.revision)) {
-          if (command.type === 'status') {
-            return ok({
-              workspaceId: workspace,
-              format: manifest.format,
-              revision: manifest.revision,
-              schemaVersion: manifest.schemaVersion,
-              compatible: false,
-              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
-              capabilities: manifest.metadata?.['capabilities'],
             });
           }
         }
@@ -1088,12 +1090,15 @@ export const pptxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'find') {
-          return await rankFind({
-            candidates: collectPptxFindCandidates(index, command),
-            query: command.query,
-            limit: command.limit,
-            model: command.model,
-          });
+          return {
+            find: {
+              candidates: collectPptxFindCandidates(index, command),
+              query: command.query,
+              limit: command.limit,
+              model: command.model,
+            },
+            findRevision: manifest.revision,
+          };
         }
 
         if (command.type === 'inspect') {
@@ -1178,6 +1183,16 @@ export const pptxAdapter: FormatAdapter = {
         }
 
         if (command.type === 'validate') {
+          if (
+            command.level === 'fast' ||
+            command.package === false ||
+            command.relationships === false ||
+            command.ids !== undefined
+          )
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              'Validation supports full package and relationship checks. Omit unsupported overrides.',
+            );
           const expectedNames = command.expectedSlideNames;
           if (command.expectRevision && command.expectRevision !== manifest.revision)
             return err(
@@ -1296,6 +1311,15 @@ export const pptxAdapter: FormatAdapter = {
               { hint: 'Omit --revision to export the current workspace package.' },
             );
           const output = resolve(command.output);
+          if (await isWorkspaceExportPathProtected(workspace, output))
+            return err(
+              'INVALID_COMMAND',
+              'Export destination overlaps workspace source or metadata.',
+              [],
+              {
+                hint: 'Choose a deliverable path outside the workspace source and metadata directories.',
+              },
+            );
           const fromPackage = command.fromPackage === true;
           let repacked = false;
           let exportRevision = manifest.revision;
@@ -1447,7 +1471,7 @@ export const pptxAdapter: FormatAdapter = {
                 revision: currentManifest.revision,
                 changedParts,
               });
-            const rev = nextRevision(currentManifest.revision);
+            const rev = await nextWorkspaceRevision(workspace, currentManifest.revision);
             const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
             const saved = await persistWrite(
               workspace,
@@ -1682,7 +1706,9 @@ export const pptxAdapter: FormatAdapter = {
               );
             const noOp = changedParts.length === 0;
             const rev =
-              dryRun || noOp ? currentManifest.revision : nextRevision(currentManifest.revision);
+              dryRun || noOp
+                ? currentManifest.revision
+                : await nextWorkspaceRevision(workspace, currentManifest.revision);
             const value = {
               results,
               revision: rev,
@@ -1799,7 +1825,7 @@ export const pptxAdapter: FormatAdapter = {
               },
               result.diagnostics,
             );
-          const rev = nextRevision(currentManifest.revision);
+          const rev = await nextWorkspaceRevision(workspace, currentManifest.revision);
           const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
           const saved = await persistWrite(
             workspace,
@@ -1848,5 +1874,12 @@ export const pptxAdapter: FormatAdapter = {
         );
       }
     });
+    if ('find' in local) {
+      const ranked = await rankFind(local.find);
+      return ranked.ok
+        ? ok({ ...ranked.value, revision: local.findRevision }, ranked.diagnostics)
+        : ranked;
+    }
+    return local;
   },
 };

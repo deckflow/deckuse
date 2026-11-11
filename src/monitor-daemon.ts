@@ -129,20 +129,14 @@ export async function monitorStatusAll(): Promise<{ monitors: MonitorStatusEntry
     });
   }
 
+  const registeredPids = new Set([...byWorkspace.values()].map((entry) => entry.pid));
   for (const disc of await discoverMonitorsFromProcessTable()) {
+    if (registeredPids.has(disc.pid)) continue;
     const ws = resolve(disc.workspace);
-    const existing = byWorkspace.get(ws);
-    if (existing?.pid === disc.pid) continue;
-    const host = disc.host ?? existing?.host ?? '127.0.0.1';
-    const port = disc.port ?? existing?.port ?? 4173;
-    byWorkspace.set(ws, {
-      pid: disc.pid,
-      host,
-      port,
-      url: existing?.url ?? displayUrl(host, port),
-      workspace: ws,
-      startedAt: existing?.startedAt ?? new Date().toISOString(),
-    });
+    const local = await readDaemonMeta(ws);
+    if (local?.pid !== disc.pid || resolve(local.workspace) !== ws || local.port <= 0) continue;
+    byWorkspace.set(ws, { ...local, workspace: ws });
+    registeredPids.add(disc.pid);
   }
 
   const monitors: MonitorStatusEntry[] = [];

@@ -213,7 +213,7 @@ describe('deckuse CLI', () => {
     expect(findHelp.stdout).toContain('api.typesafe.ai');
   }, 15000);
 
-  it('allows find --revision and reports a missing TypeSafe key', async () => {
+  it('rejects find --revision before querying TypeSafe', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-find-cli-'));
     const source = join(root, 'in.pptx');
     const workspace = join(root, 'ws');
@@ -244,14 +244,13 @@ describe('deckuse CLI', () => {
         child.on('close', (code) => done({ code, stdout, stderr }));
       },
     );
-    expect(found.stdout).not.toContain('Write commands reject --revision');
     const envelope = JSON.parse(found.stdout) as {
       ok: boolean;
       error?: { code?: string; hint?: string };
     };
     expect(envelope.ok).toBe(false);
-    expect(envelope.error?.code).toBe('UPSTREAM_ERROR');
-    expect(envelope.error?.hint).toContain('TYPESAFE_API_KEY');
+    expect(envelope.error?.code).toBe('UNSUPPORTED_CAPABILITY');
+    expect(envelope.error?.hint).toContain('current workspace');
     expect(found.code).toBe(1);
   });
 

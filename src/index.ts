@@ -6,7 +6,7 @@ import {
 } from './workspace/cleanup.js';
 import type { Diagnostic } from './core/index.js';
 import { initializationState } from './workspace/initialize.js';
-import { withWriteLock } from './workspace/lock.js';
+import { withWriteLock, WorkspaceLockError } from './workspace/lock.js';
 import { recoverTransaction } from './workspace/transaction.js';
 import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -44,6 +44,7 @@ export const createDefaultExecutor = (): Executor =>
                 .get(manifest.format)
             : undefined;
         } catch (cause) {
+          if (cause instanceof WorkspaceLockError) throw cause;
           if (cause instanceof Error && cause.name === 'RecoveryRequiredError') return pptxAdapter;
           return undefined;
         }
