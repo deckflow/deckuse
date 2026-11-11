@@ -63,8 +63,8 @@ Keep the same output directory to reuse unchanged pages. Review newly rendered p
 
 Use a revision-guarded patch for local changes. For a full replacement, run
 `node <installed-package>/scripts/rebuild-generation.mjs ./job ./ops.json
-./expected-slide-names.json`. The output root must exist. If the host permits
-internal retirement moves, explicitly select `DECKUSE_CLEANUP_MODE=retire`. Each run creates a separate generation with its own
+./expected-slide-names.json`. The output root must exist. Each run creates a
+separate generation with its own
 workspace, exported PPTX and reports. Add `--preview` to render into that
 generation's preview directory and check the page inventory against the export.
 A failed generation leaves all earlier workspaces and deliverables intact. The runner writes `run.json` and separate process results. Treat `preview-ready` as screenshots available for review and `preview-blocked` as structural delivery with visual review outstanding. After an error marked `retryable: false`, stop preview attempts until the host configuration changes.
@@ -74,7 +74,7 @@ A failed generation leaves all earlier workspaces and deliverables intact. The r
 Once operations and ordered unique slide names are saved, prefer the installed
 `scripts/rebuild-generation.mjs` runner for new presentations as well as full
 replacements. Create the output root once, then run the documented command above.
-Set `DECKUSE_CLEANUP_MODE=retire` only when the host permits these internal moves.
+Workspace cleanup moves owned artifacts into `.deckuse-trash/` by default.
 Use `--resume <generation-directory>` after correcting a failed environment phase;
 it checks saved inputs, live revision, receipt and artifact digests before continuing.
 Do not clear host-injected `NODE_OPTIONS`, delete locks, repeat writes after an

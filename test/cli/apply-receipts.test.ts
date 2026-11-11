@@ -122,15 +122,16 @@ it.each([false, true])(
       import fs from 'node:fs';
       import { syncBuiltinESMExports } from 'node:module';
       const write = fs.promises.writeFile;
-      const remove = fs.promises.rm;
+      const rename = fs.promises.rename;
+      delete process.env.DECKUSE_CLEANUP_MODE;
       fs.promises.writeFile = async (path, ...args) => {
         const value = await write(path, ...args);
         if (!${committed} && String(path).includes('/.deckuse/receipts/')) process.exit(19);
         return value;
       };
-      fs.promises.rm = async (path, ...args) => {
+      fs.promises.rename = async (path, ...args) => {
         if (${committed} && String(path).endsWith('/.deckuse/transaction')) process.exit(19);
-        return remove(path, ...args);
+        return rename(path, ...args);
       };
       syncBuiltinESMExports();
     `,
@@ -154,12 +155,13 @@ it.each([false, true])(
           `
           import fs from 'node:fs';
           import { syncBuiltinESMExports } from 'node:module';
-          const remove = fs.promises.rm;
-          fs.promises.rm = async (path, ...args) => {
+          const rename = fs.promises.rename;
+          delete process.env.DECKUSE_CLEANUP_MODE;
+          fs.promises.rename = async (path, ...args) => {
             if (String(path).endsWith('/.deckuse/transaction')) {
               throw Object.assign(new Error('Injected cleanup denial'), { code: 'EACCES' });
             }
-            return remove(path, ...args);
+            return rename(path, ...args);
           };
           syncBuiltinESMExports();
         `,
@@ -294,7 +296,8 @@ it.each(['lock', 'journal', 'retirement'])(
     import fs from 'node:fs';
     import { syncBuiltinESMExports } from 'node:module';
     const mode = ${JSON.stringify(mode)};
-    if (mode === 'retirement') process.env.DECKUSE_CLEANUP_MODE = 'retire';
+    if (mode === 'retirement') delete process.env.DECKUSE_CLEANUP_MODE;
+    else process.env.DECKUSE_CLEANUP_MODE = 'delete';
     const rm = fs.promises.rm, rename = fs.promises.rename;
     function blocked(path) {
       const name = String(path).split(/[\\\\/]/).at(-1);

@@ -341,9 +341,11 @@ protocol `summary` field only requests the additional PPTX inspection data.
 Use the installed generation runner with saved operations and an ordered unique
 slide-name array. It records each process and timeout, a stable request ID, input
 hashes and immutable checkpoints. Reuse the confirmed absolute CLI/package path
-rather than copying dependencies. The runner preserves host environment policy;
-it no longer implicitly selects a cleanup mode. Set `DECKUSE_CLEANUP_MODE=retire`
-only when the host permits moving owned internal artifacts.
+rather than copying dependencies. The runner preserves the host environment.
+With `DECKUSE_CLEANUP_MODE` unset, workspace cleanup moves owned artifacts into
+`.deckuse-trash/`. Set `DECKUSE_CLEANUP_MODE=delete` to delete these artifacts
+when the host permits it. After a failed initialization that leaves retired
+entries, choose a fresh workspace directory.
 
 ```sh
 node <package>/scripts/rebuild-generation.mjs ./job ./ops.json ./names.json --preview

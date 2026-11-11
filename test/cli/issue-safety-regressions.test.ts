@@ -116,7 +116,7 @@ it('uses a monotonic write guard across undo and paginates filtered history', as
   });
   expect(
     cli('history', '--slide', '1', '--limit', '1', '--offset', '1', '--workspace', root).data,
-  ).toEqual({
+  ).toMatchObject({
     total: 1,
     records: [],
   });
@@ -247,7 +247,7 @@ it('reports an existing workspace lock through a fresh resolver and recovers aft
   expect(await executor.execute(command)).toMatchObject({ ok: true, value: { revision: '1' } });
 });
 
-it('journals DOCX undo and rolls back failed retire-mode writes without deleting workspace files', async () => {
+it('journals DOCX undo and rolls back failed writes with default cleanup and deletion denied', async () => {
   const root = await mkdtemp(join(tmpdir(), 'deckuse-word-rollback-'));
   const ws = join(root, 'workspace');
   const hook = join(root, 'fault.mjs');
@@ -281,27 +281,33 @@ it('journals DOCX undo and rolls back failed retire-mode writes without deleting
   `,
   );
   function managed(fail: boolean, ...args: string[]) {
+    const env = { ...process.env };
+    delete env.DECKUSE_CLEANUP_MODE;
     const { stdout, stderr } = spawnSync(
       process.execPath,
       ['--import', hook, bin, ...args, '--workspace', ws, '--json'],
       {
         encoding: 'utf8',
-        env: {
-          ...process.env,
-          DECKUSE_CLEANUP_MODE: 'retire',
-          ROUND_WORKSPACE: ws,
-          ROUND_FAIL_PACK: fail ? '1' : '0',
-        },
+        env: { ...env, ROUND_WORKSPACE: ws, ROUND_FAIL_PACK: fail ? '1' : '0' },
       },
     );
     expect(stderr).not.toContain('Unexpected deletion');
     return JSON.parse(stdout);
   }
   expect(cli('new', ws, '--format', 'docx').ok).toBe(true);
-  expect(managed(false, 'add', 'paragraph', '--text', 'UndoCandidate')).toMatchObject({
+  const committed = managed(false, 'add', 'paragraph', '--text', 'UndoCandidate');
+  expect(committed).toMatchObject({
     ok: true,
     revision: 2,
+    data: {
+      cleanupRetirements: expect.arrayContaining([
+        expect.objectContaining({ category: 'transaction' }),
+        expect.objectContaining({ category: 'write.lock' }),
+      ]),
+    },
   });
+  const retired = await readdir(join(ws, '.deckuse-trash'));
+  expect(retired.some((name) => name.endsWith('-transaction'))).toBe(true);
   const readTracked = () => Promise.all(tracked.map((file) => readFile(join(ws, file))));
   const before = await readTracked();
   expect(managed(true, 'add', 'paragraph', '--text', 'Uncommitted').ok).toBe(false);

@@ -65,10 +65,10 @@ file is an ordered JSON array of unique slide names. Use the actual expected
 inventory and the revision returned by apply. Stop on a mismatch. Pin export
 with `--revision 2` and compare preview's revision and page inventory to it.
 
-For a host that approves moving Deckuse-owned internal artifacts, set
-`DECKUSE_CLEANUP_MODE=retire` before authoring. Routine lock and journal release
-then moves retired entries into the workspace's `.deckuse-trash/` without a
-delete attempt. This leaves an auditable directory that can grow over time.
+Routine lock and journal release moves Deckuse-owned artifacts into the
+workspace's `.deckuse-trash/` by default. The directory can grow over time.
+Set `DECKUSE_CLEANUP_MODE=delete` to delete these artifacts when the host permits it.
+If an initialization fails and leaves retired entries, use a fresh workspace directory.
 Successful moves are listed in `cleanupRetirements` with both paths and a category.
 If release fails, keep the committed response and its cleanup warnings.
 Leave unknown or live locks in place. A claim left by interrupted stale-lock

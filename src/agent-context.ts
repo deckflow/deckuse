@@ -200,7 +200,7 @@ export async function agentContext(options: {
               resume:
                 'node <package>/scripts/rebuild-generation.mjs --resume <generation-directory>',
               cleanup:
-                'Set DECKUSE_CLEANUP_MODE=retire only when the host permits internal retirement moves.',
+                'Workspace cleanup moves owned artifacts into .deckuse-trash by default. Set DECKUSE_CLEANUP_MODE=delete only when the host permits deletion.',
             },
           }
         : {}),

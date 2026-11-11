@@ -297,6 +297,14 @@ describe('embedded chart workbooks', () => {
     expect(result.ok).toBe(false);
     expect(result.diagnostics.some((d) => d.code === 'CHART_DATA_INCONSISTENT')).toBe(true);
     expect(await readFile(output, 'utf8')).toBe('keep-existing');
-    expect((await readdir(root)).some((name) => name.endsWith('.tmp'))).toBe(false);
+    const staged = (await readdir(root)).filter((name) => name.endsWith('.tmp'));
+    if (process.env.DECKUSE_CLEANUP_MODE === 'delete') {
+      expect(staged).toEqual([]);
+    } else {
+      expect(staged).toHaveLength(1);
+      expect(result).toMatchObject({
+        error: { details: { cleanupWarning: expect.stringContaining(join(root, staged[0]!)) } },
+      });
+    }
   });
 });

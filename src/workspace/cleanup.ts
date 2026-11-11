@@ -6,8 +6,8 @@ import type { Diagnostic } from '../core/index.js';
 
 export function managedRetirement(): boolean {
   const mode = process.env['DECKUSE_CLEANUP_MODE'];
-  if (mode === undefined || mode === 'delete') return false;
-  if (mode === 'retire') return true;
+  if (mode === undefined || mode === 'retire') return true;
+  if (mode === 'delete') return false;
   throw new Error('DECKUSE_CLEANUP_MODE must be delete or retire');
 }
 

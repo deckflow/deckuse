@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OpcArchive } from '../../src/opc/index.js';
 import { pptxAdapter } from '../../src/pptx/adapter.js';
 import { docxAdapter } from '../../src/docx/adapter.js';
@@ -9,14 +9,19 @@ import { assertDefaultPptxExists, assertDefaultDocxExists } from '../../src/defa
 import { PROTOCOL_VERSION } from '../../src/core/index.js';
 import { withInitialization, WorkspaceNotEmptyError } from '../../src/workspace/initialize.js';
 
+beforeEach(() => vi.stubEnv('DECKUSE_CLEANUP_MODE', 'delete'));
+afterEach(() => vi.unstubAllEnvs());
+
 describe('workspace initialization reservation', () => {
-  it('preserves an existing destination', async () => {
+  it('preserves an existing destination with default cleanup', async () => {
+    vi.stubEnv('DECKUSE_CLEANUP_MODE', undefined);
     const root = await mkdtemp(join(tmpdir(), 'deckuse-init-test-'));
     await writeFile(join(root, 'keep'), 'user content');
     await expect(withInitialization(root, async () => undefined)).rejects.toBeInstanceOf(
       WorkspaceNotEmptyError,
     );
     expect(await readFile(join(root, 'keep'), 'utf8')).toBe('user content');
+    expect(await readdir(root)).toEqual(['keep']);
   });
   it('cleans its own failed initialization and permits retry', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-init-test-'));
@@ -142,9 +147,9 @@ describe('direct workspace initialization rollback', () => {
   });
 });
 
-it('retires only reserved paths and the marker when initialization rolls back', async () => {
+it('retires only reserved paths and the marker by default when initialization rolls back', async () => {
   const root = await mkdtemp(join(tmpdir(), 'deckuse-init-retire-'));
-  vi.stubEnv('DECKUSE_CLEANUP_MODE', 'retire');
+  vi.stubEnv('DECKUSE_CLEANUP_MODE', undefined);
   try {
     await expect(
       withInitialization(root, async (_destination, reserve) => {

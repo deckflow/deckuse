@@ -34,6 +34,7 @@ export async function withInitialization<T>(
 ): Promise<T> {
   managedRetirement();
   await mkdir(root, { recursive: true });
+  if ((await readdir(root)).length > 0) throw new WorkspaceNotEmptyError();
   const marker = join(root, '.deckuse-init.lock');
   let lock;
   try {

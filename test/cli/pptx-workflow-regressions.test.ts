@@ -150,7 +150,7 @@ it('recovers the validated invocation without guessing or overwriting', async ()
   );
 }, 30_000);
 
-it('retains committed init and export outcomes under cleanup denial', async () => {
+it('retains committed init and export outcomes when explicit delete cleanup is denied', async () => {
   const root = await fixture();
   const preload = join(root, 'fault.mjs');
   await writeFile(
@@ -158,6 +158,7 @@ it('retains committed init and export outcomes under cleanup denial', async () =
     `
     import fs from 'node:fs/promises';
     import { syncBuiltinESMExports } from 'node:module';
+    process.env.DECKUSE_CLEANUP_MODE = 'delete';
     const rm = fs.rm, write = fs.writeFile;
     fs.rm = async (path, ...args) => {
       if (/committed[\\\\/]\\.deckuse-init\\.lock$|partial[\\\\/]source$|cleanup\\.pptx\\..+\\.tmp$/.test(String(path)))
