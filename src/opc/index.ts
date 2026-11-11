@@ -589,6 +589,19 @@ export class OpcArchive {
     // Keep source/[Content_Types].xml in sync with in-memory overrides so the
     // next openDirectory() does not fall back to Default Extension="xml".
     this.syncContentTypes();
+    const paths = new Map<string, { spelling: string; isPart: boolean }>();
+    for (const part of this.parts.values()) {
+      const segments = part.name.slice(1).split('/');
+      for (let depth = 1; depth <= segments.length; depth++) {
+        const spelling = segments.slice(0, depth).join('/');
+        const key = spelling.normalize('NFC').toLowerCase();
+        const isPart = depth === segments.length;
+        const previous = paths.get(key);
+        if (previous && (previous.spelling !== spelling || previous.isPart !== isPart))
+          throw new Error(`OPC extraction paths collide: ${previous.spelling} and ${spelling}`);
+        paths.set(key, { spelling, isPart });
+      }
+    }
     for (const part of this.parts.values()) {
       const file = resolve(path, part.name.slice(1));
       await mkdir(dirname(file), { recursive: true });
@@ -596,7 +609,11 @@ export class OpcArchive {
       await writeFile(file, data);
     }
   }
-  async writeFile(path: string, overwrite = false): Promise<void> {
+  async writeFile(
+    path: string,
+    overwrite = false,
+    cleanup: (staging: string) => Promise<unknown> = (staging) => rm(staging, { force: true }),
+  ): Promise<void> {
     const destination = resolve(path);
     await mkdir(dirname(destination), { recursive: true });
     if (!overwrite) {
@@ -612,7 +629,7 @@ export class OpcArchive {
       await writeFile(temporary, await this.toUint8Array(), { flag: 'wx' });
       await rename(temporary, destination);
     } catch (error) {
-      await rm(temporary, { force: true });
+      await cleanup(temporary);
       throw error;
     }
   }
@@ -621,8 +638,9 @@ export class OpcArchive {
 export async function snapshotArchive(
   archive: OpcArchive,
   outputPath: string,
+  cleanup?: (staging: string) => Promise<unknown>,
 ): Promise<{ checksum: string }> {
-  await archive.writeFile(outputPath, true);
+  await archive.writeFile(outputPath, true, cleanup);
   const bytes = await readFile(resolve(outputPath));
   return { checksum: createHash('sha256').update(bytes).digest('hex') };
 }

@@ -2,7 +2,7 @@
 
 # Deckuse
 
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 20.19.0+](https://img.shields.io/badge/Node.js-20.19.0%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
@@ -43,7 +43,7 @@ Conserva el XML intacto y las partes desconocidas del paquete siempre que es pos
 
 ## Instalación
 
-Requisitos: Node.js 18 o posterior.
+Requisitos: Node.js 20.19.0 o posterior.
 
 ```sh
 npm install -g @deckflow/deckuse

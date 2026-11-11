@@ -2,8 +2,8 @@ import { requireDefined } from './required.js';
 import { PROTOCOL_VERSION } from './core/index.js';
 
 const GLOBAL_OPTIONS = `Global options:
+  --revision <rev>          Pin export to the current workspace revision
   --workspace <path>        Explicit workspace (default: nearest .deckuse)
-  --revision <rev>          Read a historical revision (writes reject it)
   --json                    Machine-readable envelope
   --quiet                   Suppress human-oriented summaries
   --dry-run                 Plan a write without committing
@@ -126,7 +126,6 @@ Notes:
     example: 'deckuse status --workspace ./workspace --json',
     details: `Options:
   --workspace <path>        Workspace root (default: nearest .deckuse)
-  --revision <rev>          Read a historical revision
   --read-only               Observe live state without locks, recovery, or cleanup
   --request-id <id>         Query a PPTX apply receipt in the live workspace
   --json                    Machine-readable envelope`,
@@ -146,7 +145,6 @@ Options:
   --master <name>           List shapes on a slide master (e.g. slideMaster1)
   --layout <name|index>     List shapes on a slide layout
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope
 
 Examples:
@@ -162,7 +160,6 @@ Examples:
     example: 'deckuse list slides --workspace ./workspace --json',
     details: `Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -178,7 +175,6 @@ Examples:
 
 Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -188,7 +184,6 @@ Options:
     example: 'deckuse list layouts --json',
     details: `Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope
 
 Items include 1-based index (usable as --layout 2 / layout:2), displayName
@@ -201,7 +196,6 @@ Items include 1-based index (usable as --layout 2 / layout:2), displayName
     example: 'deckuse list masters --json',
     details: `Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -211,7 +205,6 @@ Items include 1-based index (usable as --layout 2 / layout:2), displayName
     example: 'deckuse list theme --json',
     details: `Options:
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -227,7 +220,6 @@ Options:
   --props <a,b,c>           Comma-separated property filter
   --no-provenance           Omit inheritance source paths
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -242,7 +234,6 @@ Options:
   --visual-tree             Include object tree projection
   --depth <n>               Tree depth (default: 2)
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -259,7 +250,6 @@ Options:
   --query <text>            Query string (shape mode)
   --limit <n>               Max results (default: 100)
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope
 
 Run 'deckuse search <text|shape> --help' for details.`,
@@ -279,7 +269,6 @@ Options:
   --limit <n>               Max matches (default: 8)
   --model <id>              TypeSafe model (default: jev-latest)
   --workspace <path>        Workspace root
-  --revision <rev>          Allowed on this read command
   --json                    Machine-readable envelope
 
 Notes:
@@ -300,7 +289,6 @@ Notes:
 Options:
   --limit <n>               Max results (default: 100)
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -313,7 +301,6 @@ Options:
   --query <text>            Additional query string
   --limit <n>               Max results (default: 100)
   --workspace <path>        Workspace root
-  --revision <rev>          Read a historical revision
   --json                    Machine-readable envelope`,
   },
 
@@ -707,19 +694,18 @@ Notes:
   <workspace>               Optional workspace path (or use --workspace)
 
 Options:
-  --level <level>           Validation level (default: full)
+  --level <level>           Full validation (only supported level)
   --profile <mode>          structure (default) or delivery (strict data verification)
   --summary                 Include ordered PPTX inventory and compact verification states
   --report <path>           Save full validation envelope to a new file
   --render                  Include visual geometry and heuristic diagnostics (not screenshots)
-  --package                 Include package checks
-  --relationships           Include relationship graph checks
+  --package                 Confirm package checks (enabled by default)
+  --relationships           Confirm relationship graph checks (enabled by default)
   --slide <n>               Limit to one slide when supported
   --expect-revision <rev>   PPTX: require this workspace revision
   --expect-slides <count>   PPTX: require this slide count
   --expect-slide-names <file> PPTX: require this ordered JSON array of unique names
   --workspace <path>        Workspace root
-  --revision <rev>          Validate a historical revision
   --json                    Machine-readable envelope
 
 Notes:
@@ -785,7 +771,6 @@ Options:
   --recover-report <path>   Publish the exact validated candidate in an export report to a new path
   --from-package            Copy existing package snapshot without rebuilding from source/
   --profile <mode>          structure (default) or delivery; strict failures preserve output
-  --revision <rev>          Export a historical revision (not available in Phase 1a)
   --json                    Machine-readable envelope
 
 Notes:

@@ -35,7 +35,7 @@ async function exists(path: string) {
     throw e;
   }
 }
-async function digest(root: string, includeGit = false) {
+async function digest(root: string, includeGit = false, sourcePath?: string) {
   const hash = createHash('sha256');
   async function walk(path: string, relative: string): Promise<void> {
     const info = await stat(path);
@@ -51,6 +51,10 @@ async function digest(root: string, includeGit = false) {
       );
     }
   }
+  if (sourcePath) {
+    await walk(sourcePath, 'source');
+    return hash.digest('hex');
+  }
   for (const path of paths.filter((p) => includeGit || !p.startsWith('.git/')))
     if (await exists(join(root, path))) await walk(join(root, path), path);
   return hash.digest('hex');
@@ -62,6 +66,7 @@ interface Journal {
   previousCommit?: string;
   rewindTo?: string;
   backupHash?: string;
+  sourceBackupHash?: string;
 }
 export async function recoverTransaction(
   root: string,
@@ -98,6 +103,25 @@ export async function recoverTransaction(
         if (!(await exists(join(dir, 'backup', path)))) throw new Error(`Missing backup: ${path}`);
       for (const path of paths) {
         const current = join(root, path);
+        if (path === 'source' && journal.sourceBackupHash) {
+          const retired = join(dir, 'retired-source');
+          if (await exists(retired)) {
+            if ((await digest(root, false, retired)) !== journal.sourceBackupHash)
+              throw new Error('Retired source checksum mismatch');
+            if (await exists(current))
+              await timed('cleanup-transaction-rollback', () =>
+                retireOwnedPath(root, current, true),
+              );
+            // Copy so a failed recovery can retry from the same original source.
+            await cp(retired, current, { recursive: true });
+          } else if (
+            !(await exists(current)) ||
+            (await digest(root, false, current)) !== journal.sourceBackupHash
+          ) {
+            throw new Error('Original source missing or changed during transaction recovery');
+          }
+          continue;
+        }
         if (await exists(current))
           await timed('cleanup-transaction-rollback', () => retireOwnedPath(root, current, true));
         if (journal.present.includes(path)) {
@@ -127,6 +151,7 @@ export async function withWorkspaceTransaction<T>(
     directory: string,
     prepareRewind: (head: string) => Promise<void>,
   ) => Promise<T>,
+  options?: { sourceSwap: true },
 ): Promise<T> {
   await recoverTransaction(root);
   const dir = directory(root);
@@ -142,8 +167,10 @@ export async function withWorkspaceTransaction<T>(
   await mkdir(staging);
   try {
     await mkdir(join(staging, 'backup'));
+    if (options?.sourceSwap)
+      journal.sourceBackupHash = await digest(root, false, join(root, 'source'));
     for (const path of paths)
-      if (await exists(join(root, path))) {
+      if ((path !== 'source' || !journal.sourceBackupHash) && (await exists(join(root, path)))) {
         journal.present.push(path);
         await mkdir(join(staging, 'backup', path, '..'), { recursive: true });
         await cp(join(root, path), join(staging, 'backup', path), { recursive: true });

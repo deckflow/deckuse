@@ -59,7 +59,9 @@ export const readHistory = async (
   workspace: string,
   limit: number,
   offset: number,
+  slide?: number,
 ): Promise<{ records: OperationRecord[]; total: number }> => {
-  const records = await readOperations(workspace);
+  const all = await readOperations(workspace);
+  const records = slide === undefined ? all : all.filter((record) => record.slides.includes(slide));
   return { records: records.slice(offset, offset + limit), total: records.length };
 };

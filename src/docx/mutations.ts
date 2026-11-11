@@ -1,7 +1,7 @@
 import { err, ok, type AtomicCommand, type Result } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import type { Document, Element } from '@xmldom/xmldom';
-import { hitsFrom, locate, matchesSelector, readDocument } from './indexer.js';
+import { hitsFrom, locate, docxSelector, readDocument } from './indexer.js';
 import {
   assertBookmarkName,
   blockAnchor,
@@ -175,11 +175,12 @@ export function mutate(
   }
 
   if (command.type === 'replaceText') {
-    if (
-      (typeof command.selector === 'object' && command.selector.page !== undefined) ||
-      (typeof command.selector === 'string' && /(?:^|\s)page=/.test(command.selector))
-    )
-      return err('INVALID_COMMAND', 'The page selector is PPTX-only');
+    let predicate;
+    try {
+      if (command.selector) predicate = docxSelector(command.selector);
+    } catch (cause) {
+      return err('INVALID_COMMAND', cause instanceof Error ? cause.message : String(cause));
+    }
     const loaded = requireDocument(archive);
     if (!loaded.ok) return loaded;
     const doc = loaded.value;
@@ -188,9 +189,9 @@ export function mutate(
     const limit = command.limit;
     for (const hit of hitsFrom(doc, undefined)) {
       if (hit.kind !== 'paragraph') continue;
-      if (command.selector) {
+      if (predicate) {
         const item = index.elements.find((entry) => entry.ref.path === hit.path);
-        if (!item || !matchesSelector(item, command.selector)) continue;
+        if (!item || !predicate(item)) continue;
       }
       const remaining = limit !== undefined ? limit - matched : undefined;
       if (remaining !== undefined && remaining <= 0) break;

@@ -1003,7 +1003,7 @@ class Runner {
       '200',
       '--json',
     ]);
-    return Array.isArray(envelope?.data) ? envelope.data : [];
+    return Array.isArray(envelope?.data?.items) ? envelope.data.items : [];
   }
 
   /**
@@ -1724,25 +1724,31 @@ const runWriteSequence = async (runner, media, opts = {}) => {
       }),
     );
 
-    const cells = await runner.query('kind=tableCell', 'query tableCell');
+    const cells = await runner.query(`kind=tableCell page=${addedTable.slide}`, 'query tableCell');
+    const shapeId = addedTable.target.split('/shape:').at(-1);
     const cell = cells.find(
-      (c) =>
-        c?.location?.tableId !== undefined ||
-        (typeof c?.ref?.elementId === 'string' && c.ref.elementId.includes(':cell:')),
+      (candidate) => String(candidate?.location?.tableId).split(':').at(-1) === shapeId,
     );
-    if (cell?.ref) {
-      await runner.step(
-        'tableCell fill (added via apply)',
-        ['apply', runner.workspace, '--input', '-', '--json'],
-        JSON.stringify({
-          type: 'setProperties',
-          ref: cell.ref,
-          properties: { fill: 'FFCC00' },
-        }),
-      );
-    } else {
-      runner.skip('tableCell fill (added via apply)', 'no tableCell in query results');
-    }
+    if (!cell?.ref) throw new Error('The generated table has no queryable cell');
+    await runner.step(
+      'tableCell fill (added via apply)',
+      ['apply', runner.workspace, '--input', '-', '--json'],
+      JSON.stringify({
+        type: 'setProperties',
+        ref: cell.ref,
+        properties: { fill: 'FFCC00' },
+      }),
+    );
+    const target = `${addedTable.target}/cell:${cell.location.row}:${cell.location.column}`;
+    const fill = await runner.step('verify tableCell fill', [
+      'get',
+      target,
+      '--props',
+      'fill.color',
+      ...runner.wsArgs(),
+    ]);
+    if (!JSON.stringify(fill?.data ?? {}).includes('FFCC00'))
+      throw new Error('Expected tableCell fill FFCC00 after apply');
   }
 
   if (addedChart?.target) {

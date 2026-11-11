@@ -376,16 +376,27 @@ export const slidesForRef = (index: IndexFile, ref: ElementRef): number[] => {
 };
 export const mergeSlides = (...groups: number[][]): number[] =>
   [...new Set(groups.flat())].sort((a, b) => a - b);
-export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement | undefined =>
-  index.elements.find((e) => e.ref.elementId === ref.elementId || e.ref.path === ref.path) ??
-  (ref.path?.includes('#')
-    ? index.elements.find(
-        (e) =>
-          e.partUri === ref.path?.split('#')[0] &&
-          e.location?.['cNvPrId'] ===
-            ref.path.split('#').at(-1)?.split(':').at(-1)?.split('.').at(-1),
-      )
-    : undefined);
+export const findIndexed = (index: IndexFile, ref: ElementRef): IndexedElement | undefined => {
+  const byPath =
+    ref.path === undefined
+      ? undefined
+      : index.elements.find(
+          (item) => item.ref.documentId === ref.documentId && item.ref.path === ref.path,
+        );
+  if (byPath)
+    return ref.elementId === undefined || byPath.ref.elementId === ref.elementId
+      ? byPath
+      : undefined;
+  const [part, localPath] = ref.path?.split('#') ?? [];
+  const id = localPath?.split(':').at(-1)?.split('.').at(-1);
+  return index.elements.find(
+    (item) =>
+      item.ref.documentId === ref.documentId &&
+      (ref.elementId === undefined || item.ref.elementId === ref.elementId) &&
+      (ref.path === undefined ||
+        (id !== undefined && part === item.partUri && item.location?.['cNvPrId'] === id)),
+  );
+};
 const selectorKeys = new Set([
   'kind',
   'name',

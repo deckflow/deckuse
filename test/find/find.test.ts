@@ -15,6 +15,7 @@ import type { FindCandidate } from '../../src/find/catalog.js';
 import { resolveHelp } from '../../src/help.js';
 import { buildBlankArchive, docxAdapter } from '../../src/docx/index.js';
 import { pptxAdapter } from '../../src/pptx/index.js';
+import { isWriteLockHeld } from '../../src/workspace/lock.js';
 
 const encoder = new TextEncoder();
 
@@ -307,6 +308,64 @@ async function pptxFixture(path: string): Promise<void> {
 }
 
 describe('find adapters', () => {
+  it.each(['pptx', 'docx'] as const)(
+    'releases the %s workspace lock before ranking its snapshot',
+    async (format) => {
+      const root = await mkdtemp(join(tmpdir(), 'deckuse-find-lock-'));
+      const source = join(root, `in.${format}`);
+      const workspace = join(root, 'ws');
+      if (format === 'pptx') {
+        await pptxFixture(source);
+      } else {
+        const archive = buildBlankArchive();
+        archive.setPart(
+          '/word/document.xml',
+          encoder.encode(
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Before</w:t></w:r></w:p></w:body></w:document>',
+          ),
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml',
+        );
+        await archive.writeFile(source);
+      }
+      const adapter = format === 'pptx' ? pptxAdapter : docxAdapter;
+      const base = { version: '2.0' as const, workspaceId: workspace };
+      expect((await adapter.init({ ...base, type: 'init', source, format }, {})).ok).toBe(true);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      injectFindClient(async (call) => {
+        entered.resolve();
+        await release.promise;
+        const rows = elementsOf(call);
+        const winner = rows[0]?.id ?? 'E001';
+        return reply({
+          where: choice(
+            Object.fromEntries(rows.map(({ id }) => [id, id === winner ? 0.9 : 0])),
+            winner,
+          ),
+          exists: { type: 'noul', noul: 0.9 },
+        });
+      });
+      const ranking = adapter.execute(
+        { ...base, type: 'find', query: 'text', limit: 1, model: 'mock' },
+        {},
+      );
+      try {
+        await entered.promise;
+        expect(await isWriteLockHeld(workspace)).toBe(false);
+        const edit = await adapter.execute(
+          format === 'pptx'
+            ? { ...base, type: 'addSlide', name: 'After', transactionId: '1' }
+            : { ...base, type: 'addParagraph', text: 'After', transactionId: '1' },
+          {},
+        );
+        expect(edit).toMatchObject({ ok: true, value: { revision: '2' } });
+      } finally {
+        release.resolve();
+      }
+      expect(await ranking).toMatchObject({ ok: true, value: { revision: '1' } });
+    },
+  );
+
   it('uses the same PPTX target as search and omits table cells', async () => {
     const root = await mkdtemp(join(tmpdir(), 'deckuse-find-pptx-'));
     const source = join(root, 'in.pptx');
@@ -361,7 +420,7 @@ describe('find adapters', () => {
     expect(sawChart).toBe(true);
     expect(sawLogo).toBe(true);
     const foundMatches = (found.value as { matches: Record<string, unknown>[] }).matches;
-    expect(Object.keys(found.value as object)).toEqual(['matches']);
+    expect(found.value).toMatchObject({ revision: '1' });
     expect(foundMatches[0]).toEqual(title);
     expect(foundMatches[0]).not.toHaveProperty('score');
 
@@ -372,7 +431,7 @@ describe('find adapters', () => {
     );
     expect(missed.ok).toBe(true);
     if (!missed.ok) return;
-    expect(missed.value).toEqual({ matches: [] });
+    expect(missed.value).toEqual({ matches: [], revision: '1' });
   });
 
   it('uses the same DOCX target as search and rejects slide', async () => {

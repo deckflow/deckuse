@@ -1,3 +1,4 @@
+import { isWorkspaceExportPathProtected } from '../workspace/export-path.js';
 import { validateReviewParts } from '../review/validation.js';
 import { REVIEW_WRITES, reviewWriteSchema } from '../review/schema.js';
 import { wordComments, mutateWordComments } from './comments.js';
@@ -24,14 +25,14 @@ import {
 } from '../core/index.js';
 import { rankFind } from '../find/rank.js';
 import { OpcArchive } from '../opc/index.js';
-import { isIntegerRevision, nextRevision } from '../workspace/index.js';
+import { isIntegerRevision, nextWorkspaceRevision } from '../workspace/revision.js';
 import { collectDocxFindCandidates } from './find-candidates.js';
 import {
   buildIndex as buildIndexImpl,
   collectHits,
   findIndexed,
   locate,
-  matchesSelector,
+  docxSelector,
   readDocument,
   resolveItem,
 } from './indexer.js';
@@ -289,34 +290,9 @@ export const docxAdapter: FormatAdapter = {
         cause instanceof Error ? cause.message : 'Workspace unavailable',
       );
     }
-    return withWriteLock(workspace, async () => {
+    const local = await withWriteLock(workspace, async () => {
       try {
         await withWriteLock(workspace, () => recoverTransaction(workspace));
-        if (command.type === 'undo') {
-          return await withWriteLock(workspace, async () => {
-            try {
-              return ok(await undoWrites(workspace, command.steps));
-            } catch (cause) {
-              return err(
-                'VALIDATION_FAILED',
-                cause instanceof Error ? cause.message : 'Undo failed',
-              );
-            }
-          });
-        }
-        if (command.type === 'history') {
-          const { records, total } = await readHistory(workspace, command.limit, command.offset);
-          const slide = command.slide;
-          const filtered =
-            slide !== undefined
-              ? records.filter((record) => record.slides.includes(slide))
-              : records;
-          return ok({
-            records: filtered,
-            total: slide !== undefined ? filtered.length : total,
-          });
-        }
-
         const manifest = await readManifest(workspace);
         const schemaVersion = manifest.schemaVersion as string;
         if (schemaVersion !== '2.0' || !isIntegerRevision(manifest.revision)) {
@@ -331,6 +307,30 @@ export const docxAdapter: FormatAdapter = {
               capabilities: manifest.metadata?.['capabilities'],
             });
           }
+          return err(
+            'UNSUPPORTED_VERSION',
+            'Workspace manifest is incompatible with protocol 2.0.',
+            [],
+            {
+              hint: 'Initialize a new empty destination with deckuse init to migrate to protocol 2.0.',
+            },
+          );
+        }
+
+        if (command.type === 'undo') {
+          return await withWriteLock(workspace, async () => {
+            try {
+              return ok(await undoWrites(workspace, command.steps));
+            } catch (cause) {
+              return err(
+                cause instanceof RecoveryRequiredError ? 'RECOVERY_REQUIRED' : 'VALIDATION_FAILED',
+                cause instanceof Error ? cause.message : 'Undo failed',
+              );
+            }
+          });
+        }
+        if (command.type === 'history') {
+          return ok(await readHistory(workspace, command.limit, command.offset, command.slide));
         }
 
         const archive = await openWorkspaceArchive(workspace);
@@ -469,21 +469,25 @@ export const docxAdapter: FormatAdapter = {
               hint: 'Omit --slide. Use --kind paragraph,table,bookmark to narrow Word elements.',
             });
           }
-          return await rankFind({
-            candidates: collectDocxFindCandidates(index, command),
-            query: command.query,
-            limit: command.limit,
-            model: command.model,
-          });
+          return {
+            find: {
+              candidates: collectDocxFindCandidates(index, command),
+              query: command.query,
+              limit: command.limit,
+              model: command.model,
+            },
+            findRevision: manifest.revision,
+          };
         }
 
         if (command.type === 'query') {
-          if (
-            (typeof command.selector === 'object' && command.selector.page !== undefined) ||
-            (typeof command.selector === 'string' && /(?:^|\s)page=/.test(command.selector))
-          )
-            return err('INVALID_COMMAND', 'The page selector is PPTX-only');
-          const matched = index.elements.filter((item) => matchesSelector(item, command.selector));
+          let predicate;
+          try {
+            predicate = docxSelector(command.selector);
+          } catch (cause) {
+            return err('INVALID_COMMAND', cause instanceof Error ? cause.message : String(cause));
+          }
+          const matched = index.elements.filter(predicate);
           return ok({
             items: matched.slice(0, command.limit).map(summary),
             total: matched.length,
@@ -506,6 +510,16 @@ export const docxAdapter: FormatAdapter = {
 
         if (command.type === 'validate') {
           if (
+            command.level === 'fast' ||
+            command.package === false ||
+            command.relationships === false ||
+            command.ids !== undefined
+          )
+            return err(
+              'UNSUPPORTED_CAPABILITY',
+              'Validation supports full package and relationship checks. Omit unsupported overrides.',
+            );
+          if (
             command.expectedSlides !== undefined ||
             command.expectedSlideNames ||
             command.expectRevision
@@ -523,6 +537,9 @@ export const docxAdapter: FormatAdapter = {
                   revision: index.revision,
                   capabilities: docxCapabilities,
                   trackedRevisions: scanRevisions(archive),
+                  ...(command.render
+                    ? { renderPerformed: false, layoutSource: 'structure-only' }
+                    : {}),
                 },
                 diagnostics,
               );
@@ -538,6 +555,15 @@ export const docxAdapter: FormatAdapter = {
             );
           }
           const output = resolve(command.output);
+          if (await isWorkspaceExportPathProtected(workspace, output))
+            return err(
+              'INVALID_COMMAND',
+              'Export destination overlaps workspace source or metadata.',
+              [],
+              {
+                hint: 'Choose a deliverable path outside the workspace source and metadata directories.',
+              },
+            );
           const fromPackage = command.fromPackage === true;
           let repacked = false;
           let exportRevision = manifest.revision;
@@ -691,7 +717,7 @@ export const docxAdapter: FormatAdapter = {
                 diagnostics,
               );
             }
-            const rev = nextRevision(currentManifest.revision);
+            const rev = await nextWorkspaceRevision(workspace, currentManifest.revision);
             const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
             const saved = await persistWrite(
               workspace,
@@ -731,7 +757,7 @@ export const docxAdapter: FormatAdapter = {
               result.diagnostics,
             );
           }
-          const rev = nextRevision(currentManifest.revision);
+          const rev = await nextWorkspaceRevision(workspace, currentManifest.revision);
           const nextIndex = buildIndex(working, currentManifest.workspaceId, rev);
           const saved = await persistWrite(
             workspace,
@@ -753,5 +779,12 @@ export const docxAdapter: FormatAdapter = {
         );
       }
     });
+    if ('find' in local) {
+      const ranked = await rankFind(local.find);
+      return ranked.ok
+        ? ok({ ...ranked.value, revision: local.findRevision }, ranked.diagnostics)
+        : ranked;
+    }
+    return local;
   },
 };

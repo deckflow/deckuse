@@ -45,8 +45,6 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "build": "node scripts/generate-cli-version.mjs && tsc && node scripts/generate-schema.mjs",
-    "prepack": "node scripts/sync-npm-readme.mjs",
-    "postpack": "node scripts/sync-npm-readme.mjs --restore",
     "lint": "eslint .",
     "typecheck": "tsc --pretty false",
     "test": "vitest run",

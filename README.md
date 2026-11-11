@@ -2,12 +2,12 @@
 
 # Deckuse
 
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Node.js 20.19.0+](https://img.shields.io/badge/Node.js-20.19.0%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [Français](README.fr.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Português](README.pt-BR.md)
+[English](https://github.com/deckflow/deckuse/blob/main/README.md) · [简体中文](https://github.com/deckflow/deckuse/blob/main/README.zh-CN.md) · [Français](https://github.com/deckflow/deckuse/blob/main/README.fr.md) · [日本語](https://github.com/deckflow/deckuse/blob/main/README.ja.md) · [한국어](https://github.com/deckflow/deckuse/blob/main/README.ko.md) · [Русский](https://github.com/deckflow/deckuse/blob/main/README.ru.md) · [Español](https://github.com/deckflow/deckuse/blob/main/README.es.md) · [Português](https://github.com/deckflow/deckuse/blob/main/README.pt-BR.md)
 
 </div>
 
@@ -16,7 +16,7 @@ Deckuse is a local-first, schema-driven Office document automation engine for co
 The engine is built around format adapters. PPTX and DOCX are implemented. XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
 
-This repository is the **community edition** (`edition=community`). See [docs/edition.md](docs/edition.md). Shared source here is the source of truth, published as `@deckflow/deckuse`; the commercial edition is a private thin overlay (`deckuse-commercial`) that registers a `PptxEditionExtension` for gated writes and may add proprietary packages.
+This repository is the **community edition** (`edition=community`). See [docs/edition.md](https://github.com/deckflow/deckuse/blob/main/docs/edition.md). Shared source here is the source of truth, published as `@deckflow/deckuse`; the commercial edition is a private thin overlay (`deckuse-commercial`) that registers a `PptxEditionExtension` for gated writes and may add proprietary packages.
 
 PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
@@ -36,7 +36,7 @@ bootstrap below with `--handoff-json`. The unscoped package is deprecated.
 
 ## Install in a managed agent job
 
-From a reviewed checkout, run the [managed bootstrap](scripts/managed-bootstrap.sh)
+From a reviewed checkout, run the [managed bootstrap](https://github.com/deckflow/deckuse/blob/main/scripts/managed-bootstrap.sh)
 with an exact published version, an unused job directory, and an existing cache
 root approved by the host. The script prints the verified local CLI path.
 
@@ -68,7 +68,7 @@ The example contains CLI apply operations. For first drafts, `data.applyContract
 
 ## Use Deckuse with a coding agent
 
-The [Deckuse skill](skills/deckuse/SKILL.md) guides your agent through editing presentations and Word documents. The CLI performs the document operations.
+The [Deckuse skill](https://github.com/deckflow/deckuse/blob/main/skills/deckuse/SKILL.md) guides your agent through editing presentations and Word documents. The CLI performs the document operations.
 
 Run this from the project where you use your agent:
 
@@ -398,7 +398,7 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - `monitor` for live HTML preview (`monitor start|status|stop`; use `--port 0` for an ephemeral port) and `render` for single-slide PNG screenshots (`--scale` supported; deck2html + Playwright). `deckuse schema` prints command JSON Schema; `deckuse measure` estimates text box size heuristically.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
-Agent quick reference: [docs/agent-cookbook.md](docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
+Agent quick reference: [docs/agent-cookbook.md](https://github.com/deckflow/deckuse/blob/main/docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
 
 ## DOCX capabilities
 
@@ -468,7 +468,7 @@ pnpm test:openability -- ./path/to/package.pptx   # LibreOffice; or --osascript 
 
 ### Agent reliability and batch rendering
 
-See [agent reliability](docs/agent-reliability.md) for JSON error handling,
+See [agent reliability](https://github.com/deckflow/deckuse/blob/main/docs/agent-reliability.md) for JSON error handling,
 transaction recovery, nonempty-directory protection, and snapshot-consistent
 `render --pages 1,3-5` / `render --all` workflows. Use `schema --list --json`
 to discover batchable commands, including `addSlide`.

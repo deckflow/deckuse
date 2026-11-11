@@ -7,7 +7,6 @@ NPM_REGISTRY_NPM="https://registry.npmjs.org"
 NPM_REGISTRY_GITHUB="https://npm.pkg.github.com"
 
 GITHUB=0
-README_REWRITTEN=0
 CHANGESET_CONFIG_BACKUP=""
 
 usage() {
@@ -16,8 +15,7 @@ Usage: $(basename "$0") [--github]
 
   1. Build
   2. Refuse publish if commercial strings leaked
-  3. Rewrite README links for the packed package
-  4. Publish with changesets to one registry:
+  3. Publish with changesets to one registry:
        - ${NPM_REGISTRY_NPM}     (access=public)     [default]
        - ${NPM_REGISTRY_GITHUB}  (access=restricted) [--github]
 
@@ -57,9 +55,6 @@ cleanup() {
     cp "$CHANGESET_CONFIG_BACKUP" "$ROOT/.changeset/config.json" || status=$?
     rm -f "$CHANGESET_CONFIG_BACKUP"
   fi
-  if [[ "$README_REWRITTEN" -eq 1 ]]; then
-    node "$ROOT/scripts/sync-npm-readme.mjs" --restore || status=$?
-  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -80,11 +75,6 @@ pnpm build
 echo
 echo "==> Checking for commercial leaks"
 pnpm check:no-commercial-leak
-
-echo
-echo "==> Rewriting README links for publish"
-node "$ROOT/scripts/sync-npm-readme.mjs"
-README_REWRITTEN=1
 
 # changesets reads access from .changeset/config.json. Pin it for this publish
 # only (public on npmjs, restricted on GitHub Packages) and restore the file
