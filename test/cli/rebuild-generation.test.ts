@@ -235,7 +235,12 @@ it('retains exported bytes and avoids repeating a blocked preview in the same co
     env,
   });
   expect(resumed.status).toBe(1);
-  expect(JSON.parse(resumed.stdout).error).toContain('previously blocked');
+  expect(JSON.parse(resumed.stdout)).toMatchObject({
+    state: 'preview-blocked',
+    previewFailure: { retryable: false },
+    verification: { structure: 'validated', preview: 'blocked', nativeReview: 'not-performed' },
+    nextAction: { type: 'deliver-validated-pptx', path: failed.output },
+  });
   expect(await readFile(failed.output)).toEqual(before);
   const { readdir } = await import('node:fs/promises');
   expect(

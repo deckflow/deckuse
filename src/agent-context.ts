@@ -220,6 +220,8 @@ export async function agentContext(options: {
                 'Append --patch ./patch.json for each ordered patch; inputs are saved and compiled into one guarded apply',
               resume:
                 'node <package>/scripts/rebuild-generation.mjs --resume <generation-directory>',
+              previewBlocked:
+                'Follow nextAction to deliver the validated PPTX. Use --retry-preview only after confirming host capability has changed.',
               cleanup:
                 'Workspace cleanup moves owned artifacts into .deckuse-trash by default. Set DECKUSE_CLEANUP_MODE=delete only when the host permits deletion.',
             },
@@ -274,6 +276,17 @@ export async function agentContext(options: {
                 height: '2in',
                 fill: { color: 'EDF4FA' },
                 stroke: { color: '345671', width: 1 },
+              },
+              image: {
+                type: 'addShape',
+                slide: 'Overview',
+                shapeType: 'image',
+                name: 'Photo',
+                file: '/absolute/path/to/photo.png',
+                x: '0.75in',
+                y: '2in',
+                width: '6in',
+                height: '3in',
               },
               richText: {
                 type: 'addShape',

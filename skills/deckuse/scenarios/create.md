@@ -72,7 +72,7 @@ Use a revision-guarded patch for local changes. For a full replacement, run
 separate generation with its own
 workspace, exported PPTX and reports. Add `--preview` to render into that
 generation's preview directory and check the page inventory against the export.
-A failed generation leaves all earlier workspaces and deliverables intact. The runner writes `run.json` and separate process results. Treat `preview-ready` as screenshots available for review and `preview-blocked` as structural delivery with visual review outstanding. After an error marked `retryable: false`, stop preview attempts until the host configuration changes.
+A failed generation leaves all earlier workspaces and deliverables intact. The runner writes `run.json` and separate process results. Treat `preview-ready` as screenshots available for review and `preview-blocked` as structural delivery with visual review outstanding. For `preview-blocked`, follow `nextAction` to deliver the validated PPTX and report visual and native review as pending. Resume with `--retry-preview` only after confirming the required host capability has changed. The runner will not start another preview from a nonretryable checkpoint without that explicit flag.
 
 ### Default delivery and continuation
 

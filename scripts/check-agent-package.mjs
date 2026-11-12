@@ -147,6 +147,14 @@ if (
 )
   throw new Error('Authoring context probed preview or returned protocol schema');
 const contract = compact.envelope.data.applyContract.examples;
+const photo = join(staging, 'photo.png');
+await writeFile(
+  photo,
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/b1sAAAAASUVORK5CYII=',
+    'base64',
+  ),
+);
 const generatedOps = join(staging, 'compact-nine-page-ops.json');
 const generatedNames = join(staging, 'compact-nine-page-names.json');
 const inventory = ['Blank starter', ...Array.from({ length: 8 }, (_, i) => 'Page ' + (i + 2))];
@@ -157,6 +165,7 @@ await writeFile(
       ...(i ? [{ ...contract.slide, name: slide }] : []),
       { ...contract.nativeShape, slide },
       { ...contract.richText, slide },
+      ...(i === 0 ? [{ ...contract.image, slide, file: photo }] : []),
     ]),
   ),
 );
@@ -191,6 +200,10 @@ if (
 const firstPage = cli(['list', 'shapes', '--slide', '1', '--workspace', compactDeck.workspace]);
 if (!JSON.stringify(firstPage).includes('产品 Overview'))
   throw new Error('Rich text was not preserved');
+if (
+  !firstPage.data.items.some((item) => item.kind === 'picture' && item.name === contract.image.name)
+)
+  throw new Error('Compact contract image did not produce a native picture');
 
 await access(join(root, context.recipe.deliveryRunner.resource));
 const ops = join(root, context.resource.example);
@@ -223,15 +236,60 @@ if (generated.state !== 'structural-only' || !generated.sha256)
 await access(generated.output);
 const original = await readFile(generated.output);
 const runner = join(root, 'scripts/rebuild-generation.mjs');
+const maskedExit = join(staging, 'masked-preview-exit.mjs');
+await writeFile(
+  maskedExit,
+  `
+  import processes from 'node:child_process';
+  import { syncBuiltinESMExports } from 'node:module';
+  const { spawnSync } = processes;
+  processes.spawnSync = (binary, argv, options) => {
+    const result = spawnSync(binary, argv, options);
+    return argv[1] === 'render' ? { ...result, status: 0 } : result;
+  };
+  syncBuiltinESMExports();
+`,
+);
+
 const deniedPreview = spawnSync(
   process.execPath,
-  [runner, staging, ops, expectedNames, '--preview'],
+  ['--import', maskedExit, runner, staging, ops, expectedNames, '--preview'],
   { encoding: 'utf8' },
 );
 const blocked = JSON.parse(deniedPreview.stdout);
 if (deniedPreview.status !== 1 || blocked.state !== 'preview-blocked' || !blocked.output)
   throw Error('Unavailable preview did not preserve the structural artifact');
 await access(blocked.output);
+const previewProcess = JSON.parse(
+  await readFile(join(blocked.generation, 'preview.process.json'), 'utf8'),
+);
+if (previewProcess.status !== 0) throw Error('Preview wrapper did not mask the child exit');
+if (
+  blocked.verification?.structure !== 'validated' ||
+  blocked.verification.preview !== 'blocked' ||
+  blocked.verification.visualReview !== 'not-performed' ||
+  blocked.verification.nativeReview !== 'not-performed' ||
+  blocked.previewFailure?.retryable !== false ||
+  blocked.nextAction?.type !== 'deliver-validated-pptx' ||
+  blocked.nextAction.path !== blocked.output
+)
+  throw Error('Expected a machine-readable structural handoff for blocked preview');
+const resumedBlocked = spawnSync(process.execPath, [runner, '--resume', blocked.generation], {
+  encoding: 'utf8',
+  env: { ...process.env, DECKUSE_BROWSER_PROVIDER: 'chrome' },
+});
+const resumedReport = JSON.parse(resumedBlocked.stdout);
+if (
+  resumedBlocked.status !== 1 ||
+  resumedReport.previewFailure?.code !== blocked.previewFailure.code ||
+  resumedReport.nextAction?.path !== blocked.output ||
+  resumedReport.sha256 !== blocked.sha256 ||
+  (await readdir(blocked.generation)).filter((name) =>
+    /^preview(?:\.attempt-\d+)?\.started\.json$/.test(name),
+  ).length !== 1
+)
+  throw Error('Changing a preview setting replayed a nonretryable preview or lost its artifact');
+
 const wrongNames = join(staging, 'wrong-slide-names.json');
 await writeFile(wrongNames, JSON.stringify(['Blank starter', 'Unexpected']));
 const invalidBuild = spawnSync(process.execPath, [runner, staging, ops, wrongNames], {

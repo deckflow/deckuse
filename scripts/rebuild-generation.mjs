@@ -72,20 +72,6 @@ let config,
   checkpoint = {},
   attempt,
   previewFailure;
-const previewContext = () =>
-  hash(
-    JSON.stringify(
-      Object.fromEntries(
-        Object.entries(process.env)
-          .filter(([key]) =>
-            /^(DECKUSE_(BROWSER|DECK2HTML)|PLAYWRIGHT_|CHROME_PATH|CHROMIUM_PATH|DOTNET_BUNDLE_EXTRACT_BASE_DIR)/.test(
-              key,
-            ),
-          )
-          .sort(),
-      ),
-    ),
-  );
 async function nextBase(name) {
   if (
     !(await exists(join(generation, name + '.started.json'))) &&
@@ -172,12 +158,22 @@ async function cli(argv, label = phase) {
     envelope?.ok !== true ||
     (['validate', 'export'].includes(label) && envelope.data?.valid !== true)
   ) {
-    if (label === 'preview')
+    let previewMessage;
+    if (label === 'preview') {
+      const failures = (envelope?.data?.results ?? []).filter((page) => !page.ok);
+      const failedPage =
+        failures.find((page) => page.errorDetails?.retryable === false) ?? failures[0];
+      const details = envelope?.error?.details ?? failedPage?.errorDetails;
+      previewMessage = failedPage?.error;
       previewFailure = {
-        context: previewContext(),
-        retryable: envelope.error?.details?.retryable ?? false,
+        code: envelope?.error?.code ?? failedPage?.errorCode ?? 'PREVIEW_FAILED',
+        stage: details?.stage,
+        retryable:
+          details?.retryable === true &&
+          failures.every((page) => page.errorDetails?.retryable === true),
       };
-    throw Error(envelope?.error?.message ?? label + ' failed');
+    }
+    throw Error(envelope?.error?.message ?? previewMessage ?? label + ' failed');
   }
   return { data: envelope.data, base };
 }
@@ -192,6 +188,18 @@ async function report(result) {
     revision,
     attempt,
     visualReview: 'not-performed',
+    verification: {
+      structure: artifact || validatedSnapshot ? 'validated' : 'unverified',
+      preview:
+        result.state === 'preview-ready'
+          ? 'generated'
+          : result.state === 'preview-blocked'
+            ? 'blocked'
+            : 'not-performed',
+      visualReview: 'not-performed',
+      nativeReview: 'not-performed',
+    },
+    nextAction: { type: 'inspect-report', path },
     ...result,
   };
   await writeFile(path, JSON.stringify(data, null, 2) + '\n', { flag: 'wx' });
@@ -474,14 +482,12 @@ async function run() {
     }
     if (config.preview) {
       phase = 'preview';
-      if (
-        checkpoint.previewFailure?.retryable === false &&
-        checkpoint.previewFailure.context === previewContext() &&
-        !retryPreview
-      )
+      if (checkpoint.previewFailure?.retryable === false && !retryPreview) {
+        previewFailure = checkpoint.previewFailure;
         throw Error(
-          'Preview previously blocked in this context; fix the environment and pass --retry-preview explicitly',
+          'Preview remains blocked. Deliver the validated PPTX and retry only after confirming host capability has changed.',
         );
+      }
       const { data: result, base } = await cli([
         'render',
         ...(resume ? ['--since-revision', revision] : ['--all']),
@@ -511,10 +517,18 @@ async function run() {
       state: config.preview ? 'preview-ready' : 'structural-only',
       validationReport: checkpoint.validationReport,
       ...(config.preview ? { previewInventory: checkpoint.previewReport } : {}),
+      nextAction: {
+        type: config.preview ? 'review-preview' : 'deliver-validated-pptx',
+        path: config.preview ? checkpoint.previewReport : artifact.output,
+      },
     });
   } catch (cause) {
     process.exitCode = 1;
-    if (previewFailure) await saveCheckpoint({ previewFailure });
+    const previewBlocked = Boolean(artifact && phase === 'preview');
+    if (previewBlocked) {
+      previewFailure ??= { code: failureKind ?? 'PREVIEW_FAILED', retryable: false };
+      if (previewFailure !== checkpoint.previewFailure) await saveCheckpoint({ previewFailure });
+    }
     let recoverableSnapshot;
     if (phase === 'export' && validatedSnapshot) {
       const candidate = await inspectSnapshot().catch(() => undefined);
@@ -523,13 +537,21 @@ async function run() {
     await report({
       ok: false,
       ...artifact,
-      state:
-        artifact && phase === 'preview'
-          ? 'preview-blocked'
-          : recoverableSnapshot
-            ? 'recoverable-snapshot'
-            : 'failed',
+      state: previewBlocked
+        ? 'preview-blocked'
+        : recoverableSnapshot
+          ? 'recoverable-snapshot'
+          : 'failed',
       ...(recoverableSnapshot ? { recoverableSnapshot } : {}),
+      ...(previewBlocked
+        ? {
+            previewFailure,
+            validationReport: checkpoint.validationReport,
+            nextAction: { type: 'deliver-validated-pptx', path: artifact.output },
+          }
+        : phase === 'apply'
+          ? { nextAction: { type: 'resume-generation', path: generation } }
+          : {}),
       ...(failureKind ? { failureKind } : {}),
       error: cause instanceof Error ? cause.message : String(cause),
     });

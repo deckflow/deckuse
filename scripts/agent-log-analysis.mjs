@@ -36,8 +36,10 @@ function milestoneKinds(event) {
   const kinds = [];
   if (/\bnpm\s+(?:install|i)\b/.test(command)) kinds.push('installation');
   if (/\bagent-context\b/.test(command)) kinds.push('contract');
-  if (event.name === 'Write' && /(?:build-ops\.[cm]?js|ops\.json)$/.test(path))
-    kinds.push('firstOperations');
+  if (event.name === 'Write' && /(?:build[-_]ops\.(?:[cm]?js|py)|ops\.json)$/i.test(path)) {
+    const probe = /(?:^|[\/_.-])probe(?:[\/_.-]|$)/i.test(path);
+    kinds.push(probe ? 'firstProbeOperations' : 'firstOperations');
+  }
   for (const kind of ['apply', 'validate', 'export'])
     if (new RegExp(`(?:deckuse|\\$CLI)\\s+${kind}\\b`).test(command)) kinds.push(kind);
   if (/(?:deckuse|\$CLI)\s+render\b/.test(command) && !command.includes('--preflight'))
@@ -93,6 +95,7 @@ export function analyzeAgentLog(events) {
       [
         'installation',
         'contract',
+        'firstProbeOperations',
         'firstOperations',
         'apply',
         'validate',
@@ -129,7 +132,7 @@ export function analyzeAgentLog(events) {
     notes: [
       'Tool intervals are merged, not summed. Batched result timestamps do not identify the slow tool.',
       'Unattributed time can include model output, reasoning, host scheduling and incomplete tool traces.',
-      'Milestones identify attempts; return status alone cannot prove a validated artifact or visual review.',
+      'Milestones identify attempts; return status alone cannot prove a validated artifact or visual review. Probe operations are identified by their path names.',
       'Background notifications and summary backfills do not start tasks. No source payloads are included.',
     ],
   };
