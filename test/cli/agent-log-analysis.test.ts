@@ -47,3 +47,24 @@ it('merges concurrent intervals and excludes summary/notification task boundarie
     ]),
   ).toBe(13);
 });
+
+it('keeps probe and formal operations milestones separate', () => {
+  const result = analyzeAgentLog([
+    {
+      timestamp: 100,
+      type: 'message',
+      role: 'user',
+      content: [{ text: '<user_query>Make a deck</user_query>' }],
+    },
+    ...['./probe-ops.json', './job/build_ops.py'].map((file_path, i) => ({
+      timestamp: 200 + i * 100,
+      type: 'function_call',
+      callId: String(i),
+      name: 'Write',
+      arguments: JSON.stringify({ file_path }),
+    })),
+  ]);
+  expect(result.tasks[0].milestones.firstProbeOperations.startedMs).toBe(100);
+  expect(result.tasks[0].milestones.firstOperations.startedMs).toBe(200);
+  expect(JSON.stringify(result)).not.toContain('probe-ops.json');
+});
