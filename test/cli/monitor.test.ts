@@ -1,7 +1,16 @@
 import { Script } from 'node:vm';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, symlink, unlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -894,3 +903,45 @@ describe('monitor', () => {
     await monitor.close();
   });
 });
+
+it.skipIf(process.platform === 'win32')(
+  'uses the configured converter and inherited extraction environment in monitor',
+  async () => {
+    const workspace = await workspaceFixture();
+    const binary = join(workspace, 'converter.cjs');
+    const record = join(workspace, 'invocation.json');
+    await writeFile(
+      binary,
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+const out = args[args.indexOf('-o') + 1];
+fs.mkdirSync(out, { recursive: true });
+fs.writeFileSync(path.join(out, 'index.html'), '<html>configured converter</html>');
+fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify({ args, base: process.env.DOTNET_BUNDLE_EXTRACT_BASE_DIR }));
+`,
+    );
+    await chmod(binary, 0o755);
+    vi.stubEnv('DECKUSE_DECK2HTML_BINARY', binary);
+    vi.stubEnv('DOTNET_BUNDLE_EXTRACT_BASE_DIR', '/host-approved-cache');
+    const watcher = Object.assign(new EventEmitter(), { close: vi.fn() });
+    const monitor = await startMonitor(workspace, {
+      port: 0,
+      dependencies: { watch: () => watcher },
+    });
+    const client = await subscribe(monitor.url);
+    try {
+      await eventually(async () => {
+        const invocation = JSON.parse(await readFile(record, 'utf8'));
+        expect(invocation.base).toBe('/host-approved-cache');
+        expect(invocation.args).toContain('--pages');
+      });
+      await eventually(() => expect(client.events.join('')).toContain('render'));
+    } finally {
+      client.close();
+      await monitor.close();
+      vi.unstubAllEnvs();
+    }
+  },
+);

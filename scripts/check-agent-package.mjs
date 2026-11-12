@@ -171,18 +171,23 @@ await writeFile(
 );
 const timeToOperationsMs = performance.now() - start;
 await writeFile(generatedNames, JSON.stringify(inventory));
-for (const [fault, code] of [
-  ['create', 'BROWSER_CACHE_UNWRITABLE'],
-  ['cleanup', 'BROWSER_PREFLIGHT_CLEANUP_FAILED'],
-]) {
-  const result = probeCli(['render', '--preflight'], fault);
-  if (
-    result.status !== 1 ||
-    result.envelope.error.code !== code ||
-    (fault === 'cleanup' && result.envelope.error.details.previewSupported !== false)
-  )
-    throw new Error('Incorrect browser preflight diagnostic: ' + JSON.stringify(result));
-}
+const createProbe = probeCli(['render', '--preflight'], 'create');
+if (createProbe.status !== 1 || createProbe.envelope.error?.code !== 'BROWSER_CACHE_UNWRITABLE')
+  throw new Error('Incorrect browser create diagnostic: ' + JSON.stringify(createProbe));
+const cleanupProbe = probeCli(['render', '--preflight'], 'cleanup');
+const cleanupWarning = cleanupProbe.envelope.data?.cleanupWarnings?.[0];
+if (
+  cleanupProbe.status !== 0 ||
+  cleanupProbe.envelope.ok !== true ||
+  cleanupProbe.envelope.data?.cacheWritable !== true ||
+  cleanupProbe.envelope.data?.launch !== 'not-probed' ||
+  cleanupWarning?.code !== 'BROWSER_PREFLIGHT_CLEANUP_FAILED' ||
+  cleanupWarning.details.stage !== 'profile-cleanup' ||
+  cleanupWarning.details.systemCode !== 'EACCES' ||
+  cleanupWarning.details.retryable !== false ||
+  cleanupWarning.details.retainedPath !== cleanupWarning.details.path
+)
+  throw new Error('Incorrect browser cleanup warning: ' + JSON.stringify(cleanupProbe));
 const compactDeck = JSON.parse(
   execFileSync(
     process.execPath,

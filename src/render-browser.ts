@@ -98,21 +98,30 @@ async function checkBrowserPreflight() {
       details('profile-write', probeFile, cause),
     );
   }
+  const cleanupWarnings: { code: string; message: string; details: Record<string, unknown> }[] = [];
   try {
     await timed('cleanup-browser-preflight', () => rm(probe, { recursive: true }));
   } catch (cause) {
-    throw new RenderFailure('BROWSER_PREFLIGHT_CLEANUP_FAILED', String(cause), {
-      ...details('profile-cleanup', probe, cause),
-      retryable: false,
-      previewSupported: false,
-      ...(writeFailure ? { writeFailure: writeFailure.details } : {}),
+    cleanupWarnings.push({
+      code: 'BROWSER_PREFLIGHT_CLEANUP_FAILED',
+      message: String(cause),
+      details: {
+        ...details('profile-cleanup', probe, cause),
+        retryable: false,
+        retainedPath: probe,
+      },
     });
   }
-  if (writeFailure) throw writeFailure;
+  if (writeFailure)
+    throw new RenderFailure(writeFailure.code, writeFailure.message, {
+      ...writeFailure.details,
+      cleanupWarnings,
+    });
   return {
     ...config,
     executableStatus,
     cacheWritable: true,
+    cleanupWarnings,
     dependencyCompatibility:
       config.provider === 'headless-shell' ? 'playwright-managed' : 'unverified',
     launch: 'not-probed',
@@ -125,7 +134,11 @@ export async function launchRenderBrowser(
   timeout?: number,
 ): Promise<Browser> {
   const config = await browserPreflight();
-  const key = JSON.stringify(config);
+  for (const warning of config.cleanupWarnings)
+    process.stderr.write(
+      `deckuse: ${warning.code} (${String(warning.details['retainedPath'])}): ${warning.message}\n`,
+    );
+  const key = JSON.stringify({ ...config, cleanupWarnings: undefined });
   const previous = failed.get(key);
   if (previous && process.env['DECKUSE_BROWSER_RETRY'] !== '1') throw previous;
   try {

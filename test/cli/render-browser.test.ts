@@ -63,7 +63,6 @@ it('probes a trivial page with bounded launch and closes the browser on page tim
 it.each([
   ['mkdtemp', 'BROWSER_CACHE_UNWRITABLE', 'profile-create'],
   ['writeFile', 'BROWSER_CACHE_UNWRITABLE', 'profile-write'],
-  ['rm', 'BROWSER_PREFLIGHT_CLEANUP_FAILED', 'profile-cleanup'],
 ] as const)('reports a denied %s probe at its own stage', async (method, code, stage) => {
   const fs = (await import('node:fs')).default;
   const { syncBuiltinESMExports } = await import('node:module');
@@ -83,6 +82,51 @@ it.each([
     });
   } finally {
     Object.assign(fs.promises, { [method]: original });
+    syncBuiltinESMExports();
+  }
+});
+
+it('retains denied cleanup as a warning and preserves a primary write failure', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  vi.stubEnv('DECKUSE_BROWSER_PROVIDER', 'headless-shell');
+  vi.stubEnv('DECKUSE_BROWSER_EXECUTION', 'unknown');
+  const original = {
+    mkdtemp: fs.promises.mkdtemp,
+    rm: fs.promises.rm,
+    writeFile: fs.promises.writeFile,
+  };
+  const denied = Object.assign(new Error('denied'), { code: 'EPERM' });
+  const rm = vi.fn().mockRejectedValue(denied);
+  Object.assign(fs.promises, {
+    mkdtemp: async () => '/probe-retained',
+    writeFile: async () => {},
+    rm,
+  });
+  syncBuiltinESMExports();
+  try {
+    await expect(browserPreflight()).resolves.toMatchObject({
+      cacheWritable: true,
+      cleanupWarnings: [
+        { code: 'BROWSER_PREFLIGHT_CLEANUP_FAILED', details: { retainedPath: '/probe-retained' } },
+      ],
+    });
+    Object.assign(fs.promises, {
+      writeFile: async () => {
+        throw denied;
+      },
+    });
+    syncBuiltinESMExports();
+    await expect(browserPreflight()).rejects.toMatchObject({
+      code: 'BROWSER_CACHE_UNWRITABLE',
+      details: {
+        stage: 'profile-write',
+        cleanupWarnings: [{ code: 'BROWSER_PREFLIGHT_CLEANUP_FAILED' }],
+      },
+    });
+    expect(rm).toHaveBeenCalledTimes(2);
+  } finally {
+    Object.assign(fs.promises, original);
     syncBuiltinESMExports();
   }
 });
