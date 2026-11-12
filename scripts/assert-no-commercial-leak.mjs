@@ -130,7 +130,14 @@ const underSource = (p) => p === sourceRoot || p.startsWith(`${sourceRoot}${sep}
 const sourceFiles = allFiles.filter((p) => sourceExt.test(p) && underSource(p));
 
 for (const file of sourceFiles) {
-  const text = readFileSync(file, 'utf8');
+  const originalText = readFileSync(file, 'utf8');
+  // The public deck2html API already accepts a license path. Permit exactly one
+  // argument-map entry forwarding it to that dependency, not Deckuse activation,
+  // verification, CLI parsing, or any other license implementation.
+  const text =
+    relative(root, file).split(sep).join('/') === 'src/deck2html-exec.ts'
+      ? originalText.replace("['license', '--license'],", '')
+      : originalText;
   for (const marker of FORBIDDEN_LICENSE_MARKERS) {
     if (text.includes(marker)) {
       errors.push(`Forbidden license/certificate marker "${marker}" in ${relative(root, file)}`);
