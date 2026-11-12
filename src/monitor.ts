@@ -16,7 +16,7 @@ import {
   operationsPath,
   previewDir,
 } from './workspace/index.js';
-import { ensureDeck2HtmlExecutable } from './deck2html-exec.js';
+import { convertWithConfiguredBinary, ensureDeck2HtmlExecutable } from './deck2html-exec.js';
 
 const KEEPALIVE_MS = 15_000;
 const DEBOUNCE_MS = 80;
@@ -503,7 +503,7 @@ export const startMonitor = async (
   const fullPreviewRoot = previewDir(absoluteWorkspace);
   await mkdir(fullPreviewRoot, { recursive: true });
   let realFullPreviewRoot = await realpath(fullPreviewRoot);
-  const converter = options.dependencies?.convert ?? deck2html.convert;
+  const converter = options.dependencies?.convert ?? convertWithConfiguredBinary;
   const createWatcher = options.dependencies?.watch ?? watch;
   const debounceMs = options.dependencies?.debounceMs ?? DEBOUNCE_MS;
   const keepaliveMs = options.dependencies?.keepaliveMs ?? KEEPALIVE_MS;
