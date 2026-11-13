@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Uint8ArrayReader, ZipReader } from '@zip.js/zip.js';
 import { describe, expect, it } from 'vitest';
 import {
   OpcArchive,
@@ -114,6 +115,55 @@ describe('OPC archive', () => {
     reopened.setPart('/custom/data.bin', enc.encode('changed'));
     expect(reopened.isUnmodified('/custom/data.bin')).toBe(false);
   });
+
+  it('deflates XML and stores media and embedded binary parts without compression', async () => {
+    const archive = new OpcArchive();
+    const binary = new Uint8Array(256).fill(42);
+    const parts = [
+      ['/ppt/slides/slide1.XML', 'application/xml'],
+      ['/custom/metadata.part', 'application/vnd.example.metadata+xml'],
+      ['/ppt/media/image.png', 'image/png'],
+      ['/custom/image.svg', 'image/svg+xml'],
+      ['/ppt/media/video.mp4', 'video/mp4'],
+      ['/ppt/media/audio.mp3', 'audio/mpeg'],
+      [
+        '/ppt/embeddings/workbook.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ],
+      ['/custom/opaque.bin', 'application/octet-stream'],
+    ] as const;
+    const xml = enc.encode('<root/>');
+    for (const [index, [name, mediaType]] of parts.entries())
+      archive.setPart(name, index < 2 || mediaType === 'image/svg+xml' ? xml : binary, mediaType);
+    archive.setRelationships('/', []);
+
+    const bytes = await archive.toUint8Array();
+    const reader = new ZipReader(new Uint8ArrayReader(bytes));
+    try {
+      const methods = Object.fromEntries(
+        (await reader.getEntries()).map((entry) => [entry.filename, entry.compressionMethod]),
+      );
+      expect(methods).toEqual({
+        '[Content_Types].xml': 8,
+        '_rels/.rels': 8,
+        'ppt/slides/slide1.XML': 8,
+        'custom/metadata.part': 8,
+        'ppt/media/image.png': 0,
+        'custom/image.svg': 0,
+        'ppt/media/video.mp4': 0,
+        'ppt/media/audio.mp3': 0,
+        'ppt/embeddings/workbook.xlsx': 0,
+        'custom/opaque.bin': 0,
+      });
+    } finally {
+      await reader.close();
+    }
+
+    const reopened = await OpcArchive.open(bytes);
+    for (const [name] of parts)
+      expect(reopened.getPart(name)?.data).toEqual(archive.getPart(name)?.data);
+  });
+
   it('hasPartIgnoreCase detects MP4/mp4 path collisions', () => {
     const archive = new OpcArchive();
     archive.setPart('/[Content_Types].xml', enc.encode(contentTypes), 'application/xml');

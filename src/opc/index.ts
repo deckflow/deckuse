@@ -559,9 +559,11 @@ export class OpcArchive {
   async toUint8Array(): Promise<Uint8Array> {
     this.syncContentTypes();
     const writer = new Uint8ArrayWriter();
-    const zip = new ZipWriter(writer, { bufferedWrite: true, keepOrder: true, level: 6 });
+    const zip = new ZipWriter(writer, { bufferedWrite: true, keepOrder: true });
     for (const part of this.parts.values())
-      await zip.add(part.name.slice(1), new Uint8ArrayReader(part.data));
+      await zip.add(part.name.slice(1), new Uint8ArrayReader(part.data), {
+        level: isXmlPart(part) && !part.mediaType.toLowerCase().startsWith('image/') ? 5 : 0,
+      });
     return zip.close();
   }
   async writeDirectory(path: string, overwrite = false): Promise<void> {
