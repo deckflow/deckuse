@@ -41,7 +41,12 @@ import {
   parseRenderReviewNotes,
   type RenderPagesResult,
 } from './render.js';
-import { browserPreflight, probeRenderBrowser, renderFailurePayload } from './render-browser.js';
+import {
+  browserPreflight,
+  installRenderBrowser,
+  probeRenderBrowser,
+  renderFailurePayload,
+} from './render-browser.js';
 import { EDITION } from './edition.js';
 import { version } from './version.js';
 
@@ -1847,6 +1852,33 @@ const main = async (): Promise<void> => {
         process.once('SIGTERM', () => void shutdown('SIGTERM'));
         return;
       } else if (action === 'render') {
+        if (clean.includes('--install-browser')) {
+          const command = 'deckuse render';
+          if (
+            clean.length !== 2 ||
+            process.argv
+              .slice(2)
+              .some((arg) => !['render', '--install-browser', '--json', '--quiet'].includes(arg))
+          ) {
+            outputEnvelope({
+              ok: false,
+              command,
+              error: {
+                code: 'INVALID_ARGUMENT',
+                message: 'Usage: deckuse render --install-browser [--json]',
+              },
+            });
+            process.exitCode = 2;
+            return;
+          }
+          try {
+            outputEnvelope({ ok: true, command, data: await installRenderBrowser() });
+          } catch (cause) {
+            outputEnvelope({ ok: false, command, error: renderFailurePayload(cause) });
+            process.exitCode = 1;
+          }
+          return;
+        }
         if (clean.includes('--preflight')) {
           const probe = clean.includes('--probe-browser');
           let converter: Awaited<ReturnType<typeof converterPreflight>> | undefined;
@@ -1854,11 +1886,15 @@ const main = async (): Promise<void> => {
           try {
             state = await browserPreflight();
             converter = await converterPreflight();
-            if (probe) await probeRenderBrowser();
+            const launched = probe ? await probeRenderBrowser(undefined, state) : undefined;
             outputEnvelope({
               ok: true,
               command: 'deckuse render',
-              data: { ...state, ...(probe ? { launch: 'available' } : {}), converter },
+              data: {
+                ...state,
+                ...(launched ? { ...launched, launch: 'available' } : {}),
+                converter,
+              },
             });
           } catch (cause) {
             const error = renderFailurePayload(cause);

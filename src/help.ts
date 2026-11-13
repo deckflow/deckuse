@@ -831,7 +831,7 @@ Examples:
       'Scenarios: create, replicate, edit, populate-template, audit, preview-export. DOCX excludes replicate/template. Static fingerprint excludes live workspace/environment state. Contracts are JSON operation schemas; recipe.cli documents shell syntax. Older binaries use same-version skill plus schema --list / --type.',
   },
   render: {
-    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>]',
+    usage: 'deckuse render --page <n> [--output <file.png>] [--scale <n>] | --install-browser',
     summary:
       'Convert one slide to HTML (deck2html), screenshot it with Playwright, then delete the HTML staging output.',
     example: 'deckuse render --page 3 --workspace ./workspace --scale 2 --json',
@@ -842,6 +842,7 @@ Options:
   --pages <1,3-5>          Render several pages from one snapshot (use --output-dir)
   --preflight              Check converter and browser configuration without a workspace
   --probe-browser           With --preflight, launch the selected browser and load a trivial page
+  --install-browser         Install the matching Playwright Chromium Headless Shell without a workspace
   --all                    Render all pages from one snapshot
   --since-revision <rev>   PPTX: reuse verified PNGs in the same output directory
   --contact-sheet         PPTX batch: also save contact-sheet.png
@@ -855,9 +856,11 @@ Options:
   --json                    Machine-readable envelope
 
 Notes:
-  Default browser: matched Playwright headless shell. DECKUSE_BROWSER_PROVIDER
-  selects headless-shell|chrome|chromium|msedge|executable; explicit paths use
-  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH. No provider fallback after launch failure.
+  Automatic selection tries the matched Playwright Headless Shell first. If missing,
+  it checks standard locations for Chrome, Edge, then Chromium. Downloads require
+  --install-browser. DECKUSE_BROWSER_PROVIDER selects auto|headless-shell|chrome|
+  chromium|msedge|executable. Explicit providers and paths select a single browser.
+  Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH for a custom browser location.
   DECKUSE_BROWSER_EXECUTION=denied lets hosts reject before launch; an approved
   host worker must be selected by the host. See docs/agent-reliability.md.
   Intended for AI agents to visually review whether an edit looks correct.
@@ -865,7 +868,6 @@ Notes:
   CHART_SERIES_COLOR_UNVERIFIED. Pages without those charts omit the generic warning.
   Verify ppt/charts/*.xml or PowerPoint when color accuracy matters.
   DOCX pages follow deck2html's HTML pagination; native Word pagination may differ.
-  Requires a system Chrome / Chromium / Edge, or PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH.
   Temporary deck2html output is always removed after the screenshot.`,
   },
 

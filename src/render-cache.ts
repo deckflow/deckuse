@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir, platform, release } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
-import { browserConfiguration, loadPreviewBrowser } from './render-browser.js';
+import {
+  browserConfiguration,
+  loadPreviewBrowser,
+  systemBrowserCandidates,
+} from './render-browser.js';
 import { version } from './version.js';
 import type { RenderResult } from './render.js';
 
@@ -47,19 +51,21 @@ export async function renderEnvironmentKey(binary?: string) {
       );
     }),
   );
+  const chromiumPath = chromium.executablePath();
+  // A new or removed browser can change which provider supplies the cached PNG.
+  const shellDirectory = /^(.*[/\\])chromium-(\d+)[/\\]/.exec(chromiumPath)?.slice(1);
+  const systemPaths = systemBrowserCandidates()
+    .filter(({ provider }) => config.provider === 'auto' || config.provider === provider)
+    .flatMap(({ executablePath }) => [
+      executablePath,
+      ...(platform() === 'darwin' ? [join(dirname(executablePath), '../Info.plist')] : []),
+    ]);
   const inputs = [
     binary,
     config.executablePath,
-    chromium.executablePath(),
-    ...(platform() === 'darwin'
-      ? [
-          '/Applications/Google Chrome.app/Contents/Info.plist',
-          '/Applications/Microsoft Edge.app/Contents/Info.plist',
-          '/Applications/Chromium.app/Contents/Info.plist',
-        ]
-      : platform() === 'linux'
-        ? ['/opt/google/chrome/chrome', '/opt/microsoft/msedge/msedge', '/usr/bin/chromium']
-        : []),
+    chromiumPath,
+    shellDirectory?.join('chromium_headless_shell-'),
+    ...systemPaths,
     process.env['FONTCONFIG_FILE'],
     process.env['DECK2HTML_LICENSE'],
     join(homedir(), '.deckflow', 'deck2html.lic'),
@@ -68,7 +74,7 @@ export async function renderEnvironmentKey(binary?: string) {
     require.resolve('@fortawesome/fontawesome-free/css/all.min.css'),
   ];
   return JSON.stringify({
-    cacheVersion: 1,
+    cacheVersion: 2,
     version,
     platform: platform(),
     release: release(),

@@ -139,14 +139,21 @@ remain compatible; a future unified wire type would require a versioned migratio
 `deckuse render --preflight --json` is static: it checks configuration, explicit
 executable permissions and temporary profile writability, without opening a GUI
 or downloading anything. Managed browser installation and system-channel
-availability remain unprobed until launch. Default provider is Playwright's matched
-headless shell; run this installation's `node_modules/playwright-core/cli.js
-install chromium --only-shell` if absent. Do not substitute a different Playwright
-version's installer. System compatibility remains unverified.
+availability remain unprobed until launch. The default `auto` provider tries
+Playwright's matched Chromium Headless Shell first. If its executable is missing,
+Deckuse checks standard locations for Chrome, Edge, then Chromium. A launch error
+for a present browser stops selection and preserves its diagnostic.
+`deckuse render --preflight --probe-browser --json` reports the actual
+`resolvedProvider` after a successful launch.
 
-Set `DECKUSE_BROWSER_PROVIDER` to headless-shell, chrome, msedge, chromium or
-executable. The latter requires PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH (legacy
-CHROME_PATH/CHROMIUM_PATH also accepted). There is no automatic provider fallback.
+Run `deckuse render --install-browser --json` to install Headless Shell using the
+Playwright version resolved by this Deckuse installation. The command works
+without a workspace and sends installation progress to stderr.
+
+Set `DECKUSE_BROWSER_PROVIDER` to auto, headless-shell, chrome, msedge, chromium
+or executable. Only auto searches for another browser when an executable is
+missing. PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH (or legacy CHROME_PATH/CHROMIUM_PATH)
+selects executable mode unless the provider is set explicitly.
 A host that cannot permit browser execution sets DECKUSE_BROWSER_EXECUTION=denied
 before invoking Deckuse: BROWSER_HOST_DENIED occurs before process launch. The
 host can instead dispatch the same command through its approved worker; Deckuse

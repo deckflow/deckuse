@@ -117,6 +117,15 @@ npm install -g @deckflow/deckuse
 
 This installs the `deckuse` CLI globally.
 
+For PNG previews, `deckuse render` uses Playwright's matching Chromium Headless
+Shell when available and otherwise looks for an installed Chrome, Edge, or
+Chromium in standard locations. If none is available, run:
+
+```sh
+deckuse render --install-browser
+deckuse render --preflight --probe-browser --json
+```
+
 ## CLI workflow
 
 ```sh
@@ -151,7 +160,7 @@ deckuse monitor start --workspace ./workspace --port 0
 deckuse monitor status --json
 deckuse monitor stop --workspace ./workspace
 
-# Screenshot one slide to PNG for visual review (requires Chrome / Chromium / Edge).
+# Screenshot one slide to PNG for visual review.
 deckuse render --page 1 --workspace ./workspace --json
 ```
 

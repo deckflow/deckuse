@@ -57,6 +57,14 @@ npm install -g @deckflow/deckuse
 
 该命令会全局安装 `deckuse` CLI。
 
+生成 PNG 预览时，`deckuse render` 优先使用与 Playwright 匹配的 Chromium
+Headless Shell。缺失时会在常见安装位置查找 Chrome、Edge 和 Chromium。如果都找不到，可以安装并验证浏览器：
+
+```sh
+deckuse render --install-browser
+deckuse render --preflight --probe-browser --json
+```
+
 ```sh
 # 从演示文稿创建持久工作空间（revision 从 1 开始）。
 deckuse init input.pptx ./workspace --json
@@ -84,7 +92,7 @@ deckuse export ./out.pptx --workspace ./workspace --json
 # 实时 HTML 预览；浏览器订阅后才开始转换。
 deckuse monitor --workspace ./workspace --port 4173
 
-# 将单页截成 PNG 供视觉复查（需要 Chrome / Chromium / Edge）。
+# 将单页截成 PNG 供视觉复查。
 deckuse render --page 1 --workspace ./workspace --json
 ```
 
