@@ -1,10 +1,13 @@
 # @deckflow/deckuse
 
-## Unreleased
+## 1.9.9
 
 - Add native grouping/ungrouping, attached connector endpoints, custom path geometry, linear gradients, physical table row heights and region merge/unmerge commands.
 - Add blank canvas dimensions, opt-in embedded chart workbooks, and read-only chart-data dependency preflight with safe independent-formula preservation.
 - Detect chart initialization failures and number-format degradation during single/batch rendering. Companion deck2html fixes trimmed number-format/color serialization and renders limited bar/line combos in Community. Use `DECKUSE_DECK2HTML_BINARY` to test the companion build before its upstream release.
+- Use Deflate level 5 for XML and relationship parts when rebuilding Office packages. Store images, audio, video, and other binary parts without compression.
+- Allow structural editing without preview dependencies, and report missing preview packages during preflight. Describe public edition capabilities and TypeSafe ranking data in the CLI and documentation.
+- Add `deckuse render --install-browser` to install the Chromium Headless Shell for the current Playwright dependency. When the default shell is missing, look for system Chrome, Edge, or Chromium. Include the install command in missing-browser errors and report the selected browser in probe results.
 
 ## 1.9.8
 
