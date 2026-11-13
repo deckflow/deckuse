@@ -74,7 +74,7 @@ import {
   undoWrites,
   withWriteLock,
 } from './workspace.js';
-import { NS, REL, descendants } from './xml.js';
+import { NS, PRESENTATION_PART_TYPES, REL, descendants } from './xml.js';
 
 const buildIndex: typeof buildIndexImpl = (...args) =>
   timedSync('index', () => buildIndexImpl(...args));
@@ -375,15 +375,31 @@ const validateArchiveImpl = (archive: OpcArchive, workspace?: string): Diagnosti
           details: { ...d.details, partUri: part },
         })),
       );
-  for (const [source, rels] of archive.relationships)
-    for (const rel of rels)
-      if (!rel.external && rel.resolvedTarget && !archive.getPart(rel.resolvedTarget))
+  for (const [source, rels] of archive.relationships) {
+    for (const rel of rels) {
+      const target = rel.resolvedTarget ? archive.getPart(rel.resolvedTarget) : undefined;
+      if (!rel.external && rel.resolvedTarget && !target) {
         diagnostics.push({
           severity: 'error',
           code: 'BROKEN_RELATIONSHIP',
           message: `Missing target ${rel.resolvedTarget}`,
           details: { source, relationshipId: rel.id },
         });
+      } else if (rel.type === REL.layout && target?.mediaType !== PRESENTATION_PART_TYPES.layout) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'INVALID_SLIDE_LAYOUT_TARGET',
+          message: `Slide layout relationship must target a slide layout part: ${rel.target}`,
+          details: {
+            source,
+            relationshipId: rel.id,
+            target: rel.resolvedTarget ?? rel.target,
+            contentType: target?.mediaType,
+          },
+        });
+      }
+    }
+  }
 
   // ZIP entries that differ only by case collide on macOS/Windows extract.
   const seenNames = new Map<string, string>();

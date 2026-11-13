@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { WorkspaceManifest } from '../core/index.js';
 import type { OpcArchive } from '../opc/index.js';
 import { writeMetadata } from '../workspace/index.js';
-import { buildIndex } from './indexer.js';
+import { buildIndex, PPTX_INDEX_VERSION } from './indexer.js';
 import { readIndex } from './workspace.js';
 import type { IndexFile } from './types.js';
 
@@ -21,7 +21,7 @@ export async function loadIndex(
     if (options?.persist) await writeMetadata(root, manifest, index);
     return index;
   }
-  if (index.revision !== manifest.revision) {
+  if (index.revision !== manifest.revision || index.version !== PPTX_INDEX_VERSION) {
     index = buildIndex(archive, manifest.workspaceId, manifest.revision);
     if (options?.persist) await writeMetadata(root, manifest, index);
   }

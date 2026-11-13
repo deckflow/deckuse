@@ -8,6 +8,7 @@ import type { ElementKind, IndexFile, IndexedElement } from './types.js';
 import { mediaHref } from './workspace.js';
 import {
   NS,
+  PRESENTATION_PART_TYPES,
   REL,
   attr,
   cNvPr,
@@ -18,6 +19,8 @@ import {
   root,
   textOf,
 } from './xml.js';
+
+export const PPTX_INDEX_VERSION = 1;
 
 const directChild = (node: Element, localName: string): Element | undefined =>
   children(node).find((child) => child.localName === localName);
@@ -293,14 +296,11 @@ export function buildIndex(
       });
     }
   }
-  if (reuse) return { revision: rev, elements: [...elements, ...shared] };
-  for (const [prefix, kind] of [
-    ['/ppt/slideMasters/', 'master'],
-    ['/ppt/slideLayouts/', 'layout'],
-    ['/ppt/theme/', 'theme'],
-  ] as const)
+  if (reuse)
+    return { version: PPTX_INDEX_VERSION, revision: rev, elements: [...elements, ...shared] };
+  for (const kind of ['master', 'layout', 'theme'] as const)
     for (const part of archive.parts.values())
-      if (part.name.startsWith(prefix) && part.name.endsWith('.xml')) {
+      if (part.mediaType === PRESENTATION_PART_TYPES[kind]) {
         const doc = archive.readXml(part.name);
         elements.push({
           ref: { documentId, elementId: `${kind}:${part.name}`, path: part.name, revision: rev },
@@ -345,7 +345,7 @@ export function buildIndex(
           }
         }
       }
-  return { revision: rev, elements };
+  return { version: PPTX_INDEX_VERSION, revision: rev, elements };
 }
 export const slidePageMap = (index: IndexFile): Map<string, number> => {
   const map = new Map<string, number>();

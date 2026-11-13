@@ -10,6 +10,7 @@ import type { OpcArchive } from '../opc/index.js';
 import { classifyChartPart, type ChartVariant } from './chart-classify.js';
 import { getPptxEditionExtension } from './edition-extension.js';
 import type { IndexedElement } from './types.js';
+import { PRESENTATION_PART_TYPES } from './xml.js';
 
 export type { Edition } from '../edition-config/index.js';
 export { EDITION, EDITION_VARIANT, DISTRIBUTION_CHANNEL, editionCapabilities, editionMetadata };
@@ -45,6 +46,9 @@ export const editionGatedWriteKind = (
   item: IndexedElement,
   archive: OpcArchive,
 ): EditionGatedWriteKind | undefined => {
+  const mediaType = archive.getPart(item.partUri)?.mediaType;
+  for (const kind of ['theme', 'master', 'layout'] as const)
+    if (mediaType === PRESENTATION_PART_TYPES[kind]) return kind;
   if (isThemePart(item)) return 'theme';
   if (isMasterPart(item)) return 'master';
   if (isLayoutPart(item)) return 'layout';

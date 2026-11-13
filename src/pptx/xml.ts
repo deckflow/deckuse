@@ -7,6 +7,11 @@ export const NS = {
   r: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
   c: 'http://schemas.openxmlformats.org/drawingml/2006/chart',
 } as const;
+export const PRESENTATION_PART_TYPES = {
+  master: 'application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml',
+  layout: 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml',
+  theme: 'application/vnd.openxmlformats-officedocument.theme+xml',
+} as const;
 export const REL = {
   slide: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide',
   notes: 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide',

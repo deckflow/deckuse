@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -6,13 +6,16 @@ import { OpcArchive } from '../../src/opc/index.js';
 import { pptxAdapter } from '../../src/pptx/index.js';
 import { naturalCompare, orderedLayouts } from '../../src/pptx/layout-ref.js';
 import type { IndexFile } from '../../src/pptx/types.js';
+import { PRESENTATION_PART_TYPES, REL } from '../../src/pptx/xml.js';
 
 const e = new TextEncoder();
 const CT = 'application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml';
 const layoutCt = 'application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml';
 const slideCt = 'application/vnd.openxmlformats-officedocument.presentationml.slide+xml';
+const nestedMaster = '/ppt/slideLayouts/masters/aMaster.xml';
+const nestedTheme = '/ppt/slideLayouts/masters/themes/aTheme.xml';
 
-async function fixtureTwoLayoutsTwoSlides(path: string) {
+async function fixtureTwoLayoutsTwoSlides(path: string, invalidLayoutTarget = false) {
   const a = new OpcArchive();
   a.setPart(
     '/[Content_Types].xml',
@@ -106,6 +109,25 @@ async function fixtureTwoLayoutsTwoSlides(path: string) {
     ),
     'application/vnd.openxmlformats-officedocument.extended-properties+xml',
   );
+  a.setPart(
+    nestedMaster,
+    e.encode('<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>'),
+    PRESENTATION_PART_TYPES.master,
+  );
+  a.setPart(
+    nestedTheme,
+    e.encode('<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>'),
+    PRESENTATION_PART_TYPES.theme,
+  );
+  if (invalidLayoutTarget)
+    a.setRelationships('/ppt/slides/slide1.xml', [
+      {
+        id: 'rId1',
+        type: REL.layout,
+        target: '../slideLayouts/masters/aMaster.xml',
+        external: false,
+      },
+    ]);
   await a.writeFile(path);
 }
 
@@ -154,6 +176,17 @@ describe('setSlideLayout', () => {
     expect(init.ok).toBe(true);
     if (!init.ok) return;
     let revision = (init.value as { revision: string }).revision;
+
+    // Workspaces created by the previous indexer cached nested masters and themes as layouts.
+    const indexPath = join(workspace, '.deckuse/index.json');
+    const index = JSON.parse(await readFile(indexPath, 'utf8')) as IndexFile;
+    delete index.version;
+    for (const partUri of [nestedMaster, nestedTheme]) {
+      const part = index.elements.find((item) => item.partUri === partUri);
+      expect(part?.kind).toBe(partUri === nestedMaster ? 'master' : 'theme');
+      if (part) part.kind = 'layout';
+    }
+    await writeFile(indexPath, JSON.stringify(index));
 
     const listed = await pptxAdapter.execute(
       { version: '2.0', type: 'list', workspaceId: workspace, resource: 'layouts' },
@@ -353,5 +386,34 @@ describe('setSlideLayout', () => {
     expect(bad.ok).toBe(false);
     if (bad.ok) return;
     expect(bad.error.code).toBe('TARGET_NOT_FOUND');
+  });
+
+  it('reports a slide layout relationship targeting an existing master as invalid', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'deckuse-invalid-layout-target-'));
+    const source = join(root, 'source.pptx');
+    const workspace = join(root, 'workspace');
+    await fixtureTwoLayoutsTwoSlides(source, true);
+    expect(
+      await pptxAdapter.init(
+        { version: '2.0', type: 'init', workspaceId: workspace, format: 'pptx', source },
+        {},
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      await pptxAdapter.execute({ version: '2.0', type: 'validate', workspaceId: workspace }, {}),
+    ).toMatchObject({
+      ok: false,
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'INVALID_SLIDE_LAYOUT_TARGET',
+          details: {
+            source: '/ppt/slides/slide1.xml',
+            relationshipId: 'rId1',
+            target: nestedMaster,
+            contentType: PRESENTATION_PART_TYPES.master,
+          },
+        }),
+      ]),
+    });
   });
 });

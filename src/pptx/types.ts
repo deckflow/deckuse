@@ -28,6 +28,7 @@ export interface IndexedElement {
   payload?: Record<string, unknown>;
 }
 export interface IndexFile {
+  version?: number;
   revision: string;
   elements: IndexedElement[];
 }
