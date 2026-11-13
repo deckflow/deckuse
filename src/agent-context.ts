@@ -205,6 +205,12 @@ export async function agentContext(options: {
         'Validate after writes; HTML preview is approximate; native Office stays unverified',
     },
     dependencies: {
+      find: {
+        service: 'api.typesafe.ai',
+        credential: 'TYPESAFE_API_KEY',
+        sends: ['query', 'candidate names', 'visible text excerpts', 'layout context'],
+        offlineAlternatives: ['search', 'list'],
+      },
       browser,
       converter:
         'bundled dependency; executable availability is checked during render; not actively probed here',

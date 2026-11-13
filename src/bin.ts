@@ -1852,8 +1852,8 @@ const main = async (): Promise<void> => {
           let converter: Awaited<ReturnType<typeof converterPreflight>> | undefined;
           let state: Awaited<ReturnType<typeof browserPreflight>> | undefined;
           try {
-            converter = await converterPreflight();
             state = await browserPreflight();
+            converter = await converterPreflight();
             if (probe) await probeRenderBrowser();
             outputEnvelope({
               ok: true,

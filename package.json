@@ -68,15 +68,11 @@
   },
   "dependencies": {
     "@deckflow/deck2html": "^0.7.0",
-    "@fortawesome/fontawesome-free": "6.5.2",
     "@typesafe-ai/sdk": "^0.6.0",
     "@xmldom/xmldom": "^0.9.10",
     "@zip.js/zip.js": "^2.8.34",
-    "isomorphic-git": "latest",
-    "playwright-core": "^1.62.1",
-    "echarts": "5.5.1",
-    "tailwindcss": "3.4.17",
-    "zod": "latest"
+    "isomorphic-git": "^1.42.2",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@changesets/cli": "latest",
@@ -93,5 +89,11 @@
     "type": "git",
     "url": "git+https://github.com/deckflow/deckuse.git"
   },
-  "homepage": "https://github.com/deckflow/deckuse#readme"
+  "homepage": "https://github.com/deckflow/deckuse#readme",
+  "optionalDependencies": {
+    "@fortawesome/fontawesome-free": "6.5.2",
+    "echarts": "5.5.1",
+    "playwright-core": "^1.62.1",
+    "tailwindcss": "3.4.17"
+  }
 }

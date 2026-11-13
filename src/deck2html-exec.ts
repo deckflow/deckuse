@@ -2,13 +2,29 @@ import { RenderFailure } from './render-browser.js';
 import { access, chmod, constants } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
-import deck2html from '@deckflow/deck2html';
+import type deck2html from '@deckflow/deck2html';
+
+async function selectedBinary(): Promise<string> {
+  const configured = process.env['DECKUSE_DECK2HTML_BINARY'];
+  if (configured) return configured;
+  try {
+    return (await import('@deckflow/deck2html')).default.getBinaryPath();
+  } catch (cause) {
+    throw new RenderFailure(
+      'RENDER_CONVERTER_MISSING',
+      'Install the platform converter to enable preview.',
+      {
+        stage: 'converter-discovery',
+        retryable: false,
+        cause: String(cause),
+      },
+    );
+  }
+}
 
 /** npm may install platform binaries without +x; restore before convert. */
 export const ensureDeck2HtmlExecutable = async (): Promise<void> => {
-  const mod = deck2html as { getBinaryPath?: () => string };
-  if (typeof mod.getBinaryPath !== 'function') return;
-  const binary = process.env['DECKUSE_DECK2HTML_BINARY'] ?? mod.getBinaryPath();
+  const binary = await selectedBinary();
   try {
     await access(binary, constants.X_OK);
   } catch {
@@ -24,8 +40,6 @@ export const ensureDeck2HtmlExecutable = async (): Promise<void> => {
   }
 };
 
-const selectedBinary = () => process.env['DECKUSE_DECK2HTML_BINARY'] ?? deck2html.getBinaryPath();
-
 function extractionConfiguration() {
   const base = process.env['DOTNET_BUNDLE_EXTRACT_BASE_DIR'];
   return {
@@ -36,7 +50,7 @@ function extractionConfiguration() {
 
 /** Inherit host policy and runtime defaults; never relocate or warm extraction caches. */
 async function runConverter(args: string[], preflight = false) {
-  const binary = resolve(selectedBinary());
+  const binary = resolve(await selectedBinary());
   await ensureDeck2HtmlExecutable();
   const env = { ...process.env };
   return new Promise<{ stdout: string; stderr: string }>((done, reject) => {
@@ -143,7 +157,7 @@ export function converterFailure(
 export async function converterPreflight() {
   const { stdout } = await runConverter(['--version'], true);
   return {
-    binary: resolve(selectedBinary()),
+    binary: resolve(await selectedBinary()),
     version: stdout.trim(),
     ...extractionConfiguration(),
   };

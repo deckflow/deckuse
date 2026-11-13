@@ -57,11 +57,11 @@ const hardDenyMessage = (kind: EditionGatedWriteKind): string => {
     case 'theme':
       return `Theme editing is not available (edition=${EDITION}); theme parts are preserve-only`;
     case 'master':
-      return `Master slide editing requires the commercial edition (edition=${EDITION})`;
+      return `Master slide editing is not supported by this build (edition=${EDITION})`;
     case 'layout':
-      return `Layout slide editing requires the commercial edition (edition=${EDITION})`;
+      return `Layout slide editing is not supported by this build (edition=${EDITION})`;
     case 'advanced-chart':
-      return `Advanced chart editing requires the commercial edition (edition=${EDITION})`;
+      return `Advanced chart editing is not supported by this build (edition=${EDITION})`;
   }
 };
 
@@ -101,6 +101,6 @@ export const gatedWriteHardDeny = (item: IndexedElement, archive: OpcArchive): R
   const kind = editionGatedWriteKind(item, archive);
   const message = kind
     ? hardDenyMessage(kind)
-    : `This write requires the commercial edition (edition=${EDITION})`;
+    : `This write is not supported by this build (edition=${EDITION})`;
   return err('UNSUPPORTED_CAPABILITY', message);
 };

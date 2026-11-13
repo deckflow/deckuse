@@ -2,8 +2,6 @@
 name: deckuse
 description: Create, recreate, edit, populate, inspect, render, or export PowerPoint presentations and Word documents with the Deckuse CLI. Use for new PPTX/DOCX files, editable slides from PDF/image references, changes to existing Office files, template-driven documents, and document QA. Routes to one task workflow and loads only the relevant instructions.
 compatibility: Requires an installed Deckuse CLI; use the installed package version and capability fingerprint. Optional capability helper requires Python 3. HTML previews require a host-approved Playwright browser. PDF/image extraction and native Office review use available host tools.
-metadata:
-  version: '1.5.0'
 ---
 
 # Deckuse

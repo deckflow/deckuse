@@ -12,6 +12,8 @@ deckuse agent-context --format pptx --scenario create --json
 
 Use `--workspace ./ws` for an existing workspace and select the matching scenario. For Word use `--format docx` with `create`, `edit`, `audit` or `preview-export`. Cache static contracts by executable and capability fingerprint. Read live revision and targets before each write. For PPTX creation, start with `data.applyContract` for copyable CLI operations, geometry units, text and style examples. Use v2 `operationFields` to find additional top-level fields by name. Query `schema --type addShape --field blocks --json` for one dereferenced field, or `schema --type <operation> --json` for the complete operation, or request `--include-schema` for the complete scenario contract. Run an explicit render preflight to check the environment. For older releases, use the fallback below.
 
+Use `search` or `list` for offline inspection. `find` requires `TYPESAFE_API_KEY` and sends the query and candidate names, visible text excerpts, and layout context to `api.typesafe.ai`. Use it when the task permits sending this content to the service.
+
 Use an existing task snapshot if it matches the selected executable, release/edition and format. Otherwise collect `deckuse --version` and `deckuse schema --json`, saving full stdout/stderr/exit code separately. The schema envelope contains `cliVersion`, `protocolVersion`, `edition`, and `schema`. It lists protocol operations, not proof of every edition/format capability. Keep the complete schema on disk and extract only task-relevant definitions into context.
 
 Optional helper (replace SKILL_ROOT and TASK_CONTEXT with absolute paths already known to the host; do not literally execute placeholders):

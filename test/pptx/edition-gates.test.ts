@@ -404,13 +404,13 @@ describe('community edition write gates', () => {
       kind: 'master' as const,
       partUri: '/ppt/slideMasters/slideMaster1.xml',
     };
-    expect(writeDenialReason(master, archive)).toMatch(/commercial edition/);
+    expect(writeDenialReason(master, archive)).toMatch(/not supported by this build/);
 
     registerPptxEditionExtension({
       assertWritable: () => ok(undefined),
     });
     try {
-      expect(writeDenialReason(master, archive)).toMatch(/commercial edition/);
+      expect(writeDenialReason(master, archive)).toMatch(/not supported by this build/);
     } finally {
       clearPptxEditionExtension();
     }

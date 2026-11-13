@@ -11,11 +11,11 @@
 
 </div>
 
+> Partial translation. See the [English README](https://github.com/deckflow/deckuse/blob/main/README.md) for current capabilities and installation.
+
 Deckuse est un moteur local-first et piloté par schéma pour automatiser les documents Office avec des agents de code. Il ouvre un document dans un espace de travail versionné, permet à un agent d’inspecter et de cibler sa structure, applique des commandes JSON explicites, valide le résultat, puis exporte un nouveau document.
 
 PPTX et DOCX sont implémentés. Les adaptateurs XLSX, Keynote et Numbers renvoient volontairement `FORMAT_NOT_IMPLEMENTED` : ils ne sont pas encore des cibles d’édition prises en charge.
-
-Ce dépôt est l’**édition community** (`edition=community`). Voir [docs/edition.md](docs/edition.md). L’édition commerciale vit dans le dépôt séparé `deckuse-commercial`.
 
 ## Agent Skill (à installer en premier)
 
@@ -317,7 +317,7 @@ Deckuse fournit à l’agent des références stables, des sélecteurs, des tran
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing).
 - Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, combo, ChartEx) are preserve-only in the community edition.
-- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
+- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`).
 - `monitor` for live HTML preview and `render` for single-slide PNG screenshots (deck2html + Playwright).
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
