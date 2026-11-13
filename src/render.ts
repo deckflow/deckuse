@@ -17,9 +17,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
-import deck2html from '@deckflow/deck2html';
-import { type Browser, type Page } from 'playwright-core';
-import { launchRenderBrowser, RenderFailure } from './render-browser.js';
+import type deck2html from '@deckflow/deck2html';
+import type { Browser, Page } from 'playwright-core';
+import { launchRenderBrowser, loadPreviewBrowser, RenderFailure } from './render-browser.js';
 import type { Diagnostic } from './core/index.js';
 import { OpcArchive } from './opc/index.js';
 import { ensureGitignore, renderDir, sourceDir } from './workspace/index.js';
@@ -480,6 +480,7 @@ export const renderPage = async (
 ): Promise<RenderResult> => {
   if (!Number.isInteger(options.page) || options.page < 1)
     throw new Error('--page must be a positive integer (one page per render call)');
+  if (!options.dependencies?.screenshot) await loadPreviewBrowser();
   const root = resolve(workspace);
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-single-snapshot-'));
   try {
@@ -647,6 +648,7 @@ export async function renderPages(
     throw new Error('Choose pages or all');
   if (options.scale !== undefined && (!Number.isFinite(options.scale) || options.scale <= 0))
     throw new Error('Invalid render scale');
+  if (!options.dependencies?.screenshot || options.contactSheet) await loadPreviewBrowser();
   const preflight = !options.dependencies?.convert ? await converterPreflight() : undefined;
   const root = resolve(workspace);
   const staging = await mkdtemp(join(tmpdir(), 'deckuse-render-batch-'));

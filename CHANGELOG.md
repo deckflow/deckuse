@@ -6,6 +6,54 @@
 - Add blank canvas dimensions, opt-in embedded chart workbooks, and read-only chart-data dependency preflight with safe independent-formula preservation.
 - Detect chart initialization failures and number-format degradation during single/batch rendering. Companion deck2html fixes trimmed number-format/color serialization and renders limited bar/line combos in Community. Use `DECKUSE_DECK2HTML_BINARY` to test the companion build before its upstream release.
 
+## 1.9.8
+
+- Improve converter startup and report blocked preview as a structured handoff to the validated PPTX.
+
+## 1.9.7
+
+- Streamline agent verification and reproducible generation, and retire owned workspace cleanup artifacts by default.
+
+## 1.9.6
+
+- Add version-matched Skill discovery and prioritize browser-measured preview findings.
+
+## 1.9.5
+
+- Improve compact validation reports and make PPTX generation resumable.
+
+## 1.9.4
+
+- Expose compact first-draft discovery and preserve validated fallback snapshots.
+
+## 1.9.3
+
+- Harden managed PPTX writes and verify the generated package before handoff.
+
+## 1.9.2
+
+- Improve managed-agent authoring, review, recovery, and write replay.
+
+## 1.9.1
+
+- Improve native PPTX editing and chart data workflows.
+
+## 1.9.0
+
+- Add native grouping, connector and geometry operations, bounded workbook synchronization, and chart data preflight.
+
+## 1.8.0
+
+- Add native comments and tracked revision workflows for Office review.
+
+## 1.7.0
+
+- Add snapshot batch rendering, improve agent reliability, and update deck2html.
+
+## 1.6.0
+
+- Add safer Office data editing and visual verification workflows.
+
 ## 1.5.0
 
 ### Minor Changes

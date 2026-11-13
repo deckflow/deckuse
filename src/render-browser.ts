@@ -3,7 +3,8 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium, type Browser } from 'playwright-core';
+import type { Browser, BrowserType } from 'playwright-core';
+import { createRequire } from 'node:module';
 
 export class RenderFailure extends Error {
   constructor(
@@ -14,6 +15,37 @@ export class RenderFailure extends Error {
     super(message);
     this.name = 'RenderFailure';
   }
+}
+const require = createRequire(import.meta.url);
+const previewModules = {
+  'playwright-core': 'playwright-core',
+  echarts: 'echarts/dist/echarts.min.js',
+  tailwindcss: 'tailwindcss',
+  '@fortawesome/fontawesome-free': '@fortawesome/fontawesome-free/css/all.min.css',
+};
+
+export async function loadPreviewBrowser(): Promise<BrowserType> {
+  const missing = Object.entries(previewModules)
+    .filter(([, path]) => {
+      try {
+        require.resolve(path);
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .map(([name]) => name);
+  if (missing.length)
+    throw new RenderFailure(
+      'RENDER_DEPENDENCIES_MISSING',
+      'Install the Deckuse optional dependencies to enable preview.',
+      {
+        stage: 'preview-dependencies',
+        retryable: false,
+        missing,
+      },
+    );
+  return (await import('playwright-core')).chromium;
 }
 const failed = new Map<string, RenderFailure>();
 export function browserConfiguration() {
@@ -45,6 +77,7 @@ async function checkBrowserPreflight() {
       'Host declares browser execution unavailable. Use a host-approved worker or execution context; Deckuse will not bypass this restriction.',
       { provider: config.provider, stage: 'preflight', retryable: false },
     );
+  const chromium = await loadPreviewBrowser();
   const executable =
     config.provider === 'executable'
       ? config.executablePath
@@ -130,7 +163,7 @@ async function checkBrowserPreflight() {
   };
 }
 export async function launchRenderBrowser(
-  launch: typeof chromium.launch = chromium.launch.bind(chromium),
+  launch?: BrowserType['launch'],
   timeout?: number,
 ): Promise<Browser> {
   const config = await browserPreflight();
@@ -142,7 +175,8 @@ export async function launchRenderBrowser(
   const previous = failed.get(key);
   if (previous && process.env['DECKUSE_BROWSER_RETRY'] !== '1') throw previous;
   try {
-    return await launch({
+    const chromium = await loadPreviewBrowser();
+    return await (launch ?? chromium.launch.bind(chromium))({
       headless: true,
       ...(timeout === undefined ? {} : { timeout }),
       ...(config.provider === 'executable'
@@ -200,9 +234,7 @@ export function renderFailurePayload(cause: unknown) {
 }
 
 /** Playwright owns the temporary profile and cancels launch on timeout. */
-export async function probeRenderBrowser(
-  launch: typeof chromium.launch = chromium.launch.bind(chromium),
-) {
+export async function probeRenderBrowser(launch?: BrowserType['launch']) {
   const browser = await launchRenderBrowser(launch, 5000);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

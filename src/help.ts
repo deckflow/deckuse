@@ -272,7 +272,9 @@ Options:
   --json                    Machine-readable envelope
 
 Notes:
-  Requires TYPESAFE_API_KEY. Names and visible text are sent to api.typesafe.ai.
+  Requires TYPESAFE_API_KEY and network access to api.typesafe.ai.
+  Sends the query plus candidate names, excerpts of visible text, and layout context.
+  Use search or list for offline inspection.
   data.matches uses the same element records as search (target, uid, kind, name, text, context).
   An empty matches list means nothing fit — do not edit a guessed target.
   Jev is stronger in English than in Chinese. Use search for a literal substring.

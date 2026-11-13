@@ -7,7 +7,7 @@ import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/
 import { watch } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path';
-import deck2html from '@deckflow/deck2html';
+import type deck2html from '@deckflow/deck2html';
 import {
   ensureGitignore,
   indexPath,

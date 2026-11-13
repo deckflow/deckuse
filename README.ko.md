@@ -11,11 +11,11 @@
 
 </div>
 
+> Partial translation. See the [English README](https://github.com/deckflow/deckuse/blob/main/README.md) for current capabilities and installation.
+
 Deckuse는 코딩 에이전트를 위한 로컬 우선, 스키마 기반 Office 문서 자동화 엔진입니다. 문서를 버전 관리되는 작업 공간으로 열고, 에이전트가 구조를 검사하고 대상 요소를 지정하여 명시적인 JSON 명령을 적용·검증한 뒤 새 문서로 내보낼 수 있게 합니다.
 
 현재 구현된 형식은 PPTX와 DOCX입니다. XLSX, Keynote 및 Numbers 어댑터는 의도적으로 `FORMAT_NOT_IMPLEMENTED`를 반환하며, 아직 지원되는 편집 대상이 아닙니다.
-
-이 저장소는 **커뮤니티 에디션**(`edition=community`)입니다. 자세한 내용은 [docs/edition.md](docs/edition.md)를 참고하세요. 상용 에디션은 별도 저장소 `deckuse-commercial`에 있습니다.
 
 ## Agent Skill (먼저 설치)
 
@@ -317,7 +317,7 @@ Deckuse는 에이전트에 안정적인 참조, 선택자, 트랜잭션, 검증 
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing).
 - Create charts (`bar` / `column` / `line` / `pie`) and edit chart title, series-name, and cached values. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, combo, ChartEx) are preserve-only in the community edition.
-- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
+- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`).
 - `monitor` for live HTML preview and `render` for single-slide PNG screenshots (deck2html + Playwright).
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 

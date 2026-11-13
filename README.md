@@ -5,7 +5,7 @@
 [![Node.js 20.19.0+](https://img.shields.io/badge/Node.js-20.19.0%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![pnpm 10](https://img.shields.io/badge/pnpm-10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![PPTX](https://img.shields.io/badge/Format-PPTX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
+[![PPTX and DOCX](https://img.shields.io/badge/Formats-PPTX%20%2F%20DOCX-B7472A?logo=microsoftpowerpoint&logoColor=white)](#pptx-capabilities)
 
 [English](https://github.com/deckflow/deckuse/blob/main/README.md) · [简体中文](https://github.com/deckflow/deckuse/blob/main/README.zh-CN.md) · [Français](https://github.com/deckflow/deckuse/blob/main/README.fr.md) · [日本語](https://github.com/deckflow/deckuse/blob/main/README.ja.md) · [한국어](https://github.com/deckflow/deckuse/blob/main/README.ko.md) · [Русский](https://github.com/deckflow/deckuse/blob/main/README.ru.md) · [Español](https://github.com/deckflow/deckuse/blob/main/README.es.md) · [Português](https://github.com/deckflow/deckuse/blob/main/README.pt-BR.md)
 
@@ -13,12 +13,37 @@
 
 Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It turns document editing into an explicit, reviewable workflow: open a versioned workspace, inspect and target its structure, apply JSON commands, validate the result, and export a new document.
 
-The engine is built around format adapters. PPTX and DOCX are implemented. XLSX, Keynote, and Numbers adapters return `FORMAT_NOT_IMPLEMENTED` today, so agents fail clearly instead of silently producing unsafe edits.
-Deckuse is a local-first, schema-driven Office document automation engine for coding agents. It opens a document into a versioned workspace, lets an agent inspect and target its structure with semantic addresses (`slide:1/shape:2`), applies explicit mutations, validates the result, and exports a new document.
+PPTX and DOCX are implemented (**protocol 2.0**). See the [community capabilities](https://github.com/deckflow/deckuse/blob/main/docs/edition.md). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
 
-This repository is the **community edition** (`edition=community`). See [docs/edition.md](https://github.com/deckflow/deckuse/blob/main/docs/edition.md). Shared source here is the source of truth, published as `@deckflow/deckuse`; the commercial edition is a private thin overlay (`deckuse-commercial`) that registers a `PptxEditionExtension` for gated writes and may add proprietary packages.
+## Why Deckuse
 
-PPTX and DOCX are implemented (**protocol 2.0**). XLSX, Keynote, and Numbers adapters deliberately return `FORMAT_NOT_IMPLEMENTED`; they are not supported editing targets yet.
+Deckuse lets an agent modify an existing presentation without recreating it from scratch. When you have no source file, `deckuse new` bootstraps a workspace from the bundled blank template. Its workflow is deliberately structural rather than visual:
+
+```text
+existing.pptx → init ─┐
+                      ├→ list / get → set / add → validate → export
+blank template → new ─┘
+```
+
+Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
+
+It preserves untouched XML and unknown package parts where possible. It is not a full PowerPoint rendering or layout engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. Use `monitor` for live HTML preview and `render` to screenshot one or more slides to PNG for agent visual review.
+
+## Where it creates value
+
+Deckuse is designed for document changes that need to be precise, repeatable,
+and auditable:
+
+- **Recurring content updates** — refresh dates, metrics, names, pricing, and
+  disclaimers without rebuilding a presentation.
+- **Customer and market variants** — create controlled versions with explicit
+  selectors and reviewable operations.
+- **Content governance** — query sensitive or outdated content, inspect every
+  match, and validate before export.
+- **Agent-driven automation** — use structured JSON, revision checks, dry runs,
+  atomic batches, and operation logs in larger workflows.
+
+![Example PowerPoint slide from the Deckuse chart verification fixture](https://raw.githubusercontent.com/deckflow/deckuse/main/test/fixtures/visual/native/powerpoint-1.png)
 
 ## Agent quick start
 
@@ -37,11 +62,11 @@ bootstrap below with `--handoff-json`. The unscoped package is deprecated.
 ## Install in a managed agent job
 
 From a reviewed checkout, run the [managed bootstrap](https://github.com/deckflow/deckuse/blob/main/scripts/managed-bootstrap.sh)
-with an exact published version, an unused job directory, and an existing cache
+with `latest` or an exact published version, an unused job directory, and an existing cache
 root approved by the host. The script prints the verified local CLI path.
 
 ```sh
-sh scripts/managed-bootstrap.sh 1.9.3 ./deckuse-job /path/to/approved-cache
+sh scripts/managed-bootstrap.sh latest ./deckuse-job /path/to/approved-cache
 ```
 
 The script allocates an empty cache per job and stops with npm's failure code if
@@ -64,7 +89,7 @@ deckuse_cli=./node_modules/.bin/deckuse
 "$deckuse_cli" export ./example.pptx --workspace ./example-workspace --json
 ```
 
-The example contains CLI apply operations. For first drafts, `data.applyContract` gives units, common enum values and directly usable operations. Request `--include-schema` when you need the protocol contract. Export and structural validation work without a browser. For optional preview, use `render --preflight --json` to check converter and browser setup.
+The example contains CLI apply operations. For first drafts, `data.applyContract` gives units, common enum values and directly usable operations. Request `--include-schema` when you need the protocol contract. Export and structural validation work without a browser. For structural-only installs, use `npm install --omit=optional @deckflow/deckuse`. Install with optional dependencies enabled to add preview support. For optional preview, use `render --preflight --json` to check converter and browser setup.
 
 ## Use Deckuse with a coding agent
 
@@ -78,37 +103,9 @@ npx skills add deckflow/deckuse
 
 Select your agent and installation scope when prompted. Use project scope for the current project or user scope to make the skill available across projects. For manual installation, copy the full `skills/deckuse/` directory into your agent's skills directory. See the [agent directory reference](https://github.com/vercel-labs/skills/blob/main/docs/agents.md).
 
-If you installed the skill first, run `deckuse --version` to check whether the CLI is available. If it is missing, follow [Installation](#installation). If you already installed the CLI, use the command above when you want your agent to use Deckuse. For a version-pinned setup, install the skill from the release tag that matches your npm package version.
+If you installed the skill first, run `deckuse --version` to check whether the CLI is available. If it is missing, follow [Installation](#installation). If you already installed the CLI, use the command above when you want your agent to use Deckuse. For a version-pinned setup, locate the Skill bundled with the installed CLI using `deckuse skill-path --json`.
 
 Once both are available, ask your agent for a concrete task, such as “Use Deckuse to update the figures in `report.pptx` and export a revised copy.”
-
-## Why Deckuse
-
-Deckuse lets an agent modify an existing presentation without recreating it from scratch. When you have no source file, `deckuse new` bootstraps a workspace from the bundled blank template. Its workflow is deliberately structural rather than visual:
-
-```text
-existing.pptx → init ─┐
-                      ├→ list / get → set / add → validate → export
-blank template → new ─┘
-```
-
-Every successful write automatically commits a Git revision, updates `operations.jsonl`, rebuilds `package.pptx`, and refreshes `.deckuse/index.json`. Use `undo` to revert writes and `history` to inspect the operation log.
-
-It preserves untouched XML and unknown package parts where possible. It is not a full PowerPoint rendering or layout engine and cannot reliably judge whether a slide is visually attractive or whether a layout is visually correct. Use `monitor` for live HTML preview and `render` to screenshot one slide to PNG for agent visual review. Semantic `diff` / `branch` remain deferred past Phase 1a.
-
-## Where it creates value
-
-Deckuse is designed for document changes that need to be precise, repeatable,
-and auditable:
-
-- **Recurring content updates** — refresh dates, metrics, names, pricing, and
-  disclaimers without rebuilding a presentation.
-- **Customer and market variants** — create controlled versions with explicit
-  selectors and reviewable operations.
-- **Content governance** — query sensitive or outdated content, inspect every
-  match, and validate before export.
-- **Agent-driven automation** — use structured JSON, revision checks, dry runs,
-  atomic batches, and operation logs in larger workflows.
 
 ## Installation
 
@@ -176,6 +173,8 @@ workspace/
 Command results use a JSON envelope (`ok`, `command`, `revision`, `data` / `error`). Exit status `0` means success, `1` means that a command failed, and `2` means CLI usage or parsing failure.
 
 ### Selectors
+
+The optional `deckuse find` command uses `TYPESAFE_API_KEY` to call TypeSafe at `api.typesafe.ai`. It sends the query and candidate names, visible text excerpts, and layout context for ranking. Use `search` and `list` for offline inspection.
 
 Prefer `search text` / `search shape` and `list` for Phase 1a inventory. `query` remains available for back-compat and accepts either a selector string or a structured selector in a command. Space-separated terms are combined with AND.
 
@@ -388,17 +387,17 @@ Deckuse gives the agent stable references, selectors, transactions, validation, 
 - `setTransform` for explicit object position, size, rotation, and flip changes.
 - `setProperties` for common shape and text properties, including `paragraph.align` (aliases `center`/`left`/…), `paragraph.level`, `bullet`, `fill` transparency, `hyperlink`, `wrap`, `anchor`/`valign`, and `cornerRadius`.
 - Add, duplicate, remove, and rebind slides to another layout (`setSlideLayout` / `deckuse set slide-layout`); layout refs accept index, `layout:N`, `slide:N`, display name, or basename. Rebind updates the relationship only (does not edit layout parts). Duplicated slides clone mutable notes and chart parts while layouts and media can be shared safely.
-- Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), straight connectors (`line`/`connector`), elbow/curved connectors, arrow presets, groups, pictures (from a file path or base64), tables, charts (cache-only), and embedded video/audio; duplicate or remove elements.
+- Add shapes/text boxes (optional `role` writes a `p:ph` placeholder), straight connectors (`line`/`connector`), elbow/curved connectors, arrow presets, groups, pictures (from a file path or base64), tables, basic charts, and embedded video/audio; duplicate or remove elements.
 - `role` must be an OOXML placeholder type (`title`, `body`, `subTitle`, `ctrTitle`, …). Common aliases like `subtitle`→`subTitle` are normalized; non-OOXML labels (for example `card`) are rejected so PowerPoint does not prompt to repair.
 - Address placeholders with `slide:N/placeholder:<type>` (for example `title`, `body`, `subTitle`, `ctrTitle`). Target `slide:N/shape:X/run:K` to style a single run.
 - `replacePicture` replaces a picture’s embedded media in place while retaining its element reference and layer order.
 - Table-cell addressing by table ID, row, and column; table row/column insert and delete via `setProperties`; cell `fill`; speaker-note reading and text editing (notes parts are created automatically when writing `slide:N/notes` if missing). Tables support `height: "auto"`, themes `minimal`/`zebra`, and `alignColumns`.
-- Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, series colors, and value format codes. When an embedded workbook exists, Deckuse emits `EMBEDDED_WORKBOOK_NOT_SYNCHRONIZED` rather than claiming that workbook data was updated. Advanced charts (other families, ChartEx) are preserve-only in the community edition. Community `render` may not show custom series colors faithfully — verify chart XML or PowerPoint.
-- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`). Master/layout editing is available in the commercial edition repository.
+- Create charts (`bar` / `column` / `line` / `pie` / limited `combo` dual-axis) and edit chart title, series-name, cached values, data labels, series colors, and value format codes. Supported embedded workbooks can be synchronized with chart values. Validation reports whether workbook data was synchronized or needs review. Advanced charts (other families, ChartEx) are preserve-only in the community edition. Community `render` may not show custom series colors faithfully — verify chart XML or PowerPoint.
+- List and resolve master, layout, and theme parts; community edition rejects writes to those parts (`UNSUPPORTED_CAPABILITY`).
 - `monitor` for live HTML preview (`monitor start|status|stop`; use `--port 0` for an ephemeral port) and `render` for single-slide PNG screenshots (`--scale` supported; deck2html + Playwright). `deckuse schema` prints command JSON Schema; `deckuse measure` estimates text box size heuristically.
 - Preservation of unknown parts and untouched nodes. ZIP files are recompressed, so fidelity is defined by uncompressed data for untouched entries rather than ZIP byte identity.
 
-Agent quick reference: [docs/agent-cookbook.md](https://github.com/deckflow/deckuse/blob/main/docs/agent-cookbook.md). Requires **CLI >= 1.2.0**.
+Agent quick reference: [docs/agent-cookbook.md](https://github.com/deckflow/deckuse/blob/main/docs/agent-cookbook.md).
 
 ## DOCX capabilities
 
@@ -408,7 +407,7 @@ Word uses the same workspace loop as PPTX (`new` / `init`, `list`, `apply`, `val
 - `setText`, `replaceText` (matches across runs inside one paragraph, including text split by `w:proofErr`), `setProperties` (`fontSize`, `bold`, `italic`, `underline`, `textColor`, `fontFamily`, `paragraph.align`, `paragraph.style`).
 - `addParagraph` (`name` writes a bookmark for same-batch `bookmark:` refs), `addTable`, `insertBreak` (`page`). CLI: `deckuse add paragraph|table|break`.
 - Slide commands (`addShape`, `xfrmSet`, `alignElements`, …) return `UNSUPPORTED_CAPABILITY`.
-- Tracked changes, fields, comments, content controls, and equations are preserved. A command that would have to rewrite them fails instead of stripping them.
+- Native comment threads and tracked-change proposals support review with atomic accept/reject. Ordinary edits preserve protected content such as fields, content controls, and equations.
 - Community edition does not write style definitions, numbering definitions, theme, or settings parts.
 - `render` supports PPTX and DOCX through deck2html → HTML → Playwright screenshots. DOCX page numbers follow HTML pagination and may differ from Word.
 
@@ -436,11 +435,11 @@ The complete command schema is at `schema/command.schema.json`. The TypeScript p
 ## Limitations
 
 - Deckuse does not implement the full PowerPoint DrawingML surface, animation editing, SmartArt editing, OLE editing, or macro editing.
-- It is not a full PowerPoint rendering or layout engine. `monitor` and `render` provide HTML/PNG review aids only; do not rely on them to assess visual quality, detect overlap, or automatically improve slide design.
-- Chart creation and edits update OOXML chart caches only; embedded Excel workbooks are not rewritten.
+- It is not a full PowerPoint rendering or layout engine. `monitor` and `render` provide HTML/PNG review aids only; browser-measured warnings describe the HTML preview and can differ from native Office layout.
+- Embedded chart workbook synchronization is limited to supported workbook and chart structures. Check validation diagnostics before treating cached chart data and workbook cells as consistent.
 - Embedded video/audio use a generated poster frame; playback timing and advanced media options are not edited.
 - Duplicated slides clone notes and chart parts and reuse layouts, themes, and media. Complex custom XML extensions are retained but not edited semantically.
-- `setText` and `replaceText` collapse multi-run text within each paragraph into one run while retaining the first run’s style; newlines in `setText` create separate paragraphs.
+- Text replacement can preserve formatting across runs. Unsupported protected ranges are rejected. Use rich-text blocks when explicitly setting multiple styles.
 
 ## Development checks
 

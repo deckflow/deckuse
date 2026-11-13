@@ -3,8 +3,7 @@ import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir, platform, release } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { chromium } from 'playwright-core';
-import { browserConfiguration } from './render-browser.js';
+import { browserConfiguration, loadPreviewBrowser } from './render-browser.js';
 import { version } from './version.js';
 import type { RenderResult } from './render.js';
 
@@ -17,6 +16,7 @@ async function fileStamp(path: string) {
 
 export async function renderEnvironmentKey(binary?: string) {
   const config = browserConfiguration();
+  const chromium = await loadPreviewBrowser();
   const roots = [
     ...(platform() === 'darwin'
       ? ['/System/Library/Fonts', '/Library/Fonts', join(homedir(), 'Library', 'Fonts')]

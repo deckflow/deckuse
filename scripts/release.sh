@@ -13,7 +13,10 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--github]
 
-  1. Build
+  Prepare a release with pnpm version-packages, commit the changelog and version,
+  then create the matching Git tag at that commit.
+
+  1. Verify the changelog and Git tag, then build
   2. Refuse publish if commercial strings leaked
   3. Publish with changesets to one registry:
        - ${NPM_REGISTRY_NPM}     (access=public)     [default]
@@ -67,6 +70,21 @@ if [[ "$GITHUB" -eq 1 ]]; then
 else
   registry="$NPM_REGISTRY_NPM"
   access="public"
+fi
+
+version="$(node -p "require('./package.json').version")"
+tag="v${version}"
+if ! grep -Fqx -- "## ${version}" CHANGELOG.md; then
+  echo "Missing CHANGELOG.md entry for ${version}. Run pnpm version-packages and commit the release files." >&2
+  exit 1
+fi
+if [[ "$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}")" != "$(git rev-parse HEAD)" ]]; then
+  echo "The release tag ${tag} must point at HEAD before publishing." >&2
+  exit 1
+fi
+if ! git diff HEAD --quiet -- package.json CHANGELOG.md .changeset; then
+  echo "Commit the release version, changelog and changesets before publishing." >&2
+  exit 1
 fi
 
 echo "==> Building"
